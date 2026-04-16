@@ -65,7 +65,7 @@ The app ingests Apple Health data via an iOS Shortcut that POSTs JSON to `/api/i
 ```
 
 6. Add a "Get Contents of URL" action:
-   - URL: `https://yourdomain.com/api/ingest/apple-health`
+   - URL: `https://delta.garymenezes.com/api/ingest/apple-health`
    - Method: POST
    - Headers: `Authorization: Bearer <your INGEST_API_KEY>`
    - Request Body: JSON from the previous step
@@ -79,8 +79,40 @@ sleep (total/deep/REM), heart rate, resting HR, HRV, active energy, steps, body 
 
 ## Deployment (AWS EC2 Ubuntu)
 
-Everything needed to stand up a fresh production instance. The full procedure
-is ~30 minutes. If you've done it before, skip to the **checklist** at the end.
+Two scripts in `scripts/` do the actual work:
+
+- **`scripts/bootstrap.sh`** — one-time, fresh box
+- **`scripts/deploy.sh`** — ongoing updates
+
+The sections below explain what they do and what you still need to do by hand
+(anything external to the box: provisioning, DNS, secrets).
+
+### Quick start
+
+On a freshly provisioned EC2 instance (see section 1 for sizing):
+
+```bash
+# As the ubuntu user, after ssh'ing in with -A (agent-forwarded SSH key):
+sudo mkdir -p /opt/delta2 && sudo chown ubuntu:ubuntu /opt/delta2
+cd /opt
+git clone git@github.com:gdmen/delta_2.git delta2
+cd delta2
+./scripts/bootstrap.sh delta.garymenezes.com gary@example.com
+```
+
+The script will prompt for your `CLAUDE_API_KEY`, then install everything,
+configure Nginx + systemd + Let's Encrypt, and print the generated
+`INGEST_API_KEY` at the end (for your iOS Shortcut).
+
+For ongoing updates:
+
+```bash
+cd /opt/delta2
+./scripts/deploy.sh
+```
+
+If the script fails at any step, the sections below document what it was
+trying to do so you can finish by hand and learn where it broke.
 
 ### 1. Provision the server
 
@@ -117,7 +149,7 @@ free -h   # Confirm swap is active
   - Strava OAuth callback (when that integration lands)
   - iOS Shortcuts to POST reliably (HTTP works on LAN but not over cellular)
   - Let's Encrypt SSL
-- DNS takes 1-10 minutes to propagate. Verify with `dig yourdomain.com +short` before proceeding.
+- DNS takes 1-10 minutes to propagate. Verify with `dig delta.garymenezes.com +short` before proceeding.
 
 **Resizing later** is trivial: Stop → Change Instance Type → Start. The Elastic IP and EBS volume stay put, DNS doesn't change, no reconfiguration needed.
 
@@ -133,9 +165,10 @@ node -v   # Should be v20.x or newer
 ### 3. Clone, install, migrate, seed, build
 
 ```bash
+sudo mkdir -p /opt/delta2 && sudo chown ubuntu:ubuntu /opt/delta2
 cd /opt
-sudo git clone <your-repo-url> delta2
-sudo chown -R ubuntu:ubuntu delta2
+git clone git@github.com:gdmen/delta_2.git delta2   # SSH form if the repo is private and you forwarded your key.
+                                                    # Use https://github.com/gdmen/delta_2.git if public or no agent.
 cd delta2
 npm ci              # Use 'ci' in prod, not 'install' — respects package-lock.json exactly
 npx drizzle-kit migrate        # Creates/updates delta2.db schema
@@ -148,33 +181,6 @@ npm run build                  # Production build to .next/
 - `drizzle-kit migrate` — applies every file under `drizzle/*.sql` in order. Safe to re-run.
 - `seed.ts` — inserts the 5 sports + all metric types using `ON CONFLICT DO NOTHING`. Safe to re-run; new metric types added over time will be inserted, existing ones untouched.
 - `npm run build` — Next.js production build. Must complete without errors.
-
-#### Escape hatch: build locally if your server is small
-
-If you're on t3.micro and want to avoid swapping during builds, build on your
-laptop and ship the artifact. Your server only needs to run the compiled output.
-
-```bash
-# On your laptop, after npm run build succeeds locally:
-rsync -avz --delete \
-  --exclude node_modules --exclude .git --exclude delta2.db --exclude '*.db-wal' --exclude '*.db-shm' \
-  ./.next ./drizzle ./package.json ./package-lock.json ./public ./src ./tsconfig.json ./next.config.ts ./drizzle.config.ts ./postcss.config.mjs \
-  ubuntu@delta.yourdomain.com:/opt/delta2/
-
-# On the server (only needed once + whenever package-lock changes):
-cd /opt/delta2
-npm ci            # still needs devDeps for drizzle-kit + tsx; see note below
-npx drizzle-kit migrate
-npx tsx src/db/seed.ts
-sudo systemctl restart delta2
-```
-
-The server still needs `drizzle-kit` and `tsx` (both `devDependencies`) to run
-migrations + the seed script. Two options:
-1. Keep `npm ci` (installs dev + prod) — simple, a bit heavier on disk.
-2. Move `drizzle-kit` + `tsx` into `dependencies` and use `npm ci --omit=dev` — leaner, but you have to remember.
-
-Option 1 is fine for a single-user deploy.
 
 ### 4. Environment variables
 
@@ -234,7 +240,7 @@ Create `/etc/nginx/sites-available/delta2`:
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name delta.garymenezes.com;
 
     # REQUIRED: BodySpec PDF uploads are up to 10MB. Default Nginx
     # limit of 1M will reject them with 413. Without this, the
@@ -265,7 +271,7 @@ Enable the site and obtain SSL:
 sudo ln -s /etc/nginx/sites-available/delta2 /etc/nginx/sites-enabled/
 sudo nginx -t                              # Syntax check
 sudo systemctl reload nginx
-sudo certbot --nginx -d yourdomain.com     # Certbot rewrites the config to listen on 443 + auto-redirect HTTP → HTTPS
+sudo certbot --nginx -d delta.garymenezes.com     # Certbot rewrites the config to listen on 443 + auto-redirect HTTP → HTTPS
 ```
 
 Certbot sets up auto-renewal via a systemd timer. Verify:
@@ -280,15 +286,15 @@ Run these in order. Each checks a specific subsystem:
 
 ```bash
 # 1. Server + DNS + TLS
-curl -I https://yourdomain.com/           # → HTTP/2 200
+curl -I https://delta.garymenezes.com/           # → HTTP/2 200
 
 # 2. Ingest auth (should return 401 without a key)
-curl -I https://yourdomain.com/api/ingest/apple-health
+curl -I https://delta.garymenezes.com/api/ingest/apple-health
 #    → HTTP/2 401
 
 # 3. Ingest accepts valid key with empty body (should 200 with zero counts)
 INGEST_KEY="<your-INGEST_API_KEY>"
-curl -X POST https://yourdomain.com/api/ingest/apple-health \
+curl -X POST https://delta.garymenezes.com/api/ingest/apple-health \
   -H "Authorization: Bearer $INGEST_KEY" \
   -H "Content-Type: application/json" \
   -d '{}'
@@ -296,7 +302,7 @@ curl -X POST https://yourdomain.com/api/ingest/apple-health \
 
 # 4. Nginx body size (upload a 3MB dummy file, should 400 not 413)
 dd if=/dev/urandom of=/tmp/dummy.pdf bs=1M count=3
-curl -X POST https://yourdomain.com/api/ingest/bodyspec-dexa/extract \
+curl -X POST https://delta.garymenezes.com/api/ingest/bodyspec-dexa/extract \
   -H "Authorization: Bearer $INGEST_KEY" \
   -F "file=@/tmp/dummy.pdf"
 #    → Claude will complain about malformed PDF (expected) — NOT 413
@@ -426,7 +432,7 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] EC2 instance type is t3.small (or t3.micro with 2 GB swap configured)
 - [ ] Root EBS volume is 20 GB gp3 (not the default 8 GB)
 - [ ] Elastic IP assigned, DNS A-record pointing at it
-- [ ] `dig yourdomain.com +short` returns the EIP
+- [ ] `dig delta.garymenezes.com +short` returns the EIP
 - [ ] System deps installed (Node 20+, Nginx, Certbot, Git)
 - [ ] Repo cloned to `/opt/delta2`, owned by `ubuntu`
 - [ ] `npm ci` succeeded
@@ -440,7 +446,7 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] `curl http://localhost:3000/` returns HTML from the server
 - [ ] Nginx site file includes `client_max_body_size 12M` and `proxy_read_timeout 60s`
 - [ ] `sudo nginx -t` passes
-- [ ] `sudo certbot --nginx` completed, `https://yourdomain.com` serves over TLS
+- [ ] `sudo certbot --nginx` completed, `https://delta.garymenezes.com` serves over TLS
 - [ ] Browser smoke test: `/`, `/data-sources`, `/coach/chat` all load
 - [ ] API smoke tests (section 7) all return expected status codes
 - [ ] Backups configured (Litestream OR cron)

@@ -216,9 +216,9 @@ function AppleHealthSetup() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="text-muted text-[0.6875rem]">URL</div>
-                <div className="break-all">https://yourdomain.com{endpointPath}</div>
+                <div className="break-all">https://delta.garymenezes.com{endpointPath}</div>
               </div>
-              <CopyButton value={`https://yourdomain.com${endpointPath}`} />
+              <CopyButton value={`https://delta.garymenezes.com${endpointPath}`} />
             </div>
             <div>
               <div className="text-muted text-[0.6875rem]">Method</div>
