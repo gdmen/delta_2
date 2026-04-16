@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-muted: #a3a3a3;
+  --color-border: #e5e5e5;
+  --color-surface: #f5f5f5;
+  --color-text-secondary: #525252;
+  --color-text-tertiary: #a3a3a3;
+
+  /* Sport colors */
+  --color-sport-pl: #2563eb;
+  --color-sport-bjj: #db2777;
+  --color-sport-run: #059669;
+  --color-sport-hike: #7c3aed;
+  --color-sport-bike: #d97706;
+
+  /* Status colors */
+  --color-accent-orange: #f97316;
+  --color-accent-red: #ef4444;
+  --color-accent-green: #22c55e;
+
+  /* Coach insight callout */
+  --color-insight-bg: #f0f9ff;
+  --color-insight-border: #e0f2fe;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+}
