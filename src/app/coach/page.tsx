@@ -51,14 +51,14 @@ export default function CoachPage() {
 
       {!loading && briefing && !briefing.cached && !briefing.generated && (
         <div>
-          <p className="text-[14px] text-muted mb-4">
+          <p className="text-[0.875rem] text-muted mb-4">
             {briefing.message ?? "No briefing yet today."}
           </p>
           {briefing.reason !== "no_data" && (
             <button
               onClick={handleGenerate}
               disabled={generating}
-              className="px-6 py-2.5 bg-foreground text-background text-[14px] font-medium rounded hover:opacity-90 disabled:opacity-50"
+              className="px-6 py-2.5 bg-foreground text-background text-[0.875rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
             >
               {generating ? "Generating..." : "Generate Briefing"}
             </button>

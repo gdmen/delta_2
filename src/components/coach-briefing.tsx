@@ -17,20 +17,20 @@ export function CoachBriefing({ date, summary, insight }: CoachBriefingProps) {
         onClick={() => setExpanded(!expanded)}
         className="flex justify-between items-center w-full text-left"
       >
-        <span className="font-mono text-[11px] text-muted">{date}</span>
-        <span className="text-[11px] text-muted">{expanded ? "▲" : "▼"}</span>
+        <span className="font-mono text-[0.6875rem] text-muted">{date}</span>
+        <span className="text-[0.6875rem] text-muted">{expanded ? "▲" : "▼"}</span>
       </button>
 
       {expanded && (
         <div className="mt-2">
-          <p className="text-[14px] leading-[1.7] text-text-secondary">{summary}</p>
+          <p className="text-[0.875rem] leading-[1.7] text-text-secondary">{summary}</p>
 
           {insight && (
             <div className="mt-3 p-[10px_14px] bg-insight-bg border border-insight-border rounded">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-orange mb-1">
+              <div className="text-[0.625rem] font-semibold uppercase tracking-wider text-accent-orange mb-1">
                 Coach Insight
               </div>
-              <p className="text-[13px] leading-[1.6] text-text-secondary">{insight}</p>
+              <p className="text-[0.8125rem] leading-[1.6] text-text-secondary">{insight}</p>
             </div>
           )}
         </div>

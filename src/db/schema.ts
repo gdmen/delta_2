@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const sports = sqliteTable("sports", {
@@ -63,6 +63,7 @@ export const focuses = sqliteTable("focuses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
   sportId: integer("sport_id").notNull().references(() => sports.id),
+  goalId: integer("goal_id").references((): AnySQLiteColumn => goals.id, { onDelete: "set null" }),
   startDate: text("start_date").notNull(),
   endDate: text("end_date"),
   status: text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),

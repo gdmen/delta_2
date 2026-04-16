@@ -8,6 +8,13 @@
       "when": 1776327873268,
       "tag": "0000_first_dreadnoughts",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1776371466738,
+      "tag": "0001_white_mother_askani",
+      "breakpoints": true
     }
   ]
 }

@@ -27,3 +27,21 @@
 **When:** Post-month-1. Requires understanding which thresholds matter through actual usage first.
 **Effort:** M (human: ~1 week / CC: ~45 min)
 **Depends on:** Pre-aggregation layer, coach engine, sufficient data history to define meaningful thresholds.
+
+## P3: Multi-User Support
+**What:** Pivot from single-user self-hosted to multi-user. Each user has:
+- Their own account (login, session, password reset)
+- Their own ingest API key (scoped to their user_id)
+- Row-level scoping on every query (metrics, events, focuses, goals, coach_messages all get a user_id column)
+- Their own coach context (only sees their own data)
+
+Requires schema migration (add user_id FK everywhere), auth middleware on every route, session management (NextAuth or lucia-auth), user signup/login UI, and rewrites of every query to filter by current user.
+**Why:** Currently Delta is single-user, built for Gary. If this proves useful and others want to try it without standing up their own EC2 instance, multi-user is the path. Also simplifies hosting — one Delta instance can serve friends/family instead of each person needing their own deployment.
+**When:** Only if you decide Delta is worth turning into a product or shareable service. Explicitly rejected for v1 in the office-hours design doc ("Side project, self-hosted, user #1").
+**Effort:** L (human: ~2-3 weeks / CC: ~3-4 hours). Touches every table, every query, every route.
+**Depends on:** Product decision to open up beyond self-use. Also depends on having a stable single-user version first so the migration has something worth migrating.
+**Notes:**
+- Auth choice: NextAuth (v5 beta) for OAuth providers, or lucia-auth for more control.
+- Key management: generate ingest keys as `bytes(32).hex()` per user, stored hashed in DB. Rotatable from settings UI.
+- Data isolation strategy: add `user_id` FK to all tables (metrics, events, workout_sets, focuses, focus_entries, focus_metric_links, goals, coach_messages, ingest_configs, daily_summaries). Drizzle middleware enforces on every query.
+- Migration path for Gary's data: all existing rows get user_id=1 (Gary). New users start with empty tables.

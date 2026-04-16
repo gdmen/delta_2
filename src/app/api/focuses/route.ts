@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { focuses, sports } from "@/db/schema";
+import { focuses, sports, goals, metricTypes } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 
 export async function GET() {
@@ -11,6 +11,11 @@ export async function GET() {
       sportId: focuses.sportId,
       sportName: sports.name,
       sportColor: sports.color,
+      goalId: focuses.goalId,
+      goalMetric: metricTypes.name,
+      goalTarget: goals.targetValue,
+      goalUnit: metricTypes.unit,
+      goalDeadline: goals.deadline,
       startDate: focuses.startDate,
       endDate: focuses.endDate,
       status: focuses.status,
@@ -18,6 +23,8 @@ export async function GET() {
     })
     .from(focuses)
     .innerJoin(sports, eq(focuses.sportId, sports.id))
+    .leftJoin(goals, eq(focuses.goalId, goals.id))
+    .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .orderBy(desc(focuses.createdAt));
 
   return NextResponse.json(rows);
@@ -26,6 +33,7 @@ export async function GET() {
 interface CreateFocusBody {
   name: string;
   sportId: number;
+  goalId?: number | null;
   technicalNotes?: string;
 }
 
@@ -46,6 +54,7 @@ export async function POST(request: NextRequest) {
   const result = await db.insert(focuses).values({
     name: body.name,
     sportId: body.sportId,
+    goalId: body.goalId ?? null,
     startDate: today,
     status: "active",
     technicalNotes: body.technicalNotes,
