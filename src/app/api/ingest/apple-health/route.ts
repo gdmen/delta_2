@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth";
 import { batchUpsertMetrics, upsertEvent, MetricInput } from "@/lib/ingest-service";
 import { db } from "@/db";
-import { metricTypes, sports } from "@/db/schema";
+import { sports } from "@/db/schema";
+import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
 
 /**
  * Ingest endpoint for the Health Auto Export iOS app (REST API export).
@@ -128,78 +129,66 @@ export async function POST(request: NextRequest) {
   const metricsIn = payload.data?.metrics ?? [];
   const workoutsIn = payload.data?.workouts ?? [];
 
-  const allMetricTypes = await db.select().from(metricTypes);
-  const metricTypeByName = new Map(allMetricTypes.map((m) => [m.name, m.id]));
+  const typeCache = await buildMetricTypeCache();
 
   const allSports = await db.select().from(sports);
   const sportByName = new Map(allSports.map((s) => [s.name, s.id]));
 
   const inputs: MetricInput[] = [];
-  const unknownMetricNames: string[] = [];
 
   for (const m of metricsIn) {
-    // Special-case sleep_analysis: explode into multiple metrics per day.
+    // Special-case sleep_analysis: HAE ships one object per night with
+    // totalSleep/deep/rem/... fields. Explode into multiple canonical rows.
     if (m.name === "sleep_analysis") {
       for (const p of m.data) {
         const iso = normalizeDate(p.date);
         const total = p.asleep ?? p.totalSleep;
-        if (typeof total === "number") {
-          const typeId = metricTypeByName.get("sleep_hours");
-          if (typeId) {
-            inputs.push({
-              metricTypeId: typeId,
-              value: total,
-              recordedAt: iso,
-              source: "apple_health",
-              sourceId: `hae-sleep_hours-${iso}`,
-            });
-          }
-        }
-        if (typeof p.deep === "number") {
-          const typeId = metricTypeByName.get("sleep_deep_hours");
-          if (typeId) {
-            inputs.push({
-              metricTypeId: typeId,
-              value: p.deep,
-              recordedAt: iso,
-              source: "apple_health",
-              sourceId: `hae-sleep_deep_hours-${iso}`,
-            });
-          }
-        }
-        if (typeof p.rem === "number") {
-          const typeId = metricTypeByName.get("sleep_rem_hours");
-          if (typeId) {
-            inputs.push({
-              metricTypeId: typeId,
-              value: p.rem,
-              recordedAt: iso,
-              source: "apple_health",
-              sourceId: `hae-sleep_rem_hours-${iso}`,
-            });
-          }
-        }
+
+        const pushSleep = async (canonicalName: string, value: number | undefined) => {
+          if (typeof value !== "number") return;
+          const typeId = await resolveMetricTypeId({
+            rawName: canonicalName,
+            map: { [canonicalName]: canonicalName },
+            sourceSystem: "apple_health",
+            unit: "h",
+            cache: typeCache,
+          });
+          inputs.push({
+            metricTypeId: typeId,
+            value,
+            recordedAt: iso,
+            source: "apple_health",
+            sourceId: `hae-${canonicalName}-${iso}`,
+          });
+        };
+
+        await pushSleep("sleep_hours", total);
+        await pushSleep("sleep_deep_hours", p.deep);
+        await pushSleep("sleep_rem_hours", p.rem);
       }
       continue;
     }
 
-    const mapped = METRIC_NAME_MAP[m.name];
-    if (!mapped) {
-      if (!unknownMetricNames.includes(m.name)) unknownMetricNames.push(m.name);
-      continue;
-    }
-    const typeId = metricTypeByName.get(mapped);
-    if (!typeId) continue;
+    // Standard path: resolve via the map, falling back to auto-created
+    // `apple_health:<rawName>` rows for anything unmapped.
+    const typeId = await resolveMetricTypeId({
+      rawName: m.name,
+      map: METRIC_NAME_MAP,
+      sourceSystem: "apple_health",
+      unit: m.units,
+      cache: typeCache,
+    });
 
     for (const p of m.data) {
       if (typeof p.qty !== "number") continue;
       const iso = normalizeDate(p.date);
+      const canonical = METRIC_NAME_MAP[m.name] ?? `apple_health:${m.name}`;
       inputs.push({
         metricTypeId: typeId,
         value: p.qty,
         recordedAt: iso,
         source: "apple_health",
-        sourceId: `hae-${mapped}-${iso}`,
+        sourceId: `hae-${canonical}-${iso}`,
       });
     }
   }
@@ -250,7 +239,6 @@ export async function POST(request: NextRequest) {
       skipped: workoutsSkipped,
       errors: workoutErrors,
     },
-    unknownMetricNames,
     unknownWorkoutNames,
   });
 }
