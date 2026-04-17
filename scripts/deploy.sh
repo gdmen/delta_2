@@ -19,8 +19,12 @@ step() {
 
 cd "$REPO_ROOT"
 
-step "Pulling latest from git"
-git pull --ff-only
+step "Fetching + hard-resetting to origin/main"
+# The server is a deploy target, not a dev machine: any local edits here are
+# accidents. Hard reset avoids ff-only failures when someone tweaked a file
+# in-place (common during debugging) and guarantees the tree matches origin.
+git fetch origin
+git reset --hard origin/main
 
 step "Installing dependencies"
 npm ci
