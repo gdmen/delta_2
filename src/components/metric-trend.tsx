@@ -33,7 +33,7 @@ export function MetricTrend({
 
   // Use numeric timestamps so the X axis is time-scaled, not categorical.
   // (If we keep the date as a string, Recharts spaces each sample evenly
-  // regardless of the real time gap between them — so a sample from 2020 and
+  // regardless of the real time gap between them - so a sample from 2020 and
   // one from 2024 end up side by side.)
   const data = samples.map((s) => ({
     ts: new Date(s.date).getTime(),
@@ -45,9 +45,9 @@ export function MetricTrend({
   const spanDays = (maxTs - minTs) / (1000 * 60 * 60 * 24);
 
   // Pick an axis label format based on the time range.
-  // - ≤ 60 days: MM-DD (e.g. "04-16") — year is redundant in short windows
-  // - ≤ 2 years: YYYY-MM — year + month matters when spanning months
-  // - > 2 years: YYYY — anything denser is noise at this scale
+  // - ≤ 60 days: MM-DD (e.g. "04-16") - year is redundant in short windows
+  // - ≤ 2 years: YYYY-MM - year + month matters when spanning months
+  // - > 2 years: YYYY - anything denser is noise at this scale
   const formatTick = (ts: number): string => {
     const iso = new Date(ts).toISOString();
     if (spanDays <= 60) return iso.slice(5, 10);
@@ -61,7 +61,7 @@ export function MetricTrend({
 
   // Generate clean calendar-aligned ticks (Jan 1 of each year, 1st of each
   // month, etc.) rather than letting Recharts pick arbitrary timestamps between
-  // the data extremes. Ticks don't need to align with sample points — they're
+  // the data extremes. Ticks don't need to align with sample points - they're
   // just axis labels. Empty array = fall back to auto.
   const ticks = generateCalendarTicks(minTs, maxTs, spanDays);
 
@@ -118,7 +118,7 @@ export function MetricTrend({
 }
 
 /**
- * Produce calendar-aligned tick positions for a time axis — Jan 1 of each year,
+ * Produce calendar-aligned tick positions for a time axis - Jan 1 of each year,
  * 1st of each month, Mondays, or midnights, depending on span. Returned ticks
  * are clamped to [minTs, maxTs]. Empty return = let Recharts auto-pick.
  *
@@ -181,7 +181,7 @@ function generateCalendarTicks(minTs: number, maxTs: number, spanDays: number): 
       d.setUTCDate(d.getUTCDate() + 1);
     }
   }
-  // <2 days: fall through to auto — Recharts handles sub-day better.
+  // <2 days: fall through to auto - Recharts handles sub-day better.
 
   return ticks;
 }

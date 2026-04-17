@@ -3,7 +3,7 @@ import { ingestConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 // Strava's stored config blob, stashed JSON-encoded in ingest_configs.api_key_encrypted.
-// (Not actually encrypted yet — the column name is aspirational. Fine for single-user self-host.)
+// (Not actually encrypted yet - the column name is aspirational. Fine for single-user self-host.)
 export interface StravaTokens {
   access_token: string;
   refresh_token: string;
@@ -12,7 +12,7 @@ export interface StravaTokens {
   athlete_name?: string;
 }
 
-// Strava activity shape — only the fields we actually use.
+// Strava activity shape - only the fields we actually use.
 export interface StravaActivity {
   id: number;
   name: string;

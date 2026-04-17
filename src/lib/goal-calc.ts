@@ -162,7 +162,7 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
 }
 
 export function formatRate(rate: number | null, unit: string): string {
-  if (rate === null || !Number.isFinite(rate)) return "—";
+  if (rate === null || !Number.isFinite(rate)) return "-";
   const sign = rate > 0 ? "+" : "";
   const abs = Math.abs(rate);
   // Use 2 decimals if small, 1 if medium, 0 if large.

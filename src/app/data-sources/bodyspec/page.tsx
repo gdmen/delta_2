@@ -248,7 +248,7 @@ export default function BodySpecUploadPage() {
         <PageHeader />
         <div className="mb-6 p-4 bg-accent-green/10 border border-accent-green/20 rounded">
           <div className="text-[0.8125rem] font-semibold text-accent-green mb-2">
-            ✓ Done — processed {queue.length} scan{queue.length === 1 ? "" : "s"}
+            ✓ Done - processed {queue.length} scan{queue.length === 1 ? "" : "s"}
           </div>
           <div className="text-[0.8125rem] text-text-secondary space-y-1 font-mono">
             <div>saved:   {savedCount}</div>
@@ -315,7 +315,7 @@ export default function BodySpecUploadPage() {
                   ? "bg-accent-red"
                   : "bg-surface"
               }`}
-              title={`${it.fileName} — ${it.status}`}
+              title={`${it.fileName} - ${it.status}`}
             />
           ))}
         </div>
@@ -401,7 +401,7 @@ export default function BodySpecUploadPage() {
             </div>
           </div>
 
-          {/* PDF preview — desktop only */}
+          {/* PDF preview - desktop only */}
           <div className="hidden lg:block lg:sticky lg:top-8 lg:self-start">
             <div className="mb-2 text-[0.6875rem] font-mono text-muted uppercase tracking-wider">Source PDF</div>
             <object
@@ -420,7 +420,7 @@ export default function BodySpecUploadPage() {
           </div>
         </div>
       ) : (
-        // saved / skipped — transitional state, advance() should have moved us; but handle gracefully.
+        // saved / skipped - transitional state, advance() should have moved us; but handle gracefully.
         <div className="text-[0.875rem] text-muted py-6">Loading next scan...</div>
       )}
     </div>
@@ -438,7 +438,7 @@ function PageHeader() {
       <h1 className="text-2xl font-semibold mt-3 mb-2">BodySpec DEXA</h1>
       <p className="text-[0.875rem] text-text-secondary mb-6">
         Upload one or more BodySpec DEXA scan PDFs. Claude Haiku extracts the key numbers from each report. You review
-        and edit each value before saving — LLMs hallucinate, so always verify against the PDF.
+        and edit each value before saving - LLMs hallucinate, so always verify against the PDF.
       </p>
     </>
   );
@@ -552,7 +552,7 @@ function NumField({
         type="number"
         step="any"
         value={value ?? ""}
-        placeholder="—"
+        placeholder="-"
         onChange={(e) => {
           const str = e.target.value;
           onChange(str === "" ? null : parseFloat(str));

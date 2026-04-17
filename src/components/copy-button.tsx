@@ -11,7 +11,7 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard API may be blocked — silently no-op */
+      /* clipboard API may be blocked - silently no-op */
     }
   }
 

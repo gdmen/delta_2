@@ -100,7 +100,7 @@ async function ingestOne(
 
   const sportId = sportIdByName.get(mapping.sport);
   if (!sportId) {
-    result.errors.push(`No sport row for '${mapping.sport}' — run seed.`);
+    result.errors.push(`No sport row for '${mapping.sport}' - run seed.`);
     return;
   }
 
@@ -131,7 +131,7 @@ async function ingestOne(
     });
 
     if (status === "accepted") result.accepted++;
-    else result.skipped++; // already existed — dedup'd
+    else result.skipped++; // already existed - deduped
   } catch (err) {
     result.errors.push(`Activity ${activity.id}: ${err instanceof Error ? err.message : String(err)}`);
   }

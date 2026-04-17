@@ -216,7 +216,7 @@ function Connected({
         </div>
         <p className="text-[0.75rem] text-muted">
           Recent sync grabs everything from the last 90 days and is safe to run often. Backfill pulls every activity
-          Strava has for you — use once, or when you&apos;ve been away a while. Both dedup by activity ID.
+          Strava has for you - use once, or when you&apos;ve been away a while. Both dedupe by activity ID.
         </p>
       </div>
 

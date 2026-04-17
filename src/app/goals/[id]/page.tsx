@@ -104,7 +104,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       {/* Progress summary */}
       <section className="mb-8 pb-6 border-b border-border">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <Stat label="Current" value={progress.currentValue !== null ? `${progress.currentValue.toFixed(1)}${goal.metricUnit}` : "—"} />
+          <Stat label="Current" value={progress.currentValue !== null ? `${progress.currentValue.toFixed(1)}${goal.metricUnit}` : "-"} />
           <Stat label="Progress" value={`${progress.progress.toFixed(0)}%`} />
           <Stat label="Actual rate" value={formatRate(progress.actualRatePerWeek, goal.metricUnit)} />
           <Stat label="Required rate" value={formatRate(progress.requiredRatePerWeek, goal.metricUnit)} />

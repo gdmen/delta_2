@@ -123,7 +123,7 @@ function GoalGroup({ title, items, dim = false }: { title: string; items: GoalRo
             </div>
             <div className={`font-mono text-[0.6875rem] mt-1 ${rateColor}`}>
               {p.status === "complete"
-                ? `✓ Complete · ${p.currentValue?.toFixed(1) ?? "—"}${g.metricUnit}`
+                ? `✓ Complete · ${p.currentValue?.toFixed(1) ?? "-"}${g.metricUnit}`
                 : p.status === "insufficient-data"
                 ? "Not enough data yet"
                 : `${formatRate(p.actualRatePerWeek, g.metricUnit)} actual · ${formatRate(p.requiredRatePerWeek, g.metricUnit)} needed`}

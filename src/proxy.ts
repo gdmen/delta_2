@@ -7,10 +7,10 @@ import type { NextRequest } from "next/server";
  * Reads SITE_PASSWORD from .env.local. If unset, the site is wide open (useful
  * for local dev). If set, every request outside the exempt list must include
  * an Authorization: Basic header with the matching password (username is
- * ignored — any value works, "delta" is a fine default).
+ * ignored - any value works, "delta" is a fine default).
  *
  * Exempt paths:
- *   - /api/ingest/*   — has its own auth (bearer token for apple-health,
+ *   - /api/ingest/*   - has its own auth (bearer token for apple-health,
  *                       OAuth state+code for Strava callback). Strava's
  *                       servers won't send Basic creds.
  *   - Next.js internals (_next/*) are already excluded via the matcher.

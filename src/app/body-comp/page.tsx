@@ -60,7 +60,7 @@ export default async function BodyCompPage() {
   ]);
 
   // Nutrition: last 30 days. Daily compliance data. Older history isn't
-  // actionable — you care about the recent trend.
+  // actionable - you care about the recent trend.
   const [protein, water] = await Promise.all([
     getLastDays("protein_g", 30),
     getLastDays("water_oz", 30),
@@ -70,7 +70,7 @@ export default async function BodyCompPage() {
     <div className="max-w-[1200px]">
       <h1 className="text-2xl font-semibold mb-8">Body Composition</h1>
 
-      {/* Nutrition — last 30 days. Appears first: these are the daily levers you pull. */}
+      {/* Nutrition - last 30 days. Appears first: these are the daily levers you pull. */}
       <section className="mb-12">
         <div className="flex items-baseline justify-between mb-4 border-b border-border pb-2">
           <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">

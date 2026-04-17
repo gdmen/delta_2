@@ -81,7 +81,7 @@ export function LinkedGoalPicker({
     if (editable && availableGoals.length === 0) {
       return (
         <p className="text-[0.875rem] text-muted italic">
-          Not linked to a goal. No active goals for this sport —{" "}
+          Not linked to a goal. No active goals for this sport -{" "}
           <Link href="/input/goal" className="text-foreground underline">add one</Link>.
         </p>
       );
@@ -99,7 +99,7 @@ export function LinkedGoalPicker({
         disabled={saving}
         className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground disabled:opacity-50"
       >
-        <option value="">— None (standalone focus) —</option>
+        <option value="">- None (standalone focus) -</option>
         {availableGoals.map((g) => (
           <option key={g.id} value={g.id}>
             {g.metricName} {g.targetValue}{g.metricUnit} by {g.deadline}

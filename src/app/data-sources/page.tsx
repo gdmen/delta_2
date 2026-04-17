@@ -76,7 +76,7 @@ export default function DataSourcesPage() {
       <IntegrationSection
         status="manual-only"
         title="Focuses"
-        description="Training focuses with narrative case files. This is the core differentiator — the coach reads focuses and correlates them with your metrics."
+        description="Training focuses with narrative case files. This is the core differentiator - the coach reads focuses and correlates them with your metrics."
       >
         <p className="text-[0.875rem] text-text-secondary">
           Manual. Create focuses with technical notes, add narrative entries as you train, close with a verdict.{" "}
@@ -146,7 +146,7 @@ function AppleHealthSetup() {
           Health Auto Export
         </a>{" "}
         is an iOS app that reads Apple Health and POSTs JSON to a URL on a schedule. It handles the background
-        timer, retries, and data shaping — Delta just ingests what it sends. One-time setup, ~5 minutes.
+        timer, retries, and data shaping - Delta just ingests what it sends. One-time setup, ~5 minutes.
       </p>
 
       <div className="space-y-5">
@@ -235,14 +235,14 @@ function AppleHealthSetup() {
         <StepBlock number={6} title="Backfill history (optional)">
           <p>
             Open the automation you just created and run a <strong>Manual Export</strong>{" "}covering your entire
-            history. Re-exporting the same days is always safe — dedup prevents duplicates.
+            history. Re-exporting the same days is always safe - dedupe prevents duplicates.
           </p>
         </StepBlock>
 
         <StepBlock number={7} title="Verify">
           <p>
             After the first export fires, open the{" "}
-            <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}— the key metrics strip
+            <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}- the key metrics strip
             should populate. The app&apos;s <strong>History</strong>{" "}tab shows each POST&apos;s HTTP status;{" "}
             <code className="font-mono bg-surface px-1 rounded">200</code>{" "}means success.
           </p>

@@ -76,7 +76,7 @@ const WORKOUT_NAME_MAP: Record<string, { sport: string; type: string }> = {
 interface HAEMetricPoint {
   date: string;
   qty?: number;
-  // sleep_analysis is special — multiple fields per day.
+  // sleep_analysis is special - multiple fields per day.
   asleep?: number;
   totalSleep?: number;
   inBed?: number;

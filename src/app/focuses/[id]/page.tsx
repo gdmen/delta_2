@@ -38,7 +38,7 @@ export default async function FocusDetailPage({ params }: { params: Promise<{ id
   if (rows.length === 0) notFound();
   const focus = rows[0];
 
-  // Pull goals for this sport — used by the linked-goal picker. Include the
+  // Pull goals for this sport - used by the linked-goal picker. Include the
   // current goal even if complete so it still shows.
   const sportGoalRows = await db
     .select({
@@ -117,7 +117,7 @@ export default async function FocusDetailPage({ params }: { params: Promise<{ id
         </div>
       </div>
 
-      {/* Linked goal — what this focus is advancing */}
+      {/* Linked goal - what this focus is advancing */}
       <section className="mb-8 pb-6 border-b border-border">
         <div className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3">
           Advances Goal
@@ -158,7 +158,7 @@ export default async function FocusDetailPage({ params }: { params: Promise<{ id
                 return (
                   <div key={m.name}>
                     <div className="text-[0.75rem] text-muted uppercase tracking-wider">{m.name}</div>
-                    <div className="font-mono text-[1.125rem] text-muted mt-1">—</div>
+                    <div className="font-mono text-[1.125rem] text-muted mt-1">-</div>
                   </div>
                 );
               }
@@ -200,7 +200,7 @@ export default async function FocusDetailPage({ params }: { params: Promise<{ id
         </div>
         {entries.length === 0 ? (
           <p className="text-[0.875rem] text-muted py-2">
-            No entries yet. Add training notes as you go — what you drilled, what felt good, what needs work. The
+            No entries yet. Add training notes as you go - what you drilled, what felt good, what needs work. The
             coach reads these to understand your training beyond just the numbers.
           </p>
         ) : (

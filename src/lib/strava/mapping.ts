@@ -1,7 +1,7 @@
 // Map Strava activity types to Delta's sport + event type.
 // Strava's `sport_type` is newer/more specific than `type`; prefer it when present.
 //
-// Anything not listed here is intentionally skipped — WeightTraining overlaps
+// Anything not listed here is intentionally skipped - WeightTraining overlaps
 // with TeamBuildr, and Swim/Yoga/etc. aren't sports Delta tracks.
 
 const MAPPING: Record<string, { sport: string; type: string }> = {

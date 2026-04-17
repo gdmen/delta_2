@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { computeGoalProgress } from "@/lib/goal-calc";
 
-// Tool definitions exposed to Claude. Keep descriptions terse — they burn context on every turn.
+// Tool definitions exposed to Claude. Keep descriptions terse - they burn context on every turn.
 export const CHAT_TOOLS: Anthropic.Messages.Tool[] = [
   {
     name: "list_sports",
@@ -40,7 +40,7 @@ export const CHAT_TOOLS: Anthropic.Messages.Tool[] = [
   },
   {
     name: "create_focus",
-    description: "Create a new training focus. Focuses are multi-week themes the user is working on (e.g. 'Break 315 Bench', 'Cross-Face Defense'). Always confirm with the user before calling this. Strongly prefer linking the focus to an existing goal it advances — use list_goals first to find candidate goals.",
+    description: "Create a new training focus. Focuses are multi-week themes the user is working on (e.g. 'Break 315 Bench', 'Cross-Face Defense'). Always confirm with the user before calling this. Strongly prefer linking the focus to an existing goal it advances - use list_goals first to find candidate goals.",
     input_schema: {
       type: "object",
       properties: {
@@ -172,8 +172,8 @@ export async function executeTool(name: string, input: Record<string, unknown>):
 export const CHAT_SYSTEM_PROMPT = `You are Delta's training coach. You help the user think through their training goals and focuses, then create them in the database using tools.
 
 Core framing:
-- GOALS are fundamental — numeric targets with deadlines (e.g. deadlift 500lb by April 2027). They define what success means.
-- FOCUSES are tools that advance goals — multi-week narrative training themes (e.g. "Break 315 Bench", "Cross-Face Defense") with technical notes.
+- GOALS are fundamental - numeric targets with deadlines (e.g. deadlift 500lb by April 2027). They define what success means.
+- FOCUSES are tools that advance goals - multi-week narrative training themes (e.g. "Break 315 Bench", "Cross-Face Defense") with technical notes.
 - When someone says "I want to work on X", your default move is to clarify the underlying GOAL first, then help define a FOCUS that advances it.
 
 Style:

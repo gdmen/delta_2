@@ -86,7 +86,7 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
         <h1 className="text-2xl font-semibold">{displayName}</h1>
       </div>
 
-      {/* Summary stats — goals first, per "goals are fundamental, focuses advance them". */}
+      {/* Summary stats - goals first, per "goals are fundamental, focuses advance them". */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border mb-8">
         <StatCell label="Goals" value={String(sportGoals.length)} />
         <StatCell label="Focuses" value={String(activeFocuses.length)} />

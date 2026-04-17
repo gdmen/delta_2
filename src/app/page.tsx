@@ -87,19 +87,19 @@ export default async function Home() {
         metrics={[
           {
             label: "Sleep",
-            value: sleep !== null ? `${sleep.toFixed(1)}h` : "—",
+            value: sleep !== null ? `${sleep.toFixed(1)}h` : "-",
             delta: sleep !== null ? "7-day avg" : "no data",
             status: sleep !== null && sleep < 7 ? "down" : sleep !== null ? "up" : "flat",
           },
           {
             label: "Weight",
-            value: weight !== null ? `${weight.value.toFixed(1)}` : "—",
+            value: weight !== null ? `${weight.value.toFixed(1)}` : "-",
             delta: weight !== null ? weight.unit : "no data",
             status: weight !== null ? "flat" : "flat",
           },
           {
             label: "Protein",
-            value: protein !== null ? `${Math.round(protein)}g` : "—",
+            value: protein !== null ? `${Math.round(protein)}g` : "-",
             delta: protein !== null ? "7-day avg" : "no data",
             status: protein !== null ? "flat" : "flat",
           },
@@ -111,7 +111,7 @@ export default async function Home() {
           },
           {
             label: "HRV",
-            value: hrv !== null ? `${Math.round(hrv.value)}ms` : "—",
+            value: hrv !== null ? `${Math.round(hrv.value)}ms` : "-",
             delta: hrv !== null ? "latest" : "no data",
             status: hrv !== null ? "flat" : "flat",
           },
@@ -141,7 +141,7 @@ export default async function Home() {
       {/*
         Today view: focuses lead. Everywhere else in the app, goals lead because
         they are the fundamental targets. Here on the "Today" page, the framing is
-        immediate and tactical — focuses are what you're doing right now.
+        immediate and tactical - focuses are what you're doing right now.
       */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-8">
         <div>
@@ -165,7 +165,7 @@ export default async function Home() {
                   sportColor={f.sportColor}
                   weekNumber={weeks}
                   sparklineData={[]}
-                  valueLabel="—"
+                  valueLabel="-"
                   href={`/focuses/${f.id}`}
                 />
               );

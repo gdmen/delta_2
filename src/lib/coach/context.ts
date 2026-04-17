@@ -169,7 +169,7 @@ export function formatContextForLLM(ctx: CoachContext): string {
   } else {
     for (const g of ctx.activeGoals) {
       const current = g.currentValue !== null ? `${g.currentValue.toFixed(1)}${g.unit}` : "no data";
-      const req = g.requiredRatePerWeek !== null ? `${g.requiredRatePerWeek.toFixed(2)}${g.unit}/wk` : "—";
+      const req = g.requiredRatePerWeek !== null ? `${g.requiredRatePerWeek.toFixed(2)}${g.unit}/wk` : "-";
       const act = g.actualRatePerWeek !== null ? `${g.actualRatePerWeek.toFixed(2)}${g.unit}/wk (last 4 wk trend)` : "insufficient data";
       lines.push(
         `- ${g.sport}: ${g.metric} → ${g.target}${g.unit} by ${g.deadline} (${g.daysRemaining}d left). ` +
