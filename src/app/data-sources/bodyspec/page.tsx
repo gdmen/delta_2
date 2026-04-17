@@ -8,7 +8,6 @@ export const dynamic = "force-dynamic";
 export default function BodySpecPage() {
   return (
     <>
-      {/* Header + imported-data summary stay comfortable-width for reading. */}
       <div className="max-w-[820px]">
         <Link href="/data-sources" className="text-[0.8125rem] text-muted hover:text-foreground">
           ← Data Sources
@@ -18,18 +17,22 @@ export default function BodySpecPage() {
           Upload BodySpec DEXA scan PDFs. <Wordmark /> extracts body fat %, lean mass, fat mass, bone mineral
           density, and visceral fat. Review before saving.
         </p>
-
-        <section className="mb-10">
-          <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
-          <SourceDataBrowser source="bodyspec_dexa" />
-        </section>
       </div>
 
-      {/* Upload section spans the full content column so the PDF preview
-          has room to breathe next to the review form on desktop. */}
-      <section className="border-t border-border pt-8">
-        <h2 className="text-[1rem] font-semibold mb-4 max-w-[820px]">Upload a new scan</h2>
-        <BodySpecUploadClient />
+      {/* Upload section collapsed by default; spans the full content column
+          when open so the PDF preview + review form both fit on desktop. */}
+      <details className="mb-10 border-b border-border pb-6">
+        <summary className="cursor-pointer text-[0.8125rem] font-semibold uppercase tracking-wider text-muted max-w-[820px]">
+          Upload a new scan
+        </summary>
+        <div className="mt-6">
+          <BodySpecUploadClient />
+        </div>
+      </details>
+
+      <section className="max-w-[820px]">
+        <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
+        <SourceDataBrowser source="bodyspec_dexa" />
       </section>
     </>
   );

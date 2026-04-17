@@ -15,12 +15,7 @@ export default function StravaPage() {
         OAuth-based sync of runs, rides, and hikes. Dedupe by Strava activity ID.
       </p>
 
-      <section className="mb-10">
-        <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
-        <SourceDataBrowser source="strava" />
-      </section>
-
-      <details className="border-t border-border pt-6" open>
+      <details className="mb-10 border-b border-border pb-6">
         <summary className="cursor-pointer text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
           Setup & sync
         </summary>
@@ -28,6 +23,11 @@ export default function StravaPage() {
           <StravaSetupClient />
         </div>
       </details>
+
+      <section>
+        <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
+        <SourceDataBrowser source="strava" />
+      </section>
     </div>
   );
 }
