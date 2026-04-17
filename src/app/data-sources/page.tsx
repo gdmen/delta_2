@@ -84,7 +84,7 @@ export default async function DataSourcesPage() {
   const activity = await getSourceActivity();
 
   return (
-    <div>
+    <div className="max-w-[820px]">
       <h1 className="text-2xl font-semibold mb-2">Data Sources</h1>
       <p className="text-[0.875rem] text-text-secondary mb-8">
         Every way data flows into <Wordmark />. Click a source to see imported data and setup.

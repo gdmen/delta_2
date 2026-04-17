@@ -5,8 +5,9 @@ import { SourceDataBrowser } from "@/components/source-data-browser";
 export const dynamic = "force-dynamic";
 
 const endpoint = "https://delta.garymenezes.com/api/ingest/apple-health";
+// HAE's exact display names for the 13 metrics we pull.
 const metricsList =
-  "Step Count, Heart Rate, Resting Heart Rate, Heart Rate Variability, Active Energy, Weight & Body Mass, Body Fat Percentage, Lean Body Mass, VO2 Max, Protein, Dietary Water, Sleep Analysis";
+  "Apple Stand Time, Headphone Audio Exposure, Heart Rate, Heart Rate Variability, Mindful Minutes, Protein, Respiratory Rate, Resting Heart Rate, Sleep Analysis, Step Count, VO2 Max, Water, Weight";
 
 export default function AppleHealthPage() {
   return (
@@ -87,12 +88,12 @@ function Setup() {
               <CopyButton value={endpoint} />
             </div>
             <div>
-              <div className="text-muted text-[0.6875rem]">Method</div>
-              <div>POST</div>
+              <div className="text-muted text-[0.6875rem]">Timeout Interval</div>
+              <div>60</div>
             </div>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="text-muted text-[0.6875rem]">Headers (add one)</div>
+                <div className="text-muted text-[0.6875rem]">Authorization header</div>
                 <div>
                   Key: <code>Authorization</code>
                   <br />
@@ -100,10 +101,6 @@ function Setup() {
                 </div>
               </div>
               <CopyButton value="Authorization" />
-            </div>
-            <div>
-              <div className="text-muted text-[0.6875rem]">Data format</div>
-              <div>JSON (Aggregated)</div>
             </div>
           </div>
           <p className="mt-3 text-[0.75rem] text-muted">
@@ -114,36 +111,65 @@ function Setup() {
           </p>
         </StepBlock>
 
-        <StepBlock number={4} title="Pick the metrics to export">
+        <StepBlock number={4} title="Data type + export settings">
+          <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 space-y-2">
+            <div>
+              <div className="text-muted text-[0.6875rem]">Data Type</div>
+              <div>Health Metrics</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Export Format</div>
+              <div>JSON</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Export Version</div>
+              <div>v2</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Date Range</div>
+              <div>Today</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Summarize Data</div>
+              <div>On</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Time Grouping</div>
+              <div>Day</div>
+            </div>
+            <div>
+              <div className="text-muted text-[0.6875rem]">Batch Requests</div>
+              <div>On</div>
+            </div>
+          </div>
+        </StepBlock>
+
+        <StepBlock number={5} title="Pick the metrics to export">
           <p className="mb-2">
-            In the automation settings, enable these health metrics:
+            Under <strong>Select Health Metrics</strong>, enable these 13 (these are{" "}
+            <strong>Health Auto Export</strong>&apos;s exact labels):
           </p>
           <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 leading-snug">{metricsList}</div>
-          <p className="mt-2 text-[0.75rem] text-muted">
-            Also enable <strong>Workouts</strong>{" "}so runs, rides, BJJ, and strength sessions sync as events.
-          </p>
         </StepBlock>
 
-        <StepBlock number={5} title="Set the export schedule">
-          <p className="mb-2">
-            Choose <strong>Automatic Export → Daily</strong>{" "}(or hourly if you want near-realtime).{" "}
-            <strong>Health Auto Export</strong>{" "}runs in the background and retries on failure.
-          </p>
+        <StepBlock number={6} title="Set the sync cadence">
           <p>
-            Set <strong>Date Range</strong>{" "}to <strong>Since Last Sync</strong>{" "}so each run only ships new data
-            since the previous export. Dedupe still catches accidental overlaps, but this keeps payloads small and
-            fast.
+            Under <strong>Sync Cadence</strong>, set <strong>Quantity</strong>{" "}to{" "}
+            <code className="font-mono bg-surface px-1 rounded">15</code>{" "}and <strong>Interval</strong>{" "}
+            to <strong>Minutes</strong>. With <strong>Date Range: Today</strong>{" "}(step 4), each run
+            re-ships today&apos;s data; dedupe on the server keeps the DB clean.
           </p>
         </StepBlock>
 
-        <StepBlock number={6} title="Backfill history (optional)">
+        <StepBlock number={7} title="Backfill history (optional)">
           <p>
-            Open the automation you just created and run a <strong>Manual Export</strong>{" "}covering your entire
-            history. Re-exporting the same days is always safe - dedupe prevents duplicates.
+            Open the automation and run a <strong>Manual Export</strong>{" "}covering your entire history (change{" "}
+            <strong>Date Range</strong>{" "}temporarily, run once, then set it back to <strong>Today</strong>).
+            Re-exporting the same days is always safe - dedupe prevents duplicates.
           </p>
         </StepBlock>
 
-        <StepBlock number={7} title="Verify">
+        <StepBlock number={8} title="Verify">
           <p>
             After the first export fires, open the{" "}
             <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}- the key metrics strip
