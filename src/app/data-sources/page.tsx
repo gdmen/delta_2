@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSourceActivity } from "@/lib/data-sources/summaries";
 import { Wordmark } from "@/components/wordmark";
+import { ImportExportBar } from "./import-export-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -158,6 +159,10 @@ export default async function DataSourcesPage() {
             </Link>
           );
         })}
+      </div>
+
+      <div className="mt-10">
+        <ImportExportBar />
       </div>
     </div>
   );

@@ -104,6 +104,53 @@ export async function insertWorkoutSets(eventId: number, sets: WorkoutSetInput[]
   return rows.length;
 }
 
+/**
+ * Upsert a single workout set by (eventId, exerciseName, setNumber).
+ * Used by the CSV importer so re-importing the same file doesn't duplicate
+ * rows. There's no unique index on that tuple, so we look up first and
+ * update-or-insert application-side.
+ */
+export async function upsertWorkoutSet(
+  eventId: number,
+  input: WorkoutSetInput
+): Promise<"accepted" | "updated"> {
+  const existing = await db
+    .select({ id: workoutSets.id })
+    .from(workoutSets)
+    .where(
+      and(
+        eq(workoutSets.eventId, eventId),
+        eq(workoutSets.exerciseName, input.exerciseName),
+        eq(workoutSets.setNumber, input.setNumber)
+      )
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(workoutSets)
+      .set({
+        reps: input.reps,
+        weight: input.weight,
+        rpe: input.rpe,
+        notes: input.notes,
+      })
+      .where(eq(workoutSets.id, existing[0].id));
+    return "updated";
+  }
+
+  await db.insert(workoutSets).values({
+    eventId,
+    exerciseName: input.exerciseName,
+    setNumber: input.setNumber,
+    reps: input.reps,
+    weight: input.weight,
+    rpe: input.rpe,
+    notes: input.notes,
+  });
+  return "accepted";
+}
+
 export async function batchUpsertMetrics(inputs: MetricInput[]): Promise<IngestResult> {
   const result: IngestResult = { accepted: 0, skipped: 0, errors: [] };
 
