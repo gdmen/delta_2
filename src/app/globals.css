@@ -4,11 +4,11 @@
 @theme inline {
   --color-background: #ffffff;
   --color-foreground: #171717;
-  --color-muted: #a3a3a3;
-  --color-border: #e5e5e5;
+  --color-muted: #525252;
+  --color-border: #d4d4d4;
   --color-surface: #f5f5f5;
-  --color-text-secondary: #525252;
-  --color-text-tertiary: #a3a3a3;
+  --color-text-secondary: #404040;
+  --color-text-tertiary: #737373;
 
   /* Sport colors */
   --color-sport-pl: #2563eb;
