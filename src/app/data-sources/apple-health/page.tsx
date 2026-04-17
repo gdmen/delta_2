@@ -72,7 +72,7 @@ function Setup() {
 
         <StepBlock number={2} title="Create a REST API automation">
           <p>
-            Open the app → <strong>Automations</strong>{" "}tab → <strong>+</strong>{" "}→ pick{" "}
+            Open <strong>Health Auto Export</strong>{" "}→ <strong>Automations</strong>{" "}tab → <strong>+</strong>{" "}→ pick{" "}
             <strong>REST API</strong>{" "}as the export type.
           </p>
         </StepBlock>
@@ -126,8 +126,8 @@ function Setup() {
 
         <StepBlock number={5} title="Set the export schedule">
           <p className="mb-2">
-            Choose <strong>Automatic Export → Daily</strong>{" "}(or hourly if you want near-realtime). The app runs in
-            the background and retries on failure.
+            Choose <strong>Automatic Export → Daily</strong>{" "}(or hourly if you want near-realtime).{" "}
+            <strong>Health Auto Export</strong>{" "}runs in the background and retries on failure.
           </p>
           <p>
             Set <strong>Date Range</strong>{" "}to <strong>Since Last Sync</strong>{" "}so each run only ships new data
@@ -147,7 +147,7 @@ function Setup() {
           <p>
             After the first export fires, open the{" "}
             <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}- the key metrics strip
-            should populate. The app&apos;s <strong>History</strong>{" "}tab shows each POST&apos;s HTTP status;{" "}
+            should populate. In the <strong>Health Auto Export</strong>{" "}app, the <strong>History</strong>{" "}tab shows each POST&apos;s HTTP status;{" "}
             <code className="font-mono bg-surface px-1 rounded">200</code>{" "}means success.
           </p>
         </StepBlock>

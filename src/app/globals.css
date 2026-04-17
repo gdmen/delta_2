@@ -31,6 +31,12 @@
   --font-wordmark: 'Unbounded', 'Inter', sans-serif;
 }
 
+/* Custom screens must live in a plain @theme (not @theme inline) so Tailwind
+   v4 generates the corresponding variant (e.g. `tablet:`). */
+@theme {
+  --breakpoint-tablet: 840px;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--color-background);

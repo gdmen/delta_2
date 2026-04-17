@@ -10,8 +10,7 @@ interface Row {
   status: Status;
   title: string;
   sourceKey: string | null; // metrics/events.source value, or null for manual-only rows
-  href: string; // where to go for setup + data details
-  summary: React.ReactNode; // one-line description
+  href: string; // where to go for setup + data details; ignored for "coming-soon" rows
 }
 
 // Ordering matters - keep ready integrations at the top so the page answers
@@ -22,77 +21,75 @@ const ROWS: Row[] = [
     title: "Apple Health",
     sourceKey: "apple_health",
     href: "/data-sources/apple-health",
-    summary: "Sleep, HR, HRV, steps, body metrics, dietary via Health Auto Export.",
   },
   {
     status: "ready",
     title: "Strava",
     sourceKey: "strava",
     href: "/data-sources/strava",
-    summary: "OAuth sync of runs, rides, and hikes.",
   },
   {
     status: "ready",
     title: "BodySpec DEXA",
     sourceKey: "bodyspec_dexa",
     href: "/data-sources/bodyspec",
-    summary: (
-      <>
-        Upload DEXA PDFs; <Wordmark /> extracts body composition.
-      </>
-    ),
   },
   {
     status: "manual-only",
     title: "Goals",
     sourceKey: null,
     href: "/goals",
-    summary: "Targets with deadlines; coach tracks required rate.",
   },
   {
     status: "manual-only",
     title: "Focuses",
     sourceKey: null,
     href: "/focuses",
-    summary: "Narrative training focuses - the core differentiator.",
   },
   {
     status: "manual-only",
     title: "BJJ Sessions",
     sourceKey: null,
     href: "/input/bjj",
-    summary: "Mat-time logs categorized by session type.",
   },
   {
     status: "coming-soon",
     title: "TeamBuildr",
     sourceKey: null,
-    href: "/data-sources",
-    summary: "CSV import of programmed lifts (sets, reps, weight, RPE).",
+    href: "",
   },
   {
     status: "coming-soon",
     title: "Whoop / Garmin",
     sourceKey: null,
-    href: "/data-sources",
-    summary: "Proprietary metrics not in Apple Health (stretch goal).",
+    href: "",
   },
 ];
 
+// Responsive columns:
+//   <640px (mobile): 3 cols - Source / Status / Rows
+//   640-767px (sm):  4 cols - ... + Last
+//   >=768px (md):    5 cols - ... + Earliest + Last
+// Hidden cells use display:none so they don't consume a grid slot.
+// Tailwind v4 sort order for arbitrary / custom breakpoints can place the
+// custom `tablet:` variant BEFORE `sm:` in the generated CSS, letting sm:
+// (640px) override tablet: (840px) at ≥840px. Force priority with `!`.
 const GRID_COLS =
-  "grid-cols-[1.6fr_5.5rem_5rem_9rem_1.8fr]";
+  "grid-cols-[minmax(8rem,1.4fr)_5.5rem_4.5rem] " +
+  "sm:grid-cols-[minmax(9rem,1.4fr)_5.5rem_4.5rem_9rem] " +
+  "tablet:!grid-cols-[minmax(10rem,1.4fr)_5.5rem_4.5rem_9rem_9rem]";
 
 export default async function DataSourcesPage() {
   const activity = await getSourceActivity();
 
   return (
-    <div className="max-w-[940px]">
+    <div>
       <h1 className="text-2xl font-semibold mb-2">Data Sources</h1>
       <p className="text-[0.875rem] text-text-secondary mb-8">
         Every way data flows into <Wordmark />. Click a source to see imported data and setup.
       </p>
 
-      <div className="border border-border rounded overflow-hidden">
+      <div className="border border-border rounded overflow-x-auto max-w-[760px]">
         {/* Header row */}
         <div
           className={`grid ${GRID_COLS} gap-4 bg-surface px-4 py-2.5 text-foreground font-mono text-[0.6875rem] font-semibold uppercase tracking-wider border-b border-border`}
@@ -100,21 +97,28 @@ export default async function DataSourcesPage() {
           <div>Source</div>
           <div>Status</div>
           <div className="text-right">Rows</div>
-          <div className="text-right">Last import</div>
-          <div>Summary</div>
+          <div className="hidden tablet:block text-right">Earliest</div>
+          <div className="hidden sm:block text-right">Latest</div>
         </div>
 
-        {/* Data rows - each entire row is a clickable link */}
+        {/* Data rows - ready + manual-only rows are clickable; coming-soon ones
+            are static so they don't imply clickability. */}
         {ROWS.map((row) => {
           const act = row.sourceKey ? activity[row.sourceKey] : null;
           const totalRows = act ? act.metricRowCount + act.eventRowCount : 0;
-
-          return (
-            <Link
-              key={row.title}
-              href={row.href}
-              className={`grid ${GRID_COLS} gap-4 px-4 py-3 items-center border-t border-border hover:bg-surface/40 transition-colors`}
-            >
+          const rowsCell = row.sourceKey ? totalRows.toLocaleString() : "-";
+          const firstCell = row.sourceKey
+            ? act?.firstDataAt
+              ? formatShort(act.firstDataAt)
+              : "-"
+            : "-";
+          const lastCell = row.sourceKey
+            ? act?.lastDataAt
+              ? formatShort(act.lastDataAt)
+              : "-"
+            : "-";
+          const rowContent = (
+            <>
               <div className="font-semibold text-[0.875rem] text-foreground">
                 {row.title}
               </div>
@@ -122,18 +126,35 @@ export default async function DataSourcesPage() {
                 <StatusBadge status={row.status} />
               </div>
               <div className="text-right font-mono text-[0.8125rem] tabular-nums text-text-secondary">
-                {row.sourceKey ? totalRows.toLocaleString() : "-"}
+                {rowsCell}
               </div>
-              <div className="text-right text-[0.8125rem] text-text-secondary tabular-nums">
-                {row.sourceKey
-                  ? act?.lastImportAt
-                    ? formatShort(act.lastImportAt)
-                    : "never"
-                  : "-"}
+              <div className="hidden tablet:block text-right text-[0.8125rem] text-text-secondary tabular-nums">
+                {firstCell}
               </div>
-              <div className="text-[0.8125rem] text-text-secondary">
-                {row.summary}
+              <div className="hidden sm:block text-right text-[0.8125rem] text-text-secondary tabular-nums">
+                {lastCell}
               </div>
+            </>
+          );
+
+          if (row.status === "coming-soon") {
+            return (
+              <div
+                key={row.title}
+                className={`grid ${GRID_COLS} gap-4 px-4 py-3 items-center border-t border-border text-muted`}
+              >
+                {rowContent}
+              </div>
+            );
+          }
+
+          return (
+            <Link
+              key={row.title}
+              href={row.href}
+              className={`grid ${GRID_COLS} gap-4 px-4 py-3 items-center border-t border-border hover:bg-surface/40 transition-colors`}
+            >
+              {rowContent}
             </Link>
           );
         })}

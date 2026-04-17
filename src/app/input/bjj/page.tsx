@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 const BJJ_TYPES = [
   { value: "class", label: "Class" },
@@ -54,7 +55,10 @@ export default function BjjInputPage() {
 
   return (
     <div className="max-w-xl">
-      <h1 className="text-2xl font-semibold mb-6">Log BJJ Session</h1>
+      <Link href="/data-sources" className="text-[0.8125rem] text-muted hover:text-foreground">
+        ← Data Sources
+      </Link>
+      <h1 className="text-2xl font-semibold mt-3 mb-6">Log BJJ Session</h1>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

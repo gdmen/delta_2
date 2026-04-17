@@ -16,6 +16,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
       typeName: metricTypes.name,
       unit: metricTypes.unit,
       count: sql<number>`count(*)`,
+      firstAt: sql<string>`min(${metrics.recordedAt})`,
       lastAt: sql<string>`max(${metrics.recordedAt})`,
     })
     .from(metrics)
@@ -29,6 +30,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
       sportId: sports.id,
       sportName: sports.name,
       count: sql<number>`count(*)`,
+      firstAt: sql<string>`min(${events.startedAt})`,
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(events)
@@ -66,7 +68,8 @@ export async function SourceDataBrowser({ source }: { source: string }) {
                 <tr>
                   <th className="text-left font-mono font-semibold px-3 py-2">Metric</th>
                   <th className="text-right font-mono font-semibold px-3 py-2">Rows</th>
-                  <th className="text-right font-mono font-semibold px-3 py-2">Last</th>
+                  <th className="hidden sm:table-cell text-right font-mono font-semibold px-3 py-2">Earliest</th>
+                  <th className="text-right font-mono font-semibold px-3 py-2">Latest</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,7 +84,10 @@ export async function SourceDataBrowser({ source }: { source: string }) {
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
                       {Number(r.count).toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-muted tabular-nums">
+                    <td className="hidden sm:table-cell px-3 py-2 text-right text-muted tabular-nums whitespace-nowrap">
+                      {r.firstAt ? formatShort(r.firstAt) : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted tabular-nums whitespace-nowrap">
                       {r.lastAt ? formatShort(r.lastAt) : "-"}
                     </td>
                   </tr>
@@ -108,7 +114,8 @@ export async function SourceDataBrowser({ source }: { source: string }) {
                 <tr>
                   <th className="text-left font-mono font-semibold px-3 py-2">Sport</th>
                   <th className="text-right font-mono font-semibold px-3 py-2">Rows</th>
-                  <th className="text-right font-mono font-semibold px-3 py-2">Last</th>
+                  <th className="hidden sm:table-cell text-right font-mono font-semibold px-3 py-2">Earliest</th>
+                  <th className="text-right font-mono font-semibold px-3 py-2">Latest</th>
                 </tr>
               </thead>
               <tbody>
@@ -118,7 +125,10 @@ export async function SourceDataBrowser({ source }: { source: string }) {
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
                       {Number(r.count).toLocaleString()}
                     </td>
-                    <td className="px-3 py-2 text-right font-mono text-muted tabular-nums">
+                    <td className="hidden sm:table-cell px-3 py-2 text-right text-muted tabular-nums whitespace-nowrap">
+                      {r.firstAt ? formatShort(r.firstAt) : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted tabular-nums whitespace-nowrap">
                       {r.lastAt ? formatShort(r.lastAt) : "-"}
                     </td>
                   </tr>

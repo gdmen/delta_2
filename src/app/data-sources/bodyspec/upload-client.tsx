@@ -282,11 +282,12 @@ export default function BodySpecUploadPage() {
     );
   }
 
-  // Review the active item.
+  // Review the active item. No max-width - the two-column review layout
+  // (form + PDF preview) benefits from every pixel on wide screens.
   const active = queue[activeIndex];
 
   return (
-    <div className="max-w-[1400px]">
+    <div>
       <PageHeader />
 
       {/* Queue progress strip */}
