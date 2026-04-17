@@ -34,7 +34,7 @@ const ROWS: Row[] = [
   {
     status: "ready",
     title: "BodySpec DEXA",
-    sourceKey: "bodyspec",
+    sourceKey: "bodyspec_dexa",
     href: "/data-sources/bodyspec",
     summary: (
       <>

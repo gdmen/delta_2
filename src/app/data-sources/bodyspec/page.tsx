@@ -19,7 +19,7 @@ export default function BodySpecPage() {
 
       <section className="mb-10">
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
-        <SourceDataBrowser source="bodyspec" />
+        <SourceDataBrowser source="bodyspec_dexa" />
       </section>
 
       <section className="border-t border-border pt-8">
