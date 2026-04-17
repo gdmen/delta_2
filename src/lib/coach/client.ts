@@ -50,7 +50,7 @@ function getClient(): Anthropic | null {
 export async function generateBriefing(context: string): Promise<CoachOutput | CoachError> {
   const client = getClient();
   if (!client) {
-    return { kind: "unavailable", message: "Claude API key not configured" };
+    return { kind: "unavailable", message: "Delta coach is not configured (missing API key)" };
   }
 
   const userMessage = `${context}

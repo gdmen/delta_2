@@ -1,275 +1,180 @@
 import Link from "next/link";
-import { CopyButton } from "@/components/copy-button";
+import { getSourceActivity } from "@/lib/data-sources/summaries";
+import { Wordmark } from "@/components/wordmark";
 
 export const dynamic = "force-dynamic";
 
-export default function DataSourcesPage() {
+type Status = "ready" | "coming-soon" | "manual-only";
+
+interface Row {
+  status: Status;
+  title: string;
+  sourceKey: string | null; // metrics/events.source value, or null for manual-only rows
+  href: string; // where to go for setup + data details
+  summary: React.ReactNode; // one-line description
+}
+
+// Ordering matters - keep ready integrations at the top so the page answers
+// "is my data flowing?" at a glance without scrolling.
+const ROWS: Row[] = [
+  {
+    status: "ready",
+    title: "Apple Health",
+    sourceKey: "apple_health",
+    href: "/data-sources/apple-health",
+    summary: "Sleep, HR, HRV, steps, body metrics, dietary via Health Auto Export.",
+  },
+  {
+    status: "ready",
+    title: "Strava",
+    sourceKey: "strava",
+    href: "/data-sources/strava",
+    summary: "OAuth sync of runs, rides, and hikes.",
+  },
+  {
+    status: "ready",
+    title: "BodySpec DEXA",
+    sourceKey: "bodyspec",
+    href: "/data-sources/bodyspec",
+    summary: (
+      <>
+        Upload DEXA PDFs; <Wordmark /> extracts body composition.
+      </>
+    ),
+  },
+  {
+    status: "manual-only",
+    title: "Goals",
+    sourceKey: null,
+    href: "/goals",
+    summary: "Targets with deadlines; coach tracks required rate.",
+  },
+  {
+    status: "manual-only",
+    title: "Focuses",
+    sourceKey: null,
+    href: "/focuses",
+    summary: "Narrative training focuses - the core differentiator.",
+  },
+  {
+    status: "manual-only",
+    title: "BJJ Sessions",
+    sourceKey: null,
+    href: "/input/bjj",
+    summary: "Mat-time logs categorized by session type.",
+  },
+  {
+    status: "coming-soon",
+    title: "TeamBuildr",
+    sourceKey: null,
+    href: "/data-sources",
+    summary: "CSV import of programmed lifts (sets, reps, weight, RPE).",
+  },
+  {
+    status: "coming-soon",
+    title: "Whoop / Garmin",
+    sourceKey: null,
+    href: "/data-sources",
+    summary: "Proprietary metrics not in Apple Health (stretch goal).",
+  },
+];
+
+const GRID_COLS =
+  "grid-cols-[1.6fr_5.5rem_5rem_9rem_1.8fr]";
+
+export default async function DataSourcesPage() {
+  const activity = await getSourceActivity();
+
   return (
-    <div className="max-w-[820px]">
+    <div className="max-w-[940px]">
       <h1 className="text-2xl font-semibold mb-2">Data Sources</h1>
       <p className="text-[0.875rem] text-text-secondary mb-8">
-        Every way data flows into Delta: integrations, file uploads, and manual entry.
+        Every way data flows into <Wordmark />. Click a source to see imported data and setup.
       </p>
 
-      <IntegrationSection
-        status="ready"
-        title="Apple Health"
-        description="Automatic daily export of sleep, heart rate, HRV, active energy, steps, body metrics, dietary protein/water, and workouts via the Health Auto Export iOS app."
-      >
-        <AppleHealthSetup />
-      </IntegrationSection>
+      <div className="border border-border rounded overflow-hidden">
+        {/* Header row */}
+        <div
+          className={`grid ${GRID_COLS} gap-4 bg-surface px-4 py-2.5 text-foreground font-mono text-[0.6875rem] font-semibold uppercase tracking-wider border-b border-border`}
+        >
+          <div>Source</div>
+          <div>Status</div>
+          <div className="text-right">Rows</div>
+          <div className="text-right">Last import</div>
+          <div>Summary</div>
+        </div>
 
-      <IntegrationSection
-        status="ready"
-        title="BodySpec DEXA"
-        description="Upload BodySpec DEXA scan PDFs. Claude extracts body fat %, lean mass, fat mass, bone mineral density, and visceral fat. Review before saving."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          <Link href="/data-sources/bodyspec" className="text-foreground underline">Upload a DEXA scan PDF →</Link>
-        </p>
-      </IntegrationSection>
+        {/* Data rows - each entire row is a clickable link */}
+        {ROWS.map((row) => {
+          const act = row.sourceKey ? activity[row.sourceKey] : null;
+          const totalRows = act ? act.metricRowCount + act.eventRowCount : 0;
 
-      <IntegrationSection
-        status="ready"
-        title="Strava"
-        description="OAuth-based sync of runs, rides, and hikes. Dedup by Strava activity ID."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          <Link href="/data-sources/strava" className="text-foreground underline">Connect Strava →</Link>
-        </p>
-      </IntegrationSection>
-
-      <IntegrationSection
-        status="coming-soon"
-        title="TeamBuildr"
-        description="CSV import of your programmed lifts (sets, reps, weight, RPE per exercise)."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          Coming soon. Export your training history from TeamBuildr as CSV, upload here, and it populates the{" "}
-          <code className="font-mono text-[0.8125rem] bg-surface px-1 py-0.5 rounded">workout_sets</code>{" "}
-          table.
-        </p>
-      </IntegrationSection>
-
-      <IntegrationSection
-        status="manual-only"
-        title="Goals"
-        description="Target values with deadlines. The coach computes required rate vs actual rate and calls out gaps."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          Manual. Set a target (e.g. deadlift 500lb by April 2027) and the home dashboard tracks your required rate.{" "}
-          <Link href="/input/goal" className="text-foreground underline">Add a goal →</Link>
-        </p>
-      </IntegrationSection>
-
-      <IntegrationSection
-        status="manual-only"
-        title="BJJ Sessions"
-        description="Log mat time by type (class / open mat / drilling / teaching) with notes."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          Manual-only. No external app captures BJJ session categorization.{" "}
-          <Link href="/input/bjj" className="text-foreground underline">Log a session →</Link>
-        </p>
-      </IntegrationSection>
-
-      <IntegrationSection
-        status="manual-only"
-        title="Focuses"
-        description="Training focuses with narrative case files. This is the core differentiator - the coach reads focuses and correlates them with your metrics."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          Manual. Create focuses with technical notes, add narrative entries as you train, close with a verdict.{" "}
-          <Link href="/input/focus" className="text-foreground underline">Manage focuses →</Link>
-        </p>
-      </IntegrationSection>
-
-      <IntegrationSection
-        status="coming-soon"
-        title="Whoop / Garmin (stretch)"
-        description="Proprietary metrics (Whoop Recovery, Strain; Garmin Body Battery, Training Load) not available via Apple Health."
-      >
-        <p className="text-[0.875rem] text-text-secondary">
-          Stretch goal, post-month-1. Requires Whoop developer API approval or Garmin Connect OAuth.
-          For now, Apple Health captures sleep, HRV, and resting HR which those wearables contribute.
-        </p>
-      </IntegrationSection>
+          return (
+            <Link
+              key={row.title}
+              href={row.href}
+              className={`grid ${GRID_COLS} gap-4 px-4 py-3 items-center border-t border-border hover:bg-surface/40 transition-colors`}
+            >
+              <div className="font-semibold text-[0.875rem] text-foreground">
+                {row.title}
+              </div>
+              <div>
+                <StatusBadge status={row.status} />
+              </div>
+              <div className="text-right font-mono text-[0.8125rem] tabular-nums text-text-secondary">
+                {row.sourceKey ? totalRows.toLocaleString() : "-"}
+              </div>
+              <div className="text-right text-[0.8125rem] text-text-secondary tabular-nums">
+                {row.sourceKey
+                  ? act?.lastImportAt
+                    ? formatShort(act.lastImportAt)
+                    : "never"
+                  : "-"}
+              </div>
+              <div className="text-[0.8125rem] text-text-secondary">
+                {row.summary}
+              </div>
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function IntegrationSection({
-  status,
-  title,
-  description,
-  children,
-}: {
-  status: "ready" | "coming-soon" | "manual-only";
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  const statusLabel = {
-    ready: { text: "READY", color: "text-accent-green" },
-    "coming-soon": { text: "COMING SOON", color: "text-muted" },
-    "manual-only": { text: "MANUAL", color: "text-sport-pl" },
+function StatusBadge({ status }: { status: Status }) {
+  // Full class names listed statically so Tailwind picks them up.
+  const spec = {
+    ready: {
+      text: "READY",
+      classes: "text-accent-green border-accent-green",
+    },
+    "coming-soon": {
+      text: "SOON",
+      classes: "text-muted border-muted",
+    },
+    "manual-only": {
+      text: "MANUAL",
+      classes: "text-sport-pl border-sport-pl",
+    },
   }[status];
 
   return (
-    <section className="mb-8 pb-8 border-b border-border last:border-b-0">
-      <div className="flex justify-between items-baseline mb-2">
-        <h2 className="text-[1rem] font-semibold">{title}</h2>
-        <span className={`font-mono text-[0.625rem] font-semibold uppercase tracking-wider ${statusLabel.color}`}>
-          {statusLabel.text}
-        </span>
-      </div>
-      <p className="text-[0.8125rem] text-text-secondary mb-4">{description}</p>
-      {children}
-    </section>
+    <span
+      className={`inline-flex items-center justify-center border-2 rounded-md px-2 py-0.5 font-mono text-[0.6875rem] font-bold uppercase tracking-wider ${spec.classes}`}
+    >
+      {spec.text}
+    </span>
   );
 }
 
-function AppleHealthSetup() {
-  const endpoint = "https://delta.garymenezes.com/api/ingest/apple-health";
-  const metricsList =
-    "Step Count, Heart Rate, Resting Heart Rate, Heart Rate Variability, Active Energy, Weight & Body Mass, Body Fat Percentage, Lean Body Mass, VO2 Max, Protein, Dietary Water, Sleep Analysis";
-
-  return (
-    <div className="space-y-6">
-      <p className="text-[0.8125rem] text-text-secondary">
-        <a
-          href="https://apps.apple.com/us/app/health-auto-export-json-csv/id1115567069"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-foreground underline"
-        >
-          Health Auto Export
-        </a>{" "}
-        is an iOS app that reads Apple Health and POSTs JSON to a URL on a schedule. It handles the background
-        timer, retries, and data shaping - Delta just ingests what it sends. One-time setup, ~5 minutes.
-      </p>
-
-      <div className="space-y-5">
-        <StepBlock number={1} title="Install Health Auto Export">
-          <p>
-            Install{" "}
-            <a
-              href="https://apps.apple.com/us/app/health-auto-export-json-csv/id1115567069"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-foreground underline"
-            >
-              Health Auto Export
-            </a>{" "}
-            from the App Store on your iPhone. On first launch, grant read access to all Health categories you want
-            to sync (sleep, heart, activity, body measurements, nutrition, workouts).
-          </p>
-        </StepBlock>
-
-        <StepBlock number={2} title="Create a REST API automation">
-          <p>
-            Open the app → <strong>Automations</strong>{" "}tab → <strong>+</strong>{" "}→ pick{" "}
-            <strong>REST API</strong>{" "}as the export type.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={3} title="Configure the endpoint">
-          <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 space-y-2">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="text-muted text-[0.6875rem]">URL</div>
-                <div className="break-all">{endpoint}</div>
-              </div>
-              <CopyButton value={endpoint} />
-            </div>
-            <div>
-              <div className="text-muted text-[0.6875rem]">Method</div>
-              <div>POST</div>
-            </div>
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="text-muted text-[0.6875rem]">Headers (add one)</div>
-                <div>
-                  Key: <code>Authorization</code>
-                  <br />
-                  Value: <code>Bearer &lt;INGEST_API_KEY&gt;</code>
-                </div>
-              </div>
-              <CopyButton value="Authorization" />
-            </div>
-            <div>
-              <div className="text-muted text-[0.6875rem]">Data format</div>
-              <div>JSON (Aggregated)</div>
-            </div>
-          </div>
-          <p className="mt-3 text-[0.75rem] text-muted">
-            Your <code className="font-mono bg-surface px-1 rounded">INGEST_API_KEY</code>{" "}is in{" "}
-            <code className="font-mono bg-surface px-1 rounded">.env.local</code>{" "}on the server (the bootstrap
-            script prints it once). Generate a new one with{" "}
-            <code className="font-mono bg-surface px-1 rounded">openssl rand -hex 32</code>{" "}if needed.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={4} title="Pick the metrics to export">
-          <p className="mb-2">
-            In the automation settings, enable these health metrics:
-          </p>
-          <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 leading-snug">{metricsList}</div>
-          <p className="mt-2 text-[0.75rem] text-muted">
-            Also enable <strong>Workouts</strong>{" "}so runs, rides, BJJ, and strength sessions sync as events.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={5} title="Set the export schedule">
-          <p className="mb-2">
-            Choose <strong>Automatic Export → Daily</strong>{" "}(or hourly if you want near-realtime). The app runs in
-            the background and retries on failure.
-          </p>
-          <p>
-            Set <strong>Date Range</strong>{" "}to <strong>Since Last Sync</strong>{" "}so each run only ships new data
-            since the previous export. Dedup still catches accidental overlaps, but this keeps payloads small and
-            fast.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={6} title="Backfill history (optional)">
-          <p>
-            Open the automation you just created and run a <strong>Manual Export</strong>{" "}covering your entire
-            history. Re-exporting the same days is always safe - dedupe prevents duplicates.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={7} title="Verify">
-          <p>
-            After the first export fires, open the{" "}
-            <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}- the key metrics strip
-            should populate. The app&apos;s <strong>History</strong>{" "}tab shows each POST&apos;s HTTP status;{" "}
-            <code className="font-mono bg-surface px-1 rounded">200</code>{" "}means success.
-          </p>
-        </StepBlock>
-      </div>
-    </div>
-  );
-}
-
-function StepBlock({
-  number,
-  title,
-  children,
-}: {
-  number: number;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex gap-4">
-      <div className="flex-shrink-0 w-7 h-7 rounded-full bg-surface flex items-center justify-center font-mono text-[0.75rem] font-semibold text-text-secondary">
-        {number}
-      </div>
-      <div className="flex-1 pt-0.5">
-        <h3 className="text-[0.875rem] font-semibold mb-1.5">{title}</h3>
-        <div className="text-[0.8125rem] leading-[1.6] text-text-secondary space-y-2">{children}</div>
-      </div>
-    </div>
-  );
+function formatShort(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace("T", " ");
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }

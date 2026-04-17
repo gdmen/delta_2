@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
 
     const textBlock = response.content.find((b) => b.type === "text");
     if (!textBlock || textBlock.type !== "text") {
-      return NextResponse.json({ error: "Claude returned no text" }, { status: 500 });
+      return NextResponse.json({ error: "Delta returned no text" }, { status: 500 });
     }
 
     const text = textBlock.text.trim();
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch {
-      return NextResponse.json({ error: "Malformed JSON from Claude", raw: text }, { status: 500 });
+      return NextResponse.json({ error: "Malformed JSON from Delta", raw: text }, { status: 500 });
     }
 
     if (parsed.error === "not_bodyspec_dexa") {
