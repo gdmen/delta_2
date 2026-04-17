@@ -98,6 +98,7 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
   echo "(Edit $REPO_ROOT/.env.local by hand if you need to rotate those.)"
   CLAUDE_API_KEY=""  # placeholder; .env.local already has the real value
   INGEST_API_KEY=""
+  SITE_PASSWORD=""
 
   # Offer to append Strava keys if they're not already set.
   if ! grep -q '^STRAVA_CLIENT_ID=' "$REPO_ROOT/.env.local"; then
@@ -121,6 +122,13 @@ else
     exit 1
   fi
   INGEST_API_KEY="$(openssl rand -hex 32)"
+
+  echo
+  echo "Site password: gates the entire web UI behind HTTP Basic Auth."
+  echo "Leave blank to skip (site will be publicly accessible)."
+  read -r -s -p "SITE_PASSWORD (input hidden, Enter to skip): " SITE_PASSWORD
+  echo
+
   prompt_strava
 fi
 
@@ -168,6 +176,9 @@ if [[ ! -f "$REPO_ROOT/.env.local" ]]; then
   {
     echo "CLAUDE_API_KEY=$CLAUDE_API_KEY"
     echo "INGEST_API_KEY=$INGEST_API_KEY"
+    if [[ -n "$SITE_PASSWORD" ]]; then
+      echo "SITE_PASSWORD=$SITE_PASSWORD"
+    fi
     if [[ -n "$STRAVA_CLIENT_ID" ]]; then
       echo "STRAVA_CLIENT_ID=$STRAVA_CLIENT_ID"
       echo "STRAVA_CLIENT_SECRET=$STRAVA_CLIENT_SECRET"
