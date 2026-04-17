@@ -15,13 +15,17 @@
 #   1. System deps (nodejs 20, nginx, certbot, git)
 #   2. 2 GB swap (for t3.micro)
 #   3. npm ci / migrate / seed / build
-#   4. .env.local with your CLAUDE_API_KEY (prompted) + generated INGEST_API_KEY
+#   4. .env.local with your CLAUDE_API_KEY (prompted) + generated INGEST_API_KEY,
+#      plus STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET (optional, prompted)
 #   5. systemd service + start
 #   6. Nginx site with client_max_body_size 12M + proxy_read_timeout 60s
 #   7. Let's Encrypt SSL via certbot --nginx
 #   8. Smoke test
 #
 # When it's done, it prints the INGEST_API_KEY — copy it into your iOS Shortcut.
+#
+# Re-running this script on an existing install: it will detect the existing
+# .env.local and offer to append Strava credentials if they're missing.
 
 set -euo pipefail
 
@@ -64,11 +68,51 @@ echo
 # Prompt for secrets
 # -----------------------------------------------------------------------------
 
+prompt_strava() {
+  # Sets STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET. Empty = skip.
+  echo
+  echo "Strava integration is optional. Press Enter at both prompts to skip."
+  echo "Register your app at https://www.strava.com/settings/api first."
+  echo "Set the Authorization Callback Domain to: $DOMAIN"
+  echo
+  read -r -p "STRAVA_CLIENT_ID (optional, Enter to skip): " STRAVA_CLIENT_ID || STRAVA_CLIENT_ID=""
+  if [[ -n "$STRAVA_CLIENT_ID" ]]; then
+    read -r -s -p "STRAVA_CLIENT_SECRET (input hidden): " STRAVA_CLIENT_SECRET
+    echo
+    if [[ -z "$STRAVA_CLIENT_SECRET" ]]; then
+      echo "STRAVA_CLIENT_SECRET required when ID is set. Skipping Strava."
+      STRAVA_CLIENT_ID=""
+      STRAVA_CLIENT_SECRET=""
+    fi
+  else
+    STRAVA_CLIENT_SECRET=""
+  fi
+}
+
+STRAVA_CLIENT_ID=""
+STRAVA_CLIENT_SECRET=""
+APPEND_STRAVA=false
+
 if [[ -f "$REPO_ROOT/.env.local" ]]; then
-  echo "Found existing .env.local — will not overwrite. Skipping CLAUDE_API_KEY prompt."
-  echo "(Edit $REPO_ROOT/.env.local by hand if you need to rotate keys.)"
+  echo "Found existing .env.local — will not overwrite Claude/Ingest keys."
+  echo "(Edit $REPO_ROOT/.env.local by hand if you need to rotate those.)"
   CLAUDE_API_KEY=""  # placeholder; .env.local already has the real value
   INGEST_API_KEY=""
+
+  # Offer to append Strava keys if they're not already set.
+  if ! grep -q '^STRAVA_CLIENT_ID=' "$REPO_ROOT/.env.local"; then
+    echo
+    echo "No STRAVA_CLIENT_ID found in existing .env.local."
+    read -r -p "Add Strava credentials now? (y/N): " add_strava
+    if [[ "$add_strava" =~ ^[Yy]$ ]]; then
+      prompt_strava
+      if [[ -n "$STRAVA_CLIENT_ID" ]]; then
+        APPEND_STRAVA=true
+      fi
+    fi
+  else
+    echo "Strava credentials already configured in .env.local. Skipping."
+  fi
 else
   read -r -s -p "Paste your CLAUDE_API_KEY (input hidden): " CLAUDE_API_KEY
   echo
@@ -77,6 +121,7 @@ else
     exit 1
   fi
   INGEST_API_KEY="$(openssl rand -hex 32)"
+  prompt_strava
 fi
 
 # -----------------------------------------------------------------------------
@@ -117,15 +162,25 @@ free -h
 # 3. Env file
 # -----------------------------------------------------------------------------
 
-step "Writing .env.local (if missing)"
+step "Writing .env.local (if missing) / appending Strava (if requested)"
 
 if [[ ! -f "$REPO_ROOT/.env.local" ]]; then
-  cat > "$REPO_ROOT/.env.local" <<EOF
-CLAUDE_API_KEY=$CLAUDE_API_KEY
-INGEST_API_KEY=$INGEST_API_KEY
-EOF
+  {
+    echo "CLAUDE_API_KEY=$CLAUDE_API_KEY"
+    echo "INGEST_API_KEY=$INGEST_API_KEY"
+    if [[ -n "$STRAVA_CLIENT_ID" ]]; then
+      echo "STRAVA_CLIENT_ID=$STRAVA_CLIENT_ID"
+      echo "STRAVA_CLIENT_SECRET=$STRAVA_CLIENT_SECRET"
+    fi
+  } > "$REPO_ROOT/.env.local"
   chmod 600 "$REPO_ROOT/.env.local"
   echo ".env.local written."
+elif [[ "$APPEND_STRAVA" == "true" ]]; then
+  {
+    echo "STRAVA_CLIENT_ID=$STRAVA_CLIENT_ID"
+    echo "STRAVA_CLIENT_SECRET=$STRAVA_CLIENT_SECRET"
+  } >> "$REPO_ROOT/.env.local"
+  echo "Appended STRAVA_* to existing .env.local."
 fi
 
 # -----------------------------------------------------------------------------
@@ -262,4 +317,9 @@ if [[ -n "$INGEST_API_KEY" ]]; then
   echo "  Bearer $INGEST_API_KEY"
   echo
   echo "Also saved to $REPO_ROOT/.env.local (chmod 600)."
+  echo
+fi
+
+if [[ -n "$STRAVA_CLIENT_ID" ]]; then
+  echo "Strava configured. Visit https://$DOMAIN/data-sources/strava to connect."
 fi

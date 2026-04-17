@@ -30,12 +30,12 @@ export default function DataSourcesPage() {
       </IntegrationSection>
 
       <IntegrationSection
-        status="coming-soon"
+        status="ready"
         title="Strava"
-        description="OAuth-based sync of runs, rides, and hikes with full activity detail (route, splits, pace)."
+        description="OAuth-based sync of runs, rides, and hikes. Dedup by Strava activity ID."
       >
         <p className="text-[0.875rem] text-text-secondary">
-          Coming in week 3. Will use Strava OAuth + webhooks for near-real-time activity sync.
+          <Link href="/data-sources/strava" className="text-foreground underline">Connect Strava →</Link>
         </p>
       </IntegrationSection>
 
