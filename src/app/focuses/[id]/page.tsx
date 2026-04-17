@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { focuses, sports, focusEntries, focusMetricLinks, metricTypes, metrics, goals } from "@/db/schema";
-import { eq, desc, and, gte, lte } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ne } from "drizzle-orm";
 import { FocusEntryForm } from "./entry-form";
 import { CloseFocusButton } from "./close-button";
 import { EditableFocusName } from "./editable-name";
@@ -50,7 +50,7 @@ export default async function FocusDetailPage({ params }: { params: Promise<{ id
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .where(eq(goals.sportId, focus.sportId));
+    .where(and(eq(goals.sportId, focus.sportId), ne(goals.status, "abandoned")));
 
   const entries = await db
     .select()

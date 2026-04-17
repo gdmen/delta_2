@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, ne } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
 
 export async function GET() {
@@ -21,6 +21,7 @@ export async function GET() {
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
+    .where(ne(goals.status, "abandoned"))
     .orderBy(desc(goals.createdAt));
 
   const enriched = await Promise.all(

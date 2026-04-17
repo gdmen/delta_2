@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { sports, metricTypes, focuses, goals } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 import type { Anthropic } from "@anthropic-ai/sdk";
 import { computeGoalProgress } from "@/lib/goal-calc";
 
@@ -107,7 +107,8 @@ export async function executeTool(name: string, input: Record<string, unknown>):
           })
           .from(goals)
           .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-          .innerJoin(sports, eq(goals.sportId, sports.id));
+          .innerJoin(sports, eq(goals.sportId, sports.id))
+          .where(ne(goals.status, "abandoned"));
 
         const enriched = await Promise.all(
           rows.map(async (g) => {

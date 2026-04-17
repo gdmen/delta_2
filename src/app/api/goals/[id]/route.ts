@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { goals } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { goals, focuses } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 
 interface UpdateGoalBody {
   targetValue?: number;
   deadline?: string; // YYYY-MM-DD
+  status?: "active" | "completed" | "abandoned";
+  // Only meaningful when status is set to "abandoned". If true, every active
+  // focus pointing at this goal is also moved to "abandoned" in the same
+  // request so callers don't have to orchestrate two PATCHes.
+  abandonLinkedFocuses?: boolean;
 }
 
 export async function PATCH(
@@ -36,13 +41,35 @@ export async function PATCH(
     }
     updates.deadline = body.deadline;
   }
+  if (body.status !== undefined) {
+    if (!["active", "completed", "abandoned"].includes(body.status)) {
+      return NextResponse.json(
+        { error: "status must be active, completed, or abandoned" },
+        { status: 400 }
+      );
+    }
+    updates.status = body.status;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
   await db.update(goals).set(updates).where(eq(goals.id, id));
-  return NextResponse.json({ ok: true });
+
+  // Cascading focus abandon happens after the goal update so a failed
+  // update above doesn't leave us with half-applied state.
+  let abandonedFocuses = 0;
+  if (body.abandonLinkedFocuses && body.status === "abandoned") {
+    const result = await db
+      .update(focuses)
+      .set({ status: "abandoned" })
+      .where(and(eq(focuses.goalId, id), eq(focuses.status, "active")))
+      .returning({ id: focuses.id });
+    abandonedFocuses = result.length;
+  }
+
+  return NextResponse.json({ ok: true, abandonedFocuses });
 }
 
 export async function DELETE(

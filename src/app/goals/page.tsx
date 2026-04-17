@@ -14,6 +14,7 @@ export default async function GoalsListPage() {
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
+      status: goals.status,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
       sportName: sports.name,
@@ -28,9 +29,13 @@ export default async function GoalsListPage() {
     rows.map(async (g) => ({ ...g, progress: await computeGoalProgress(g) }))
   );
 
-  const active = withProgress.filter((g) => g.progress.status !== "complete" && g.progress.daysRemaining > 0);
-  const completed = withProgress.filter((g) => g.progress.status === "complete");
-  const expired = withProgress.filter((g) => g.progress.status !== "complete" && g.progress.daysRemaining === 0);
+  // Abandoned is persistent (from the DB); everything else buckets on the
+  // computed progress for non-abandoned goals.
+  const abandoned = withProgress.filter((g) => g.status === "abandoned");
+  const live = withProgress.filter((g) => g.status !== "abandoned");
+  const active = live.filter((g) => g.progress.status !== "complete" && g.progress.daysRemaining > 0);
+  const completed = live.filter((g) => g.progress.status === "complete");
+  const expired = live.filter((g) => g.progress.status !== "complete" && g.progress.daysRemaining === 0);
 
   return (
     <div className="max-w-[820px]">
@@ -55,6 +60,7 @@ export default async function GoalsListPage() {
       <GoalGroup title="Active" items={active} />
       <GoalGroup title="Completed" items={completed} dim />
       <GoalGroup title="Expired" items={expired} dim />
+      <GoalGroup title="Abandoned" items={abandoned} dim />
     </div>
   );
 }

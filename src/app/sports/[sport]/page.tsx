@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { sports, events, focuses, workoutSets, goals, metricTypes } from "@/db/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, ne } from "drizzle-orm";
 import { GoalBar } from "@/components/goal-bar";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 
@@ -46,7 +46,7 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .where(eq(goals.sportId, sport.id));
+    .where(and(eq(goals.sportId, sport.id), ne(goals.status, "abandoned")));
 
   const sportGoals = await Promise.all(
     goalRows.map(async (g) => ({

@@ -91,6 +91,9 @@ export const goals = sqliteTable("goals", {
   sportId: integer("sport_id").notNull().references(() => sports.id),
   targetValue: real("target_value").notNull(),
   deadline: text("deadline").notNull(),
+  status: text("status", { enum: ["active", "completed", "abandoned"] })
+    .notNull()
+    .default("active"),
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 

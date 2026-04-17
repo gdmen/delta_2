@@ -4,7 +4,7 @@ import { FocusCard } from "@/components/focus-card";
 import { GoalBar } from "@/components/goal-bar";
 import { db } from "@/db";
 import { focuses, sports, goals, metricTypes, coachMessages } from "@/db/schema";
-import { eq, desc, and, gte } from "drizzle-orm";
+import { eq, desc, and, gte, ne } from "drizzle-orm";
 import { getLatestMetric, getAverageLast7Days, getSessionsThisWeek } from "@/lib/metrics-query";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 
@@ -51,7 +51,8 @@ export default async function Home() {
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id));
+    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .where(ne(goals.status, "abandoned"));
 
   const activeGoals = await Promise.all(
     goalRows.map(async (g) => ({

@@ -7,7 +7,7 @@ import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
 import { EditableGoalTarget } from "./editable-target";
 import { EditableGoalDeadline } from "./editable-deadline";
-import { DeleteGoalButton } from "./delete-button";
+import { AbandonGoalButton } from "./delete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
+      status: goals.status,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
       sportName: sports.name,
@@ -186,7 +187,11 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       </section>
 
       <div className="mt-8">
-        <DeleteGoalButton goalId={goal.id} />
+        <AbandonGoalButton
+          goalId={goal.id}
+          currentStatus={goal.status}
+          activeLinkedFocusCount={linkedFocuses.filter((f) => f.status === "active").length}
+        />
       </div>
     </div>
   );

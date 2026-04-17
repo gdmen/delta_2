@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { focuses, sports, goals, metricTypes, focusEntries } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, ne } from "drizzle-orm";
 import { getDailySummaries, daysAgo, today, DailySummary } from "./pre-aggregate";
 import { computeGoalProgress } from "@/lib/goal-calc";
 
@@ -99,7 +99,8 @@ export async function assembleBriefingContext(days = 7): Promise<CoachContext> {
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id));
+    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .where(ne(goals.status, "abandoned"));
 
   const activeGoals = await Promise.all(
     goalRows.map(async (g) => {
