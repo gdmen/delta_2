@@ -31,10 +31,39 @@ export function MetricTrend({
     );
   }
 
+  // Use numeric timestamps so the X axis is time-scaled, not categorical.
+  // (If we keep the date as a string, Recharts spaces each sample evenly
+  // regardless of the real time gap between them — so a sample from 2020 and
+  // one from 2024 end up side by side.)
   const data = samples.map((s) => ({
-    date: s.date.slice(5, 10), // MM-DD
+    ts: new Date(s.date).getTime(),
     value: s.value,
   }));
+
+  const minTs = data[0].ts;
+  const maxTs = data[data.length - 1].ts;
+  const spanDays = (maxTs - minTs) / (1000 * 60 * 60 * 24);
+
+  // Pick an axis label format based on the time range.
+  // - ≤ 60 days: MM-DD (e.g. "04-16") — year is redundant in short windows
+  // - ≤ 2 years: YYYY-MM — year + month matters when spanning months
+  // - > 2 years: YYYY — anything denser is noise at this scale
+  const formatTick = (ts: number): string => {
+    const iso = new Date(ts).toISOString();
+    if (spanDays <= 60) return iso.slice(5, 10);
+    if (spanDays <= 365 * 2) return iso.slice(0, 7);
+    return iso.slice(0, 4);
+  };
+
+  const formatTooltipLabel = (ts: number): string => {
+    return new Date(ts).toISOString().slice(0, 10);
+  };
+
+  // Generate clean calendar-aligned ticks (Jan 1 of each year, 1st of each
+  // month, etc.) rather than letting Recharts pick arbitrary timestamps between
+  // the data extremes. Ticks don't need to align with sample points — they're
+  // just axis labels. Empty array = fall back to auto.
+  const ticks = generateCalendarTicks(minTs, maxTs, spanDays);
 
   return (
     <div style={{ height, width: "100%" }}>
@@ -42,10 +71,16 @@ export function MetricTrend({
         <LineChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
           <CartesianGrid stroke="#f5f5f5" vertical={false} />
           <XAxis
-            dataKey="date"
+            dataKey="ts"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            scale="time"
             tick={{ fontSize: 11, fill: "#a3a3a3", fontFamily: "JetBrains Mono" }}
             axisLine={{ stroke: "#e5e5e5" }}
             tickLine={false}
+            tickFormatter={formatTick}
+            minTickGap={24}
+            {...(ticks.length > 0 ? { ticks } : {})}
           />
           <YAxis
             tick={{ fontSize: 11, fill: "#a3a3a3", fontFamily: "JetBrains Mono" }}
@@ -63,6 +98,7 @@ export function MetricTrend({
               fontFamily: "JetBrains Mono, monospace",
             }}
             formatter={(v) => [`${typeof v === "number" ? v.toFixed(1) : v} ${unit}`, ""]}
+            labelFormatter={(label) => formatTooltipLabel(Number(label))}
           />
           {target !== undefined && (
             <ReferenceLine y={target} stroke="#f97316" strokeDasharray="3 3" />
@@ -79,4 +115,73 @@ export function MetricTrend({
       </ResponsiveContainer>
     </div>
   );
+}
+
+/**
+ * Produce calendar-aligned tick positions for a time axis — Jan 1 of each year,
+ * 1st of each month, Mondays, or midnights, depending on span. Returned ticks
+ * are clamped to [minTs, maxTs]. Empty return = let Recharts auto-pick.
+ *
+ * Density targets: aim for roughly 4-10 labels visible. `minTickGap` on the
+ * XAxis still culls overlapping ones if the chart is narrow.
+ */
+function generateCalendarTicks(minTs: number, maxTs: number, spanDays: number): number[] {
+  if (spanDays <= 0 || !Number.isFinite(spanDays)) return [];
+
+  const ticks: number[] = [];
+  const push = (ts: number) => {
+    if (ts >= minTs && ts <= maxTs) ticks.push(ts);
+  };
+
+  if (spanDays > 365 * 2) {
+    // Yearly ticks (Jan 1 UTC). Subsample if range is very long.
+    const startYear = new Date(minTs).getUTCFullYear();
+    const endYear = new Date(maxTs).getUTCFullYear();
+    const totalYears = endYear - startYear;
+    const step = totalYears > 20 ? 5 : totalYears > 10 ? 2 : 1;
+    for (let y = startYear; y <= endYear + 1; y++) {
+      if ((y - startYear) % step === 0) push(Date.UTC(y, 0, 1));
+    }
+  } else if (spanDays > 60) {
+    // Monthly ticks (1st UTC). Subsample if >12 months.
+    const start = new Date(minTs);
+    const totalMonths = Math.ceil(spanDays / 30);
+    const step = totalMonths > 24 ? 3 : totalMonths > 12 ? 2 : 1;
+    let y = start.getUTCFullYear();
+    let m = start.getUTCMonth();
+    let count = 0;
+    while (Date.UTC(y, m, 1) <= maxTs) {
+      if (count % step === 0) push(Date.UTC(y, m, 1));
+      m++;
+      if (m > 11) {
+        m = 0;
+        y++;
+      }
+      count++;
+    }
+  } else if (spanDays > 14) {
+    // Weekly ticks at the Monday UTC on or after minTs.
+    const d = new Date(minTs);
+    d.setUTCHours(0, 0, 0, 0);
+    const dow = d.getUTCDay();
+    const daysToMonday = dow === 0 ? 1 : (8 - dow) % 7;
+    d.setUTCDate(d.getUTCDate() + daysToMonday);
+    while (d.getTime() <= maxTs) {
+      push(d.getTime());
+      d.setUTCDate(d.getUTCDate() + 7);
+    }
+  } else if (spanDays > 2) {
+    // Daily ticks at midnight UTC.
+    const d = new Date(minTs);
+    d.setUTCHours(0, 0, 0, 0);
+    // Start at first midnight >= minTs
+    if (d.getTime() < minTs) d.setUTCDate(d.getUTCDate() + 1);
+    while (d.getTime() <= maxTs) {
+      push(d.getTime());
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+  }
+  // <2 days: fall through to auto — Recharts handles sub-day better.
+
+  return ticks;
 }
