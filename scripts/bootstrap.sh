@@ -254,8 +254,9 @@ server {
     listen 80;
     server_name $DOMAIN;
 
-    # BodySpec PDF uploads are up to 10 MB. Default 1M would reject them.
-    client_max_body_size 12M;
+    # BodySpec PDFs are up to ~10 MB; Health Auto Export backfill POSTs can
+    # easily hit 50-100 MB on first run. 200M gives headroom for both.
+    client_max_body_size 200M;
 
     # Chat tool-use loops can take 15-30s.
     proxy_read_timeout 60s;

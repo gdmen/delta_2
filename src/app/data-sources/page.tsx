@@ -14,7 +14,7 @@ export default function DataSourcesPage() {
       <IntegrationSection
         status="ready"
         title="Apple Health"
-        description="Daily sync of sleep, heart rate, HRV, active energy, steps, body metrics, dietary protein/water, and workouts via an iOS Shortcut."
+        description="Automatic daily export of sleep, heart rate, HRV, active energy, steps, body metrics, dietary protein/water, and workouts via the Health Auto Export iOS app."
       >
         <AppleHealthSetup />
       </IntegrationSection>
@@ -130,95 +130,57 @@ function IntegrationSection({
 }
 
 function AppleHealthSetup() {
-  const endpointPath = "/api/ingest/apple-health";
-  const payloadTemplate = `{
-  "samples": [
-    {
-      "type": "sleep_analysis_total",
-      "value": 7.2,
-      "unit": "h",
-      "startDate": "2026-04-16T23:00:00Z",
-      "uuid": "<Sample UUID>"
-    }
-  ],
-  "workouts": [
-    {
-      "type": "martial_arts",
-      "startDate": "2026-04-16T18:00:00Z",
-      "endDate": "2026-04-16T19:30:00Z",
-      "durationMinutes": 90,
-      "uuid": "<Workout UUID>"
-    }
-  ]
-}`;
+  const endpoint = "https://delta.garymenezes.com/api/ingest/apple-health";
+  const metricsList =
+    "Step Count, Heart Rate, Resting Heart Rate, Heart Rate Variability, Active Energy, Weight & Body Mass, Body Fat Percentage, Lean Body Mass, VO2 Max, Protein, Dietary Water, Sleep Analysis";
 
   return (
     <div className="space-y-6">
       <p className="text-[0.8125rem] text-text-secondary">
-        Build an iOS Shortcut that queries Health data and POSTs JSON to Delta. Runs daily in the background.
-        One-time setup, ~15 minutes. You can copy-paste the template below into the Shortcut&apos;s Text action.
+        <a
+          href="https://apps.apple.com/us/app/health-auto-export-json-csv/id1115567069"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-foreground underline"
+        >
+          Health Auto Export
+        </a>{" "}
+        is an iOS app that reads Apple Health and POSTs JSON to a URL on a schedule. It handles the background
+        timer, retries, and data shaping — Delta just ingests what it sends. One-time setup, ~5 minutes.
       </p>
 
       <div className="space-y-5">
-        <StepBlock number={1} title="Create the Shortcut">
+        <StepBlock number={1} title="Install Health Auto Export">
           <p>
-            On your iPhone, open <strong>Shortcuts</strong>{" "}→ tap <strong>+</strong>{" "}→ name it &quot;Delta Daily Sync&quot;.
+            Install{" "}
+            <a
+              href="https://apps.apple.com/us/app/health-auto-export-json-csv/id1115567069"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline"
+            >
+              Health Auto Export
+            </a>{" "}
+            from the App Store on your iPhone. On first launch, grant read access to all Health categories you want
+            to sync (sleep, heart, activity, body measurements, nutrition, workouts).
           </p>
         </StepBlock>
 
-        <StepBlock number={2} title="Add Find Health Samples actions">
-          <p className="mb-2">
-            Add a <strong>Find Health Samples</strong>{" "}action for each type below. Set each to &quot;Start Date: is in the last 1 day&quot;.
-          </p>
-          <ul className="text-[0.8125rem] font-mono bg-surface rounded p-3 space-y-0.5 leading-snug">
-            <li>Sleep Analysis</li>
-            <li>Heart Rate Variability (SDNN)</li>
-            <li>Resting Heart Rate</li>
-            <li>Active Energy</li>
-            <li>Step Count</li>
-            <li>Body Mass</li>
-            <li>Body Fat Percentage</li>
-            <li>VO2 Max</li>
-            <li>Dietary Protein</li>
-            <li>Dietary Water</li>
-          </ul>
-          <p className="mt-2 text-[0.75rem] text-muted">
-            Tip: after adding, tap the <strong>Find Health Samples</strong>{" "}result to rename each as &quot;Sleep&quot;, &quot;HRV&quot;, etc. — makes the next step easier.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={3} title="Add Find Workouts (optional)">
+        <StepBlock number={2} title="Create a REST API automation">
           <p>
-            Add a <strong>Find Workouts</strong>{" "}action with Start Date in the last 1 day. Captures runs, rides, BJJ sessions, etc. logged via Apple Watch.
+            Open the app → <strong>Automations</strong>{" "}tab → <strong>+</strong>{" "}→ pick{" "}
+            <strong>REST API</strong>{" "}as the export type.
           </p>
         </StepBlock>
 
-        <StepBlock number={4} title="Add a Text action with this template">
-          <p className="mb-2">
-            Add a <strong>Text</strong>{" "}action. Tap <strong>Copy</strong>, then paste into the Text action. Replace the literal values (7.2, &quot;&lt;Sample UUID&gt;&quot;, etc.) with magic variables from your Find Health Samples results.
-          </p>
-          <div className="relative">
-            <pre className="text-[0.75rem] font-mono bg-surface rounded p-3 pr-20 overflow-x-auto">{payloadTemplate}</pre>
-            <div className="absolute top-2 right-2">
-              <CopyButton value={payloadTemplate} />
-            </div>
-          </div>
-          <p className="mt-3 text-[0.75rem] text-muted">
-            Repeat the object inside <code className="font-mono bg-surface px-1 rounded">samples[]</code>{" "}for each data type. Each needs a unique <code className="font-mono bg-surface px-1 rounded">type</code>{" "}key mapped to Delta&apos;s internal name (sleep_analysis_total, heart_rate_variability, resting_heart_rate, active_energy, step_count, body_mass, body_fat_percentage, vo2_max, dietary_protein, dietary_water).
-          </p>
-        </StepBlock>
-
-        <StepBlock number={5} title="Add Get Contents of URL">
-          <p className="mb-2">
-            Add a <strong>Get Contents of URL</strong>{" "}action. Expand it and configure:
-          </p>
+        <StepBlock number={3} title="Configure the endpoint">
           <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="text-muted text-[0.6875rem]">URL</div>
-                <div className="break-all">https://delta.garymenezes.com{endpointPath}</div>
+                <div className="break-all">{endpoint}</div>
               </div>
-              <CopyButton value={`https://delta.garymenezes.com${endpointPath}`} />
+              <CopyButton value={endpoint} />
             </div>
             <div>
               <div className="text-muted text-[0.6875rem]">Method</div>
@@ -226,43 +188,63 @@ function AppleHealthSetup() {
             </div>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <div className="text-muted text-[0.6875rem]">Headers</div>
-                <div>Authorization: Bearer &lt;INGEST_API_KEY&gt;</div>
+                <div className="text-muted text-[0.6875rem]">Headers (add one)</div>
+                <div>
+                  Key: <code>Authorization</code>
+                  <br />
+                  Value: <code>Bearer &lt;INGEST_API_KEY&gt;</code>
+                </div>
               </div>
               <CopyButton value="Authorization" />
             </div>
             <div>
-              <div className="text-muted text-[0.6875rem]">Request Body</div>
-              <div>JSON → use the magic variable from the Text action in step 4</div>
+              <div className="text-muted text-[0.6875rem]">Data format</div>
+              <div>JSON (Aggregated)</div>
             </div>
           </div>
           <p className="mt-3 text-[0.75rem] text-muted">
-            Your <code className="font-mono bg-surface px-1 rounded">INGEST_API_KEY</code>{" "}is set on the server in <code className="font-mono bg-surface px-1 rounded">.env.local</code>. Generate one with{" "}
-            <code className="font-mono bg-surface px-1 rounded">openssl rand -hex 32</code>{" "}and paste the same value into the Shortcut&apos;s header.
+            Your <code className="font-mono bg-surface px-1 rounded">INGEST_API_KEY</code>{" "}is in{" "}
+            <code className="font-mono bg-surface px-1 rounded">.env.local</code>{" "}on the server (the bootstrap
+            script prints it once). Generate a new one with{" "}
+            <code className="font-mono bg-surface px-1 rounded">openssl rand -hex 32</code>{" "}if needed.
           </p>
         </StepBlock>
 
-        <StepBlock number={6} title="Automate daily">
-          <p>
-            In the <strong>Automation</strong>{" "}tab → <strong>+</strong>{" "}→ <strong>Daily</strong>{" "}→ pick a time (6am or &quot;When I wake up&quot;) → select your &quot;Delta Daily Sync&quot; Shortcut → turn off <strong>Ask Before Running</strong>.
-          </p>
-        </StepBlock>
-
-        <StepBlock number={7} title="Test and backfill">
+        <StepBlock number={4} title="Pick the metrics to export">
           <p className="mb-2">
-            Run the Shortcut manually once. A success response means data flowed in — open the{" "}
-            <Link href="/" className="text-foreground underline">home dashboard</Link>{" "}and the key metrics strip should populate.
+            In the automation settings, enable these health metrics:
           </p>
-          <p className="text-[0.8125rem] text-muted">
-            To backfill history, duplicate the Shortcut, change &quot;last 1 day&quot; to &quot;last 365 days&quot;, run once, then delete the duplicate.
-            The <code className="font-mono bg-surface px-1 rounded text-[0.75rem]">source_id</code>{" "}dedup prevents duplicates.
+          <div className="text-[0.8125rem] font-mono bg-surface rounded p-3 leading-snug">{metricsList}</div>
+          <p className="mt-2 text-[0.75rem] text-muted">
+            Also enable <strong>Workouts</strong>{" "}so runs, rides, BJJ, and strength sessions sync as events.
           </p>
         </StepBlock>
 
-        <StepBlock number={8} title="Share your Shortcut (optional)">
+        <StepBlock number={5} title="Set the export schedule">
+          <p className="mb-2">
+            Choose <strong>Automatic Export → Daily</strong>{" "}(or hourly if you want near-realtime). The app runs in
+            the background and retries on failure.
+          </p>
           <p>
-            Once it works, you can share the Shortcut as an iCloud link from the Shortcuts app (⋯ → Share → iCloud Link).
-            Future you — or anyone else self-hosting Delta — can tap it to install and only needs to fill in their endpoint URL + API key.
+            Set <strong>Date Range</strong>{" "}to <strong>Since Last Sync</strong>{" "}so each run only ships new data
+            since the previous export. Dedup still catches accidental overlaps, but this keeps payloads small and
+            fast.
+          </p>
+        </StepBlock>
+
+        <StepBlock number={6} title="Backfill history (optional)">
+          <p>
+            Open the automation you just created and run a <strong>Manual Export</strong>{" "}covering your entire
+            history. Re-exporting the same days is always safe — dedup prevents duplicates.
+          </p>
+        </StepBlock>
+
+        <StepBlock number={7} title="Verify">
+          <p>
+            After the first export fires, open the{" "}
+            <Link href="/" className="text-foreground underline">Today dashboard</Link>{" "}— the key metrics strip
+            should populate. The app&apos;s <strong>History</strong>{" "}tab shows each POST&apos;s HTTP status;{" "}
+            <code className="font-mono bg-surface px-1 rounded">200</code>{" "}means success.
           </p>
         </StepBlock>
       </div>
