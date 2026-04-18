@@ -22,6 +22,20 @@
       "when": 1776415725460,
       "tag": "0002_amused_aaron_stack",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776465689482,
+      "tag": "0003_dusty_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1776469978091,
+      "tag": "0004_faulty_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { metrics, events, workoutSets, dailySummaries } from "@/db/schema";
+import { metrics, events, workoutSets, dailySummaries, eventMetrics } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 
 export interface IngestResult {
@@ -102,6 +102,38 @@ export async function insertWorkoutSets(eventId: number, sets: WorkoutSetInput[]
 
   await db.insert(workoutSets).values(rows);
   return rows.length;
+}
+
+/**
+ * Upsert a single per-event metric (distance, calories, avg HR, etc.) keyed
+ * by (eventId, metricTypeId). Re-importing the same event rewrites the
+ * value rather than appending a duplicate row.
+ */
+export async function upsertEventMetric(
+  eventId: number,
+  metricTypeId: number,
+  value: number
+): Promise<"accepted" | "updated"> {
+  const existing = await db
+    .select({ eventId: eventMetrics.eventId })
+    .from(eventMetrics)
+    .where(
+      and(eq(eventMetrics.eventId, eventId), eq(eventMetrics.metricTypeId, metricTypeId))
+    )
+    .limit(1);
+
+  if (existing.length > 0) {
+    await db
+      .update(eventMetrics)
+      .set({ value })
+      .where(
+        and(eq(eventMetrics.eventId, eventId), eq(eventMetrics.metricTypeId, metricTypeId))
+      );
+    return "updated";
+  }
+
+  await db.insert(eventMetrics).values({ eventId, metricTypeId, value });
+  return "accepted";
 }
 
 /**

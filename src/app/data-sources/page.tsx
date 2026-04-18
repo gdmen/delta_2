@@ -2,6 +2,9 @@ import Link from "next/link";
 import { getSourceActivity } from "@/lib/data-sources/summaries";
 import { Wordmark } from "@/components/wordmark";
 import { ImportExportBar } from "./import-export-bar";
+import { db } from "@/db";
+import { importSources } from "@/db/schema";
+import { asc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -55,12 +58,6 @@ const ROWS: Row[] = [
   },
   {
     status: "coming-soon",
-    title: "TeamBuildr",
-    sourceKey: null,
-    href: "",
-  },
-  {
-    status: "coming-soon",
     title: "Whoop / Garmin",
     sourceKey: null,
     href: "",
@@ -83,6 +80,27 @@ const GRID_COLS =
 export default async function DataSourcesPage() {
   const activity = await getSourceActivity();
 
+  // Dynamically fold user-defined import sources into the table. Inserted
+  // between the built-in "ready" integrations and the manual-only rows so
+  // they sit alongside the real data pipelines.
+  const customSources = await db
+    .select()
+    .from(importSources)
+    .orderBy(asc(importSources.name));
+
+  const customRows: Row[] = customSources.map((s) => ({
+    status: "ready",
+    title: s.name,
+    sourceKey: s.name.toLowerCase().replace(/\s+/g, "_"),
+    href: `/data-sources/import/${s.id}`,
+  }));
+
+  const rows: Row[] = [
+    ...ROWS.slice(0, 3),        // Apple Health, Strava, BodySpec
+    ...customRows,              // user-defined
+    ...ROWS.slice(3),           // manual-only + coming-soon
+  ];
+
   return (
     <div className="max-w-[820px]">
       <h1 className="text-2xl font-semibold mb-2">Data Sources</h1>
@@ -104,7 +122,7 @@ export default async function DataSourcesPage() {
 
         {/* Data rows - ready + manual-only rows are clickable; coming-soon ones
             are static so they don't imply clickability. */}
-        {ROWS.map((row) => {
+        {rows.map((row) => {
           const act = row.sourceKey ? activity[row.sourceKey] : null;
           const totalRows = act ? act.metricRowCount + act.eventRowCount : 0;
           const rowsCell = row.sourceKey ? totalRows.toLocaleString() : "-";
@@ -159,6 +177,15 @@ export default async function DataSourcesPage() {
             </Link>
           );
         })}
+      </div>
+
+      <div className="mt-4">
+        <Link
+          href="/data-sources/import/new"
+          className="text-[0.8125rem] text-foreground underline"
+        >
+          + New custom CSV source
+        </Link>
       </div>
 
       <div className="mt-10">

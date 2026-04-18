@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Wordmark } from "@/components/wordmark";
+import { FileDropZone } from "@/components/file-drop-zone";
 
 interface Extracted {
   scan_date: string | null;
@@ -48,11 +49,9 @@ function makeId() {
 }
 
 export default function BodySpecUploadPage() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [pickerError, setPickerError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   // Revoke blob URLs on unmount.
   useEffect(() => {
@@ -218,7 +217,6 @@ export default function BodySpecUploadPage() {
     setQueue([]);
     setActiveIndex(0);
     setPickerError(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   // -- Render branches -------------------------------------------------------
@@ -228,10 +226,15 @@ export default function BodySpecUploadPage() {
     return (
       <div className="max-w-[820px]">
         <PageHeader />
-        <Uploader
-          fileInputRef={fileInputRef}
-          dragging={dragging}
-          setDragging={setDragging}
+        <FileDropZone
+          accept="application/pdf"
+          multiple
+          primaryLabel={
+            <>
+              Click to choose PDFs <span className="text-muted font-normal">or drag them here</span>
+            </>
+          }
+          hint={`Up to ${MAX_FILES} BodySpec DEXA scans · each up to 10 MB`}
           onFiles={handleFiles}
           error={pickerError}
         />
@@ -440,71 +443,6 @@ function PageHeader() {
   );
 }
 
-function Uploader({
-  fileInputRef,
-  dragging,
-  setDragging,
-  onFiles,
-  error,
-}: {
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
-  dragging: boolean;
-  setDragging: (v: boolean) => void;
-  onFiles: (files: FileList | File[]) => void;
-  error: string | null;
-}) {
-  return (
-    <div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="application/pdf"
-        multiple
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) onFiles(e.target.files);
-        }}
-        className="sr-only"
-      />
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) onFiles(e.dataTransfer.files);
-        }}
-        className={`block w-full py-10 px-6 border-2 border-dashed rounded-lg transition-colors ${
-          dragging
-            ? "border-foreground bg-surface"
-            : "border-border hover:border-foreground hover:bg-surface/40"
-        }`}
-      >
-        <div className="flex flex-col items-center gap-2 pointer-events-none">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted">
-            <path d="M12 3v13M12 3l-5 5M12 3l5 5M4 17v3h16v-3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <div className="text-[0.9375rem] font-medium">
-            Click to choose PDFs <span className="text-muted font-normal">or drag them here</span>
-          </div>
-          <div className="text-[0.75rem] text-muted font-mono">
-            Up to {MAX_FILES} BodySpec DEXA scans · each up to 10 MB
-          </div>
-        </div>
-      </button>
-
-      {error && (
-        <p className="mt-3 text-[0.8125rem] text-accent-red bg-accent-red/10 border border-accent-red/20 rounded p-3">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
 
 function StatusDot({ status }: { status: ItemStatus }) {
   const color = {

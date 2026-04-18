@@ -45,6 +45,22 @@ export const events = sqliteTable("events", {
   uniqueIndex("idx_events_source_id").on(table.sourceId),
 ]);
 
+/**
+ * Per-event numeric dimensions: distance, calories, avg HR, elevation, etc.
+ * Lets cardio + workout sessions carry arbitrary quantified data without
+ * ballooning the events schema.  Keyed by (event_id, metric_type_id) so
+ * imports can upsert idempotently.
+ */
+export const eventMetrics = sqliteTable("event_metrics", {
+  eventId: integer("event_id")
+    .notNull()
+    .references(() => events.id, { onDelete: "cascade" }),
+  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
+  value: real("value").notNull(),
+}, (table) => [
+  uniqueIndex("idx_event_metrics_event_type").on(table.eventId, table.metricTypeId),
+]);
+
 export const workoutSets = sqliteTable("workout_sets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   eventId: integer("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
@@ -112,6 +128,17 @@ export const ingestConfigs = sqliteTable("ingest_configs", {
   apiKeyEncrypted: text("api_key_encrypted"),
   lastSyncAt: text("last_sync_at"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+});
+
+export const importSources = sqliteTable("import_sources", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // Display name, also used as the `source` value written to metrics/events.
+  name: text("name").notNull().unique(),
+  kind: text("kind", { enum: ["metrics", "events", "workout_sets"] }).notNull(),
+  // JSON-encoded ImportMapping (see src/lib/import-mapping.ts). Opaque to
+  // the DB layer; parsed by the import runner.
+  mapping: text("mapping").notNull(),
+  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 
 export const dailySummaries = sqliteTable("daily_summaries", {
