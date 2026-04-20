@@ -4,7 +4,9 @@ import { db } from "@/db";
 import { sports, events, focuses, workoutSets, goals, metricTypes } from "@/db/schema";
 import { eq, desc, and, ne } from "drizzle-orm";
 import { GoalBar } from "@/components/goal-bar";
+import { BigThree } from "@/components/big-three";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
+import { getBigThreeStats } from "@/lib/strength-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +59,7 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
     }))
   );
 
-  // For powerlifting: grab PR-relevant workout sets.
+  // For powerlifting: grab PR-relevant workout sets and Big-3 stats.
   const recentSets = sport.name === "powerlifting"
     ? await db
         .select()
@@ -65,6 +67,7 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
         .orderBy(desc(workoutSets.id))
         .limit(30)
     : [];
+  const bigThree = sport.name === "powerlifting" ? await getBigThreeStats() : null;
 
   const totalMinutes = recentEvents.reduce((sum, e) => sum + (e.durationMinutes ?? 0), 0);
   const sessionsThisMonth = recentEvents.filter((e) => {
@@ -93,6 +96,15 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
         <StatCell label="Sessions (30d)" value={String(sessionsThisMonth)} />
         <StatCell label="Total Time (30d)" value={`${Math.round(totalMinutes / 60)}h`} />
       </div>
+
+      {/* Big-3 (powerlifting only). Above goals because it's the sport's
+          primary scoreboard - current/trend/PR summarizes "where am I"
+          faster than any goal progress bar can. */}
+      {bigThree && (
+        <div className="mb-8">
+          <BigThree stats={bigThree} sportColor={sport.color} />
+        </div>
+      )}
 
       {/* Goals for this sport */}
       <section className="mb-8">
