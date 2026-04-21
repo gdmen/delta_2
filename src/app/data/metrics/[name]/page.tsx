@@ -2,19 +2,29 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { metrics, metricTypes, metricTypeAliases } from "@/db/schema";
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 100;
+
+interface SearchParams {
+  page?: string;
+}
+
 export default async function MetricHistoryPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ name: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
   const { name } = await params;
+  const sp = await searchParams;
   const decoded = decodeURIComponent(name);
+  const requestedPage = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   const typeRows = await db
     .select()
@@ -23,6 +33,14 @@ export default async function MetricHistoryPage({
     .limit(1);
   if (typeRows.length === 0) notFound();
   const type = typeRows[0];
+
+  const totalRow = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(metrics)
+    .where(eq(metrics.metricTypeId, type.id));
+  const total = Number(totalRow[0]?.c ?? 0);
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, pageCount);
 
   const rows = await db
     .select({
@@ -35,13 +53,19 @@ export default async function MetricHistoryPage({
     .from(metrics)
     .where(eq(metrics.metricTypeId, type.id))
     .orderBy(desc(metrics.recordedAt))
-    .limit(1000);
+    .limit(PAGE_SIZE)
+    .offset((currentPage - 1) * PAGE_SIZE);
 
   const aliases = await db
     .select({ alias: metricTypeAliases.alias })
     .from(metricTypeAliases)
     .where(eq(metricTypeAliases.canonicalMetricTypeId, type.id))
     .orderBy(asc(metricTypeAliases.alias));
+
+  const linkWithPage = (p: number) => {
+    const base = `/data/metrics/${encodeURIComponent(decoded)}`;
+    return p === 1 ? base : `${base}?page=${p}`;
+  };
 
   return (
     <div className="max-w-[940px]">
@@ -51,7 +75,8 @@ export default async function MetricHistoryPage({
       <div className="flex items-baseline justify-between mt-3 mb-2 gap-3">
         <h1 className="text-2xl font-semibold font-mono">{type.name}</h1>
         <span className="font-mono text-[0.6875rem] text-muted">
-          {rows.length.toLocaleString()} row{rows.length === 1 ? "" : "s"}
+          {total.toLocaleString()} total
+          {pageCount > 1 && ` · page ${currentPage} of ${pageCount}`}
           {type.unit && ` · unit: ${type.unit}`}
         </span>
       </div>
@@ -64,6 +89,30 @@ export default async function MetricHistoryPage({
         initialAliases={aliases.map((a) => a.alias)}
       />
       <MetricHistoryEditor metricTypeId={type.id} unit={type.unit} initialRows={rows} />
+
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between mt-4 text-[0.8125rem]">
+          <div className="flex gap-2">
+            {currentPage > 1 ? (
+              <Link href={linkWithPage(currentPage - 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
+                ← Prev
+              </Link>
+            ) : (
+              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">← Prev</span>
+            )}
+            {currentPage < pageCount ? (
+              <Link href={linkWithPage(currentPage + 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
+                Next →
+              </Link>
+            ) : (
+              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">Next →</span>
+            )}
+          </div>
+          <span className="font-mono text-[0.6875rem] text-muted">
+            Page {currentPage} / {pageCount}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
