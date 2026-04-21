@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Delta deploy — pull latest, migrate, seed, build, restart.
+# Delta deploy — pull latest, stop service, migrate, seed, build, start.
 #
 # Usage:
 #   ./scripts/deploy.sh
@@ -29,17 +29,33 @@ git reset --hard origin/main
 step "Installing dependencies"
 npm ci
 
+# Stop the app before touching SQLite. The running better-sqlite3 connection
+# holds a WAL write lock which makes drizzle-kit migrate hang silently —
+# observed in prod (2026-04-21) where a pending migration sat unapplied
+# across multiple deploys because of this. Restarting at the end brings
+# it back up regardless of whether it was running before.
+step "Stopping delta2 (releases SQLite write lock)"
+sudo systemctl stop delta2 || true
+
+# If any DB step fails or hangs below, still bring the service back up.
+trap 'echo; echo "!!! deploy aborted — starting delta2 anyway"; sudo systemctl start delta2 || true' ERR
+
 step "Running migrations"
-npx drizzle-kit migrate
+# Timeout guards against the same silent hang reappearing under some other
+# lock holder. 60s is generous for the tiny SQL-only migrations this project
+# writes; bump it if schema diffs grow.
+timeout 60 npx drizzle-kit migrate
 
 step "Running seed (idempotent)"
-npx tsx src/db/seed.ts
+timeout 60 npx tsx src/db/seed.ts
 
 step "Building Next.js"
 npm run build
 
-step "Restarting delta2 service"
-sudo systemctl restart delta2
+trap - ERR
+
+step "Starting delta2"
+sudo systemctl start delta2
 
 sleep 2
 if systemctl is-active --quiet delta2; then
