@@ -66,8 +66,8 @@ export function MetricTrend({
   const ticks = generateCalendarTicks(minTs, maxTs, spanDays);
 
   return (
-    <div style={{ height, width: "100%" }}>
-      <ResponsiveContainer>
+    <div style={{ width: "100%" }}>
+      <ResponsiveContainer height={height}>
         <LineChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
           <CartesianGrid stroke="#f5f5f5" vertical={false} />
           <XAxis
