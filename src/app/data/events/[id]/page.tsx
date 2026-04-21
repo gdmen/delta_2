@@ -1,0 +1,89 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { db } from "@/db";
+import { events, sports, workoutSets, eventMetrics, metricTypes } from "@/db/schema";
+import { asc, eq } from "drizzle-orm";
+import { EventEditor } from "./editor";
+
+export const dynamic = "force-dynamic";
+
+export default async function EventDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: idStr } = await params;
+  const id = parseInt(idStr, 10);
+  if (isNaN(id)) notFound();
+
+  const rows = await db
+    .select({
+      id: events.id,
+      sportId: events.sportId,
+      sportName: sports.name,
+      type: events.type,
+      durationMinutes: events.durationMinutes,
+      notes: events.notes,
+      startedAt: events.startedAt,
+      source: events.source,
+      sourceId: events.sourceId,
+    })
+    .from(events)
+    .innerJoin(sports, eq(events.sportId, sports.id))
+    .where(eq(events.id, id))
+    .limit(1);
+  if (rows.length === 0) notFound();
+  const event = rows[0];
+
+  const sportsList = await db.select({ id: sports.id, name: sports.name }).from(sports).orderBy(asc(sports.name));
+
+  const sets = await db
+    .select()
+    .from(workoutSets)
+    .where(eq(workoutSets.eventId, id))
+    .orderBy(asc(workoutSets.setNumber));
+
+  const emRows = await db
+    .select({
+      metricTypeId: eventMetrics.metricTypeId,
+      value: eventMetrics.value,
+      name: metricTypes.name,
+      unit: metricTypes.unit,
+    })
+    .from(eventMetrics)
+    .innerJoin(metricTypes, eq(eventMetrics.metricTypeId, metricTypes.id))
+    .where(eq(eventMetrics.eventId, id))
+    .orderBy(asc(metricTypes.name));
+
+  const metricTypesList = await db
+    .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
+    .from(metricTypes)
+    .orderBy(asc(metricTypes.name));
+
+  return (
+    <div className="max-w-[940px]">
+      <Link href="/data" className="text-[0.8125rem] text-muted hover:text-foreground">
+        ← Data
+      </Link>
+      <h1 className="text-2xl font-semibold mt-3 mb-2">
+        Event #{event.id}{" "}
+        <span className="text-muted text-[0.875rem] font-mono">
+          {event.sportName} · {event.type}
+        </span>
+      </h1>
+      <p className="text-[0.875rem] text-text-secondary mb-6">
+        {event.source === "manual"
+          ? "Manual entry."
+          : `Imported from ${event.source}. Edits may be overwritten on next sync.`}
+      </p>
+
+      <EventEditor
+        event={event}
+        sports={sportsList}
+        initialSets={sets}
+        initialEventMetrics={emRows}
+        metricTypes={metricTypesList}
+      />
+    </div>
+  );
+}
