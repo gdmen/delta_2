@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { zipSync, strToU8 } from "fflate";
 import { db } from "@/db";
-import { metrics, events, workoutSets, metricTypes, sports } from "@/db/schema";
+import { metrics, events, eventMetrics, workoutSets, metricTypes, sports } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { serializeCsv } from "@/lib/csv";
 
@@ -9,17 +9,19 @@ import { serializeCsv } from "@/lib/csv";
  * GET /api/export
  *
  * Returns a ZIP of all measured/quantified data:
- *   - metrics.csv       - timestamped numeric streams
- *   - events.csv        - sessions (runs, rides, strength days, BJJ, etc.)
- *   - workout_sets.csv  - per-set lifting details, child rows of strength events
+ *   - metrics.csv        - timestamped numeric streams
+ *   - events.csv         - sessions (runs, rides, strength days, BJJ, etc.)
+ *   - event_metrics.csv  - per-event numeric dimensions (distance, elevation,
+ *                          calories, avg HR, ...), child rows of events
+ *   - workout_sets.csv   - per-set lifting details, child rows of strength events
  *
  * Everything uses human-readable names (metric, sport, exercise_name) instead
  * of DB IDs so the CSVs are self-describing and round-trip through the
  * matching import endpoint (or any other SQL/spreadsheet tool).
  *
- * workout_sets references its parent event by (event_started_at, sport,
- * event_type, event_source_id); the importer uses event_source_id when
- * present, else the started_at+sport+type tuple.
+ * event_metrics + workout_sets both reference their parent event by
+ * (event_started_at, sport, event_type, event_source_id); the importer uses
+ * event_source_id when present, else the started_at+sport+type tuple.
  */
 export async function GET() {
   // --- metrics.csv ---------------------------------------------------------
@@ -80,6 +82,47 @@ export async function GET() {
     ]),
   );
 
+  // --- event_metrics.csv ---------------------------------------------------
+  // Per-event numeric dimensions attached to events. Join all the way out
+  // so each row carries the parent event's natural key AND the canonical
+  // metric name, matching what the importer expects.
+  const emRows = await db
+    .select({
+      eventStartedAt: events.startedAt,
+      sport: sports.name,
+      eventType: events.type,
+      eventSourceId: events.sourceId,
+      metric: metricTypes.name,
+      unit: metricTypes.unit,
+      value: eventMetrics.value,
+    })
+    .from(eventMetrics)
+    .innerJoin(events, eq(eventMetrics.eventId, events.id))
+    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(metricTypes, eq(eventMetrics.metricTypeId, metricTypes.id))
+    .orderBy(asc(events.startedAt), asc(metricTypes.name));
+
+  const eventMetricsCsv = serializeCsv(
+    [
+      "event_started_at",
+      "sport",
+      "event_type",
+      "event_source_id",
+      "metric",
+      "unit",
+      "value",
+    ],
+    emRows.map((r) => [
+      r.eventStartedAt,
+      r.sport,
+      r.eventType,
+      r.eventSourceId ?? "",
+      r.metric,
+      r.unit,
+      r.value,
+    ]),
+  );
+
   // --- workout_sets.csv ----------------------------------------------------
   // Join to events + sports so each set carries its parent's natural key.
   const setRows = await db
@@ -131,6 +174,7 @@ export async function GET() {
   const zipped = zipSync({
     "metrics.csv": strToU8(metricsCsv),
     "events.csv": strToU8(eventsCsv),
+    "event_metrics.csv": strToU8(eventMetricsCsv),
     "workout_sets.csv": strToU8(workoutSetsCsv),
   });
 

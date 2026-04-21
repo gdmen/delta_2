@@ -9,7 +9,8 @@ interface TableResult {
   errors: string[];
 }
 
-type ImportResponse = Partial<Record<"metrics" | "events" | "workout_sets", TableResult>> & {
+type TableName = "metrics" | "events" | "event_metrics" | "workout_sets";
+type ImportResponse = Partial<Record<TableName, TableResult>> & {
   error?: string;
 };
 
@@ -67,7 +68,8 @@ export function ImportExportBar() {
 
       <p className="text-[0.75rem] text-muted">
         Export bundles <code className="font-mono">metrics.csv</code>,{" "}
-        <code className="font-mono">events.csv</code>, and{" "}
+        <code className="font-mono">events.csv</code>,{" "}
+        <code className="font-mono">event_metrics.csv</code>, and{" "}
         <code className="font-mono">workout_sets.csv</code>. Import accepts the same shapes in a
         ZIP or any individual CSV. Re-importing the same file is a no-op.
       </p>
@@ -84,9 +86,10 @@ function ImportResult({ result }: { result: ImportResponse }) {
     );
   }
 
-  const tables: Array<["metrics" | "events" | "workout_sets", TableResult | undefined]> = [
+  const tables: Array<[TableName, TableResult | undefined]> = [
     ["metrics", result.metrics],
     ["events", result.events],
+    ["event_metrics", result.event_metrics],
     ["workout_sets", result.workout_sets],
   ];
 

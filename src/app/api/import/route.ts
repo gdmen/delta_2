@@ -11,6 +11,7 @@ import {
 import {
   upsertMetric,
   upsertEvent,
+  upsertEventMetric,
   upsertWorkoutSet,
   type MetricInput,
   type EventInput,
@@ -21,8 +22,9 @@ import {
  * POST /api/import
  *
  * Accepts either a ZIP (with any of metrics.csv / events.csv /
- * workout_sets.csv at its root) or a single CSV (filename determines
- * which table it targets) via multipart form field "file".
+ * event_metrics.csv / workout_sets.csv at its root) or a single CSV
+ * (filename determines which table it targets) via multipart form field
+ * "file".
  *
  * Idempotent:
  *   - metrics rows dedupe on (source, source_id). When source_id is
@@ -30,6 +32,7 @@ import {
  *     so re-importing the same file is a no-op.
  *   - events rows dedupe the same way with synthetic
  *     `csv_import-<sport>-<type>-<started_at>` when no source_id.
+ *   - event_metrics rows upsert on (event_id, metric_type_id).
  *   - workout_sets rows upsert on (event_id, exercise_name, set_number).
  *
  * Unknown metric names auto-register via the metric-resolver
@@ -82,7 +85,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const recognized = ["metrics.csv", "events.csv", "workout_sets.csv"];
+  const recognized = ["metrics.csv", "events.csv", "event_metrics.csv", "workout_sets.csv"];
   const matched = recognized.filter((n) => n in csvs);
   if (matched.length === 0) {
     return NextResponse.json(
@@ -103,6 +106,14 @@ export async function POST(request: NextRequest) {
   // --- events.csv ----------------------------------------------------------
   if (csvs["events.csv"]) {
     out.events = await importEvents(csvs["events.csv"]);
+  }
+
+  // --- event_metrics.csv ---------------------------------------------------
+  // Runs after events.csv so parent events exist. Same parent-resolution
+  // strategy as workout_sets: event_source_id first, then (started_at,
+  // sport, type) natural key, else auto-create a barebones parent event.
+  if (csvs["event_metrics.csv"]) {
+    out.event_metrics = await importEventMetrics(csvs["event_metrics.csv"]);
   }
 
   // --- workout_sets.csv ----------------------------------------------------
@@ -263,6 +274,118 @@ async function importEvents(text: string): Promise<TableResult> {
       else result.skipped++;
     } catch (err) {
       result.errors.push(`events.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return result;
+}
+
+// -----------------------------------------------------------------------------
+// event_metrics.csv
+// -----------------------------------------------------------------------------
+
+async function importEventMetrics(text: string): Promise<TableResult> {
+  const result = emptyResult();
+  const { headers, rows } = parseCsv(text);
+  let idx: Map<string, number>;
+  try {
+    idx = headerIndex(headers, [
+      "event_started_at",
+      "sport",
+      "event_type",
+      "metric",
+      "value",
+    ]);
+  } catch (err) {
+    result.errors.push(`event_metrics.csv: ${err instanceof Error ? err.message : String(err)}`);
+    return result;
+  }
+
+  const sportCache = await loadSportCache();
+  const typeCache = await buildMetricTypeCache();
+
+  for (const [i, row] of rows.entries()) {
+    try {
+      const startedAt = row[idx.get("event_started_at")!];
+      const sportName = row[idx.get("sport")!];
+      const eventType = row[idx.get("event_type")!];
+      const eventSourceId = idx.has("event_source_id") ? row[idx.get("event_source_id")!] : "";
+      const metricName = row[idx.get("metric")!];
+      const unit = idx.has("unit") ? row[idx.get("unit")!] : "";
+      const valueStr = row[idx.get("value")!];
+
+      if (!startedAt || !sportName || !eventType || !metricName || valueStr === "") {
+        result.errors.push(`event_metrics.csv row ${i + 2}: missing required field`);
+        continue;
+      }
+      const value = Number(valueStr);
+      if (!Number.isFinite(value)) {
+        result.errors.push(`event_metrics.csv row ${i + 2}: non-numeric value "${valueStr}"`);
+        continue;
+      }
+      const sportId = sportCache.get(sportName);
+      if (!sportId) {
+        result.errors.push(`event_metrics.csv row ${i + 2}: unknown sport "${sportName}"`);
+        continue;
+      }
+
+      // Parent event resolution: source_id first, else natural key.
+      let parentId: number | null = null;
+      if (eventSourceId) {
+        const existing = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(eq(events.sourceId, eventSourceId))
+          .limit(1);
+        parentId = existing[0]?.id ?? null;
+      }
+      if (parentId === null) {
+        const existing = await db
+          .select({ id: events.id })
+          .from(events)
+          .where(
+            and(
+              eq(events.startedAt, startedAt),
+              eq(events.sportId, sportId),
+              eq(events.type, eventType)
+            )
+          )
+          .limit(1);
+        parentId = existing[0]?.id ?? null;
+      }
+
+      // No parent: auto-create a barebones event so the metric has somewhere
+      // to hang. Mirrors the workout_sets.csv behaviour.
+      if (parentId === null) {
+        const synthId = eventSourceId || `csv_import-${sportName}-${eventType}-${startedAt}`;
+        const { eventId } = await upsertEvent({
+          sportId,
+          type: eventType,
+          durationMinutes: null,
+          notes: null,
+          startedAt,
+          source: "csv_import",
+          sourceId: synthId,
+        });
+        parentId = eventId;
+      }
+
+      const metricTypeId = await resolveMetricTypeId({
+        rawName: metricName,
+        // Identity map: exporter emitted canonical names.
+        map: { [metricName]: metricName },
+        sourceSystem: "csv_import",
+        unit: unit || undefined,
+        cache: typeCache,
+      });
+
+      const status = await upsertEventMetric(parentId, metricTypeId, value);
+      if (status === "accepted") result.accepted++;
+      else result.updated++;
+    } catch (err) {
+      result.errors.push(
+        `event_metrics.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
