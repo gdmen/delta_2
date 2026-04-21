@@ -4,6 +4,7 @@ import { events, sports } from "@/db/schema";
 import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { DataTabs } from "../tabs";
 import { ImportExportBar } from "../import-export-bar";
+import { PaginationControls } from "@/components/pagination-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -160,6 +161,13 @@ export default async function AllEventsPage({
         )}
       </form>
 
+      <PaginationControls
+        currentPage={currentPage}
+        pageCount={pageCount}
+        linkWithPage={linkWithPage}
+        className="mb-4"
+      />
+
       <div className="border border-border rounded overflow-hidden">
         <table className="w-full text-[0.8125rem]">
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
@@ -202,30 +210,12 @@ export default async function AllEventsPage({
         </table>
       </div>
 
-      {/* Pagination */}
-      {pageCount > 1 && (
-        <div className="flex items-center justify-between mt-4 text-[0.8125rem]">
-          <div className="flex gap-2">
-            {currentPage > 1 ? (
-              <Link href={linkWithPage(currentPage - 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
-                ← Prev
-              </Link>
-            ) : (
-              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">← Prev</span>
-            )}
-            {currentPage < pageCount ? (
-              <Link href={linkWithPage(currentPage + 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
-                Next →
-              </Link>
-            ) : (
-              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">Next →</span>
-            )}
-          </div>
-          <span className="font-mono text-[0.6875rem] text-muted">
-            Page {currentPage} / {pageCount}
-          </span>
-        </div>
-      )}
+      <PaginationControls
+        currentPage={currentPage}
+        pageCount={pageCount}
+        linkWithPage={linkWithPage}
+        className="mt-4"
+      />
     </div>
   );
 }

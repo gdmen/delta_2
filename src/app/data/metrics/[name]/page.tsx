@@ -5,6 +5,7 @@ import { metrics, metricTypes, metricTypeAliases } from "@/db/schema";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
+import { PaginationControls } from "@/components/pagination-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -88,31 +89,19 @@ export default async function MetricHistoryPage({
         metricTypeId={type.id}
         initialAliases={aliases.map((a) => a.alias)}
       />
+      <PaginationControls
+        currentPage={currentPage}
+        pageCount={pageCount}
+        linkWithPage={linkWithPage}
+        className="mb-4"
+      />
       <MetricHistoryEditor metricTypeId={type.id} unit={type.unit} initialRows={rows} />
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-between mt-4 text-[0.8125rem]">
-          <div className="flex gap-2">
-            {currentPage > 1 ? (
-              <Link href={linkWithPage(currentPage - 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
-                ← Prev
-              </Link>
-            ) : (
-              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">← Prev</span>
-            )}
-            {currentPage < pageCount ? (
-              <Link href={linkWithPage(currentPage + 1)} className="px-3 py-1.5 border border-border rounded hover:bg-surface">
-                Next →
-              </Link>
-            ) : (
-              <span className="px-3 py-1.5 border border-border rounded text-muted opacity-50">Next →</span>
-            )}
-          </div>
-          <span className="font-mono text-[0.6875rem] text-muted">
-            Page {currentPage} / {pageCount}
-          </span>
-        </div>
-      )}
+      <PaginationControls
+        currentPage={currentPage}
+        pageCount={pageCount}
+        linkWithPage={linkWithPage}
+        className="mt-4"
+      />
     </div>
   );
 }
