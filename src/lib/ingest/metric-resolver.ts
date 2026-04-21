@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { metricTypes } from "@/db/schema";
+import { metricTypes, metricTypeAliases } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 /**
@@ -7,22 +7,37 @@ import { eq } from "drizzle-orm";
  * a row for unmapped names so nothing gets silently dropped.
  *
  * Pattern for adding a new import source:
- *   1. Define a name map for that source (e.g. APPLE_HEALTH_METRIC_MAP).
+ *   1. (Optional) define a name map for that source — for one-shot defaults
+ *      at ingest time; the DB alias table supersedes it once users merge.
  *   2. Call resolveMetricTypeId(rawName, map, sourceSystem, unit?, cache).
- *   3. Known names land in their canonical metric_type.
- *      Unknown names get stored under `<source>:<rawName>` so you can see
- *      them in the DB, decide what to do, and fold them into the map later
- *      (historical rows can then be re-linked).
+ *   3. Known names land in their canonical metric_type via the map or the
+ *      alias table. Unknown names get stored under `<source>:<rawName>` so
+ *      you can see them, then merge them from the UI to create an alias —
+ *      future ingests route directly to canonical.
  *
- * The cache is per-request: a Map<metricTypeName, id> populated by a single
- * `db.select().from(metricTypes)` up-front, passed in by the caller.
+ * The cache is per-request. A single pass populates both the canonical
+ * name → id map and the alias → id map; callers pass it in.
  */
 
-export type MetricTypeCache = Map<string, number>;
+export interface MetricTypeCache {
+  byName: Map<string, number>;
+  aliasToId: Map<string, number>;
+}
 
 export async function buildMetricTypeCache(): Promise<MetricTypeCache> {
-  const rows = await db.select({ id: metricTypes.id, name: metricTypes.name }).from(metricTypes);
-  return new Map(rows.map((r) => [r.name, r.id]));
+  const [typeRows, aliasRows] = await Promise.all([
+    db.select({ id: metricTypes.id, name: metricTypes.name }).from(metricTypes),
+    db
+      .select({
+        alias: metricTypeAliases.alias,
+        id: metricTypeAliases.canonicalMetricTypeId,
+      })
+      .from(metricTypeAliases),
+  ]);
+  return {
+    byName: new Map(typeRows.map((r) => [r.name, r.id])),
+    aliasToId: new Map(aliasRows.map((r) => [r.alias, r.id])),
+  };
 }
 
 export interface ResolveArgs {
@@ -40,19 +55,31 @@ export async function resolveMetricTypeId({
   unit,
   cache,
 }: ResolveArgs): Promise<number> {
+  // 1. Hardcoded source map — if it points to a canonical that exists,
+  //    it wins (preserves today's CSV "identity map" behaviour where a
+  //    raw name that matches a canonical routes straight to canonical).
   const canonical = map[rawName];
   if (canonical) {
-    const id = cache.get(canonical);
+    const id = cache.byName.get(canonical);
     if (id !== undefined) return id;
-    // Canonical name is in the map but not seeded — fall through to auto-create
-    // under the canonical name so at least nothing drops.
-    return autoCreate(canonical, unit, cache);
+    // Map hit but canonical missing — fall through to alias/autocreate.
   }
 
-  // Unmapped: store under `<source>:<rawName>` so unknowns are visible and
-  // don't collide with any canonical name.
-  const fallbackName = `${sourceSystem}:${rawName}`;
-  return autoCreate(fallbackName, unit, cache);
+  // 2. Alias table — checks the raw name AND the source-prefixed orphan
+  //    form so past merges cover future ingests regardless of which path
+  //    they took before the merge. User-driven merges populate this table.
+  const aliasHit =
+    cache.aliasToId.get(rawName) ??
+    cache.aliasToId.get(`${sourceSystem}:${rawName}`);
+  if (aliasHit !== undefined) return aliasHit;
+
+  // 3. Map pointed to a canonical that isn't seeded yet — create under
+  //    the canonical name so nothing drops. (Rare post-0006.)
+  if (canonical) return autoCreate(canonical, unit, cache);
+
+  // 4. Unknown — auto-create `<source>:<rawName>` so it's visible and
+  //    can't collide with any canonical name. User can merge it later.
+  return autoCreate(`${sourceSystem}:${rawName}`, unit, cache);
 }
 
 async function autoCreate(
@@ -60,7 +87,7 @@ async function autoCreate(
   unit: string | undefined,
   cache: MetricTypeCache
 ): Promise<number> {
-  const cached = cache.get(name);
+  const cached = cache.byName.get(name);
   if (cached !== undefined) return cached;
 
   const inserted = await db
@@ -83,6 +110,6 @@ async function autoCreate(
   if (id === undefined) {
     throw new Error(`Failed to resolve or create metric_type "${name}"`);
   }
-  cache.set(name, id);
+  cache.byName.set(name, id);
   return id;
 }

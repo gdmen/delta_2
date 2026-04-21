@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { metrics, metricTypes } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { metrics, metricTypes, metricTypeAliases } from "@/db/schema";
+import { asc, desc, eq } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
+import { AliasesSection } from "./aliases-section";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,12 @@ export default async function MetricHistoryPage({
     .orderBy(desc(metrics.recordedAt))
     .limit(1000);
 
+  const aliases = await db
+    .select({ alias: metricTypeAliases.alias })
+    .from(metricTypeAliases)
+    .where(eq(metricTypeAliases.canonicalMetricTypeId, type.id))
+    .orderBy(asc(metricTypeAliases.alias));
+
   return (
     <div className="max-w-[940px]">
       <Link href="/data" className="text-[0.8125rem] text-muted hover:text-foreground">
@@ -52,6 +59,10 @@ export default async function MetricHistoryPage({
         All measurements for this metric, across every source. Edits to
         source-imported rows may be overwritten on the next sync.
       </p>
+      <AliasesSection
+        metricTypeId={type.id}
+        initialAliases={aliases.map((a) => a.alias)}
+      />
       <MetricHistoryEditor metricTypeId={type.id} unit={type.unit} initialRows={rows} />
     </div>
   );

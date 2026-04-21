@@ -1,6 +1,10 @@
 import { db } from "./index";
 import { sports, metricTypes } from "./schema";
 
+// NOTE: Delta's canonical metric_types are also seeded by migration
+// 0006_redundant_bullseye.sql so every DB has them regardless of whether
+// this script is run. Keep the two lists in sync when adding canonicals.
+
 const SPORTS = [
   { name: "powerlifting", color: "#2563eb" },
   { name: "bjj", color: "#db2777" },

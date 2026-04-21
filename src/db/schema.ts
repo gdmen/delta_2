@@ -17,6 +17,23 @@ export const metricTypes = sqliteTable("metric_types", {
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 
+/**
+ * Routes a raw import name onto a canonical metric_types row. The `alias` key
+ * is the string a source would have emitted (e.g. `apple_health:fiber`,
+ * `dietary_fiber`), not an id — because merged-away metric_types get deleted
+ * and their IDs disappear. Every ingest path checks this table before falling
+ * back to auto-creating a `${source}:${rawName}` orphan.
+ */
+export const metricTypeAliases = sqliteTable("metric_type_aliases", {
+  alias: text("alias").primaryKey(),
+  canonicalMetricTypeId: integer("canonical_metric_type_id")
+    .notNull()
+    .references(() => metricTypes.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+}, (table) => [
+  index("idx_metric_type_aliases_canonical").on(table.canonicalMetricTypeId),
+]);
+
 export const metrics = sqliteTable("metrics", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),

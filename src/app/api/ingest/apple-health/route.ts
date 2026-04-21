@@ -45,23 +45,10 @@ import { ReconcileTracker } from "@/lib/reconcile";
  * `hae-<metric-or-workout>-<iso-date>` which is stable across re-exports.
  */
 
-// HAE metric `name` → our metric_type.name.
-const METRIC_NAME_MAP: Record<string, string> = {
-  step_count: "steps",
-  heart_rate: "resting_hr",
-  resting_heart_rate: "resting_hr",
-  heart_rate_variability: "hrv_ms",
-  active_energy: "active_energy_kcal",
-  weight_body_mass: "bodyweight",
-  body_mass: "bodyweight",
-  body_fat_percentage: "body_fat_pct",
-  lean_body_mass: "lean_mass",
-  vo2_max: "vo2_max",
-  protein: "protein_g",
-  dietary_protein: "protein_g",
-  dietary_water: "water_oz",
-  water: "water_oz",
-};
+// HAE metric-name routing lives in the `metric_type_aliases` DB table now
+// (seeded in migration 0006 with the former hardcoded values). Users edit
+// it via the merge UI on /data and the per-alias remove button on each
+// metric detail page. Resolver checks aliases before auto-creating orphans.
 
 // HAE workout `name` (matches HKWorkoutActivityType display name) →
 // (sport_name, event_type).
@@ -131,6 +118,10 @@ export async function POST(request: NextRequest) {
   const workoutsIn = payload.data?.workouts ?? [];
 
   const typeCache = await buildMetricTypeCache();
+  // Reverse lookup for source_id composition — preserves existing
+  // `hae-<canonical>-<iso>` source_ids so re-ingests still dedup correctly.
+  const typeNameById = new Map<number, string>();
+  for (const [name, id] of typeCache.byName) typeNameById.set(id, name);
 
   const allSports = await db.select().from(sports);
   const sportByName = new Map(allSports.map((s) => [s.name, s.id]));
@@ -170,26 +161,28 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Standard path: resolve via the map, falling back to auto-created
-    // `apple_health:<rawName>` rows for anything unmapped.
+    // Standard path: resolver consults the alias table and falls back to
+    // `apple_health:<rawName>` for anything still unmapped.
     const typeId = await resolveMetricTypeId({
       rawName: m.name,
-      map: METRIC_NAME_MAP,
+      map: {},
       sourceSystem: "apple_health",
       unit: m.units,
       cache: typeCache,
     });
 
+    // Compose source_id from the canonical metric_type name so it remains
+    // stable across HAE re-exports — same scheme as before aliases.
+    const canonicalName = typeNameById.get(typeId) ?? `apple_health:${m.name}`;
     for (const p of m.data) {
       if (typeof p.qty !== "number") continue;
       const iso = normalizeDate(p.date);
-      const canonical = METRIC_NAME_MAP[m.name] ?? `apple_health:${m.name}`;
       inputs.push({
         metricTypeId: typeId,
         value: p.qty,
         recordedAt: iso,
         source: "apple_health",
-        sourceId: `hae-${canonical}-${iso}`,
+        sourceId: `hae-${canonicalName}-${iso}`,
       });
     }
   }
