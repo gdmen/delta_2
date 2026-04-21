@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { events, sports } from "@/db/schema";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { DataTabs } from "../tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -67,14 +68,23 @@ export default async function AllEventsPage({
 
   return (
     <div className="max-w-[1100px]">
-      <Link href="/data" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data
-      </Link>
-      <div className="flex items-baseline justify-between mt-3 mb-6 gap-3">
-        <h1 className="text-2xl font-semibold">All events</h1>
+      <h1 className="text-2xl font-semibold mb-2">Data</h1>
+      <p className="text-[0.875rem] text-text-secondary mb-6">
+        Every row Delta has stored. Click an event to view, edit, add, or delete data points.
+      </p>
+
+      <DataTabs active="events" />
+
+      <div className="flex items-baseline justify-between mb-6 gap-3">
         <span className="font-mono text-[0.6875rem] text-muted">
           {total.toLocaleString()} total · page {currentPage} of {pageCount}
         </span>
+        <Link
+          href="/data/events/new"
+          className="px-3 py-1.5 border border-border rounded text-[0.8125rem] font-medium hover:bg-surface"
+        >
+          + New event
+        </Link>
       </div>
 
       {/* Date filter form - plain GET form so state lives in the URL. */}
