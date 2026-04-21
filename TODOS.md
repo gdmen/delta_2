@@ -1,5 +1,19 @@
 # TODOS
 
+## P3 (maybe): Big 3 — local-time day grouping
+**What:** `src/lib/strength-metrics.ts` uses `r.startedAt.slice(0, 10)` to key sessions by day, which is the UTC date. A 9pm PT workout has an ISO startedAt of the next UTC day, so it plots one day forward in the history chart and in the session-break logic.
+**Why:** Cosmetic today (server runs in local TZ anyway for most Delta flows), but if we ever host outside Gary's TZ or care about UTC-boundary edge cases, the chart dates will read wrong.
+**Fix sketch:** Build a `localDayKey(iso)` helper using a real `Date` object and use it both for the `byDay` map key and the session-break comparison.
+**Effort:** XS (~10 min).
+**When:** Only if UTC-boundary workouts start showing up in the wrong bucket visibly.
+
+## P3 (maybe): Big 3 — expose lift-variant exclusions
+**What:** `LIFT_PATTERNS` in `src/lib/strength-metrics.ts` silently excludes sumo deadlift, trap-bar deadlift, front squat, goblet squat, incline/decline/close-grip/dumbbell bench, etc. A user doing these won't see them in Big 3 with no UI explanation.
+**Why:** Current behavior is defensible (Big 3 = competition-standard movements), but silent. If Gary ever programs sumo or trap-bar, those sessions will be invisible to the powerlifting page.
+**Fix sketch:** Either (a) document the included variants on the `/powerlifting` page, or (b) expose the inclusion list as a user setting.
+**Effort:** XS for (a), S for (b).
+**When:** If Gary starts programming excluded variants regularly.
+
 ## P2: Meet Countdown / War Room View
 **What:** Dedicated `/meet-prep` view aggregating all powerlifting goals with required-rate vs actual-rate, days remaining, weight class tracking, peaking phase awareness, and coach readiness summary.
 **Why:** The powerlifting meet is the primary forcing function for the project. A dedicated view makes the app feel purpose-built for meet prep rather than generic fitness tracking.

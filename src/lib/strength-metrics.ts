@@ -103,6 +103,7 @@ export function classifyLift(exerciseName: string): Lift | null {
 export function oconnorE1RM(weight: number, reps: number): number {
   if (!Number.isFinite(weight) || !Number.isFinite(reps)) return 0;
   if (weight <= 0 || reps <= 0 || reps > 10) return 0;
+  if (reps === 1) return weight;
   return weight * (1 + 0.025 * reps);
 }
 
