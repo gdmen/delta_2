@@ -50,6 +50,13 @@
       "when": 1776805416497,
       "tag": "0006_redundant_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1776807990317,
+      "tag": "0007_seed_distance_elevation",
+      "breakpoints": true
     }
   ]
 }

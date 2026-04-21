@@ -34,6 +34,8 @@ const METRIC_TYPES = [
   { name: "active_energy_kcal", unit: "kcal", frequencyHint: "daily" as const },
   { name: "steps", unit: "steps", frequencyHint: "daily" as const },
   { name: "vo2_max", unit: "mL/kg/min", frequencyHint: "weekly" as const },
+  { name: "distance_km", unit: "km", frequencyHint: "occasional" as const },
+  { name: "elevation_gain_m", unit: "m", frequencyHint: "occasional" as const },
 ];
 
 async function seed() {

@@ -3,8 +3,12 @@ import { db } from "@/db";
 import { sports } from "@/db/schema";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
 import { mapStravaType } from "@/lib/strava/mapping";
-import { upsertEvent } from "@/lib/ingest-service";
+import { upsertEvent, upsertEventMetric } from "@/lib/ingest-service";
+import { buildMetricTypeCache, MetricTypeCache } from "@/lib/ingest/metric-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
+
+// Strava emits SI (meters). distance_km = m ÷ 1000; elevation_gain_m = m.
+const METERS_TO_KM = 1 / 1000;
 
 export const maxDuration = 120;
 
@@ -59,9 +63,11 @@ export async function POST(request: NextRequest) {
     afterUnix = Math.floor(fallback / 1000);
   }
 
-  // Preload sport name → id.
+  // Preload sport name → id, and metric_type cache (used for attaching
+  // distance/elevation event_metrics).
   const allSports = await db.select().from(sports);
   const sportIdByName = new Map(allSports.map((s) => [s.name, s.id]));
+  const typeCache = await buildMetricTypeCache();
 
   const result: SyncResult = {
     fetched: 0,
@@ -76,7 +82,7 @@ export async function POST(request: NextRequest) {
   try {
     for await (const activity of iterateActivities(afterUnix)) {
       result.fetched++;
-      await ingestOne(activity, sportIdByName, result, tracker);
+      await ingestOne(activity, sportIdByName, typeCache, result, tracker);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
@@ -100,6 +106,7 @@ export async function POST(request: NextRequest) {
 async function ingestOne(
   activity: StravaActivity,
   sportIdByName: Map<string, number>,
+  typeCache: MetricTypeCache,
   result: SyncResult,
   tracker: ReconcileTracker
 ): Promise<void> {
@@ -134,7 +141,7 @@ async function ingestOne(
 
   try {
     const sourceId = `strava-${activity.id}`;
-    const { status } = await upsertEvent({
+    const { status, eventId } = await upsertEvent({
       sportId,
       type: mapping.type,
       durationMinutes: Math.round((activity.moving_time ?? activity.elapsed_time ?? 0) / 60),
@@ -144,6 +151,28 @@ async function ingestOne(
       sourceId,
     });
     tracker.recordEvent(sourceId, activity.start_date);
+
+    // Attach distance + elevation as event_metrics. Upsert keyed on
+    // (eventId, metricTypeId) means re-syncs refresh the values rather
+    // than duplicating. Skipped silently if a canonical type is missing
+    // (migration 0007 seeds them; this guard is defense-in-depth).
+    const distanceKm = activity.distance * METERS_TO_KM;
+    if (Number.isFinite(distanceKm)) {
+      const id = typeCache.byName.get("distance_km");
+      if (id !== undefined) {
+        await upsertEventMetric(eventId, id, Number(distanceKm.toFixed(3)));
+      }
+    }
+    if (typeof activity.total_elevation_gain === "number") {
+      const id = typeCache.byName.get("elevation_gain_m");
+      if (id !== undefined) {
+        await upsertEventMetric(
+          eventId,
+          id,
+          Math.round(activity.total_elevation_gain)
+        );
+      }
+    }
 
     if (status === "accepted") result.accepted++;
     else result.skipped++; // already existed - deduped
