@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getAllHistory } from "@/lib/metric-history";
 import { MetricBlock } from "@/components/metric-block";
 
@@ -18,15 +17,7 @@ export default async function BodyCompPage() {
 
   return (
     <div className="max-w-[1200px]">
-      <div className="flex items-baseline justify-between mb-8">
-        <h1 className="text-2xl font-semibold">Body Composition</h1>
-        <Link
-          href="/nutrition"
-          className="text-[0.8125rem] text-muted hover:text-foreground"
-        >
-          Nutrition →
-        </Link>
-      </div>
+      <h1 className="text-2xl font-semibold mb-8">Body Composition</h1>
 
       <section>
         <div className="flex items-baseline justify-between mb-4 border-b border-border pb-2">

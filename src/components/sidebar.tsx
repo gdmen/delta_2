@@ -10,7 +10,7 @@ const NAV_SECTIONS = [
     label: "Dashboard",
     items: [
       { href: "/", label: "Today" },
-      { href: "/nutrition", label: "Nutrition" },
+      { href: "/recovery", label: "Recovery" },
       { href: "/body-comp", label: "Body Comp" },
     ],
   },
