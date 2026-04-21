@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { events, sports } from "@/db/schema";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { DataTabs } from "../tabs";
 import { ImportExportBar } from "../import-export-bar";
 
@@ -12,6 +12,7 @@ const PAGE_SIZE = 50;
 interface SearchParams {
   from?: string; // YYYY-MM-DD
   to?: string;   // YYYY-MM-DD
+  q?: string;    // free-text filter: sport name / type / source / notes
   page?: string;
 }
 
@@ -23,19 +24,33 @@ export default async function AllEventsPage({
   const sp = await searchParams;
   const from = isIsoDate(sp.from) ? sp.from : "";
   const to = isIsoDate(sp.to) ? sp.to : "";
+  const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
-  // Build WHERE clause from the date range. `started_at` is stored as ISO
-  // with time; we compare against day-boundary ISO strings since that
-  // works with SQLite's text-string comparison.
+  // Build WHERE from date range + optional text match. `started_at` is stored
+  // as ISO with time; day-boundary ISO strings work with SQLite's text-string
+  // comparison. Text match is OR across sport name, event type, source, notes.
   const conditions = [];
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));
   if (to) conditions.push(lte(events.startedAt, `${to}T23:59:59.999Z`));
+  if (q) {
+    const needle = `%${q}%`;
+    conditions.push(
+      or(
+        like(sports.name, needle),
+        like(events.type, needle),
+        like(events.source, needle),
+        like(events.notes, needle)
+      )!
+    );
+  }
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
+  // Count query needs the join too (text match may reference sports.name).
   const totalRow = await db
     .select({ c: sql<number>`count(*)` })
     .from(events)
+    .innerJoin(sports, eq(events.sportId, sports.id))
     .where(where);
   const total = Number(totalRow[0]?.c ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -60,6 +75,7 @@ export default async function AllEventsPage({
   const baseQs = new URLSearchParams();
   if (from) baseQs.set("from", from);
   if (to) baseQs.set("to", to);
+  if (q) baseQs.set("q", q);
   const linkWithPage = (p: number) => {
     const qs = new URLSearchParams(baseQs);
     if (p !== 1) qs.set("page", String(p));
@@ -92,8 +108,20 @@ export default async function AllEventsPage({
         </Link>
       </div>
 
-      {/* Date filter form - plain GET form so state lives in the URL. */}
+      {/* Date + text filter form — plain GET form so state lives in the URL. */}
       <form method="get" action="/data/events" className="flex flex-wrap items-end gap-3 mb-6">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-[0.6875rem] font-mono uppercase tracking-wider text-muted mb-1">
+            Search
+          </label>
+          <input
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="sport, type, source, notes..."
+            className="w-full px-2 py-1.5 border border-border rounded text-[0.8125rem]"
+          />
+        </div>
         <div>
           <label className="block text-[0.6875rem] font-mono uppercase tracking-wider text-muted mb-1">
             From
@@ -122,7 +150,7 @@ export default async function AllEventsPage({
         >
           Filter
         </button>
-        {(from || to) && (
+        {(from || to || q) && (
           <Link
             href="/data/events"
             className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground"
@@ -147,7 +175,7 @@ export default async function AllEventsPage({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-muted">
-                  No events in this range.
+                  No events match the current filters.
                 </td>
               </tr>
             ) : (
