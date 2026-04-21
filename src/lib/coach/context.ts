@@ -31,8 +31,11 @@ export interface CoachContext {
 }
 
 export async function assembleBriefingContext(days = 7): Promise<CoachContext> {
+  // End at yesterday: today's readings are partial (sleep hasn't finished,
+  // step count is mid-day, etc.) and including them skews trend comparisons.
+  // Briefings are about what the *completed* days say.
   const start = daysAgo(days);
-  const end = today();
+  const end = daysAgo(1);
 
   const dailySummaries = await getDailySummaries(start, end);
 

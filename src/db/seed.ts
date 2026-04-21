@@ -26,6 +26,7 @@ const METRIC_TYPES = [
   { name: "resting_hr", unit: "bpm", frequencyHint: "daily" as const },
   { name: "protein_g", unit: "g", frequencyHint: "daily" as const },
   { name: "water_oz", unit: "oz", frequencyHint: "daily" as const },
+  { name: "fiber_g", unit: "g", frequencyHint: "daily" as const },
   { name: "active_energy_kcal", unit: "kcal", frequencyHint: "daily" as const },
   { name: "steps", unit: "steps", frequencyHint: "daily" as const },
   { name: "vo2_max", unit: "mL/kg/min", frequencyHint: "weekly" as const },

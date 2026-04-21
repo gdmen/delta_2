@@ -14,6 +14,7 @@ const BJJ_TYPES = [
 export default function BjjInputPage() {
   const router = useRouter();
   const [bjjSportId, setBjjSportId] = useState<number | null>(null);
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [type, setType] = useState("class");
   const [durationMinutes, setDurationMinutes] = useState("60");
   const [notes, setNotes] = useState("");
@@ -42,6 +43,8 @@ export default function BjjInputPage() {
         type,
         durationMinutes: parseInt(durationMinutes, 10),
         notes: notes || undefined,
+        // Noon UTC keeps the date visually intact across continental US timezones.
+        startedAt: `${date}T12:00:00.000Z`,
       }),
     });
 
@@ -79,6 +82,20 @@ export default function BjjInputPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div>
+          <label className="block text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-2">
+            Date
+          </label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            max={new Date().toISOString().slice(0, 10)}
+            className="px-3 py-2 border border-border rounded font-mono text-[1rem] focus:outline-none focus:border-foreground"
+            required
+          />
         </div>
 
         <div>
