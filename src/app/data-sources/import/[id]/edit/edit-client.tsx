@@ -52,6 +52,7 @@ export function EditClient({
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ExistingMetricType[]>([]);
   const [migration, setMigration] = useState<MigrationRow[] | null>(null);
+  const [distinctExercises, setDistinctExercises] = useState<string[]>([]);
 
   const metricNames = useMetricTypeNames();
   const sportNames = useSportNames();
@@ -69,6 +70,22 @@ export function EditClient({
       }
     })();
   }, [id]);
+
+  // For workout_sets sources, load distinct exercise names so the
+  // WeightUnitEditor can show them as checkboxes instead of an empty
+  // textarea.
+  useEffect(() => {
+    if (kind !== "workout_sets") return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/import-sources/${id}/distinct-exercises`);
+        if (!res.ok) return;
+        setDistinctExercises(await res.json());
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [id, kind]);
 
   function updateMapping(m: ImportMapping) {
     setMapping(m);
@@ -150,6 +167,17 @@ export function EditClient({
         onChange={updateMapping}
         metricNameSuggestions={metricNames}
         sportSuggestions={sportNames}
+        distinctValuesByColumn={
+          // For workout_sets sources, key the distinct list under whatever
+          // column the mapping currently has exerciseName pointing at.
+          kind === "workout_sets" && mapping.kind === "workout_sets" && mapping.exerciseName.source === "column"
+            ? {
+                ...("column" in mapping.exerciseName.ref
+                  ? { [mapping.exerciseName.ref.column]: distinctExercises }
+                  : {}),
+              }
+            : undefined
+        }
       />
 
       {migration && migration.length > 0 && (

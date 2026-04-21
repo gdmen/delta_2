@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileDropZone } from "@/components/file-drop-zone";
+import { parseCsv } from "@/lib/csv";
 import type { ColumnRef, ImportMapping } from "@/lib/import-mapping";
 import {
   KindPicker,
@@ -29,6 +30,7 @@ export function WizardClient() {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [kind, setKind] = useState<Kind>("workout_sets");
   const [mapping, setMapping] = useState<ImportMapping | null>(null);
+  const [distinctValuesByColumn, setDistinctValuesByColumn] = useState<Record<string, string[]>>({});
   const [name, setName] = useState("");
   const [parsed, setParsed] = useState<unknown[] | null>(null);
   const [parseErrors, setParseErrors] = useState<string[]>([]);
@@ -52,6 +54,27 @@ export function WizardClient() {
     const json = (await res.json()) as PreviewResponse;
     setPreview(json);
     setMapping(defaultMappingForKind(currentKind, json.autoMatch ?? {}));
+
+    // Parse the file once on the client to derive distinct values per
+    // column. Powers the WeightUnitEditor's exercise-name checkbox grid
+    // (and any future "pick from CSV" affordances).
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCsv(text);
+      const dv: Record<string, Set<string>> = {};
+      for (const h of headers) dv[h] = new Set();
+      for (const row of rows) {
+        for (let i = 0; i < headers.length; i++) {
+          const v = (row[i] ?? "").trim();
+          if (v) dv[headers[i]].add(v);
+        }
+      }
+      const out: Record<string, string[]> = {};
+      for (const [k, set] of Object.entries(dv)) out[k] = [...set];
+      setDistinctValuesByColumn(out);
+    } catch {
+      setDistinctValuesByColumn({});
+    }
   }
 
   async function handleKindChange(next: Kind) {
@@ -170,6 +193,7 @@ export function WizardClient() {
           onChange={updateMapping}
           metricNameSuggestions={metricNames}
           sportSuggestions={sportNames}
+          distinctValuesByColumn={distinctValuesByColumn}
         />
 
         <section>

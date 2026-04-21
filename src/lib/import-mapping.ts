@@ -79,6 +79,21 @@ export type EventsMapping = {
   metrics?: MetricTarget[];
 };
 
+/**
+ * How to interpret the Weight column. Some apps (e.g. TeamBuildr) store
+ * weights in a single column with mixed units - big barbell compounds in
+ * kg, cable/accessory work in lb, no per-row indicator. Rather than store
+ * units per set, Delta normalizes everything to lb on write. The mapping
+ * declares a default unit + an exception list of exercise names (in the
+ * canonical form that lands in workout_sets.exercise_name) whose weights
+ * are in the other unit.
+ */
+export type WeightUnitConfig = {
+  default: "lb" | "kg";
+  /** Exercises whose weights are in the non-default unit. Case-insensitive. */
+  overrides?: string[];
+};
+
 export type WorkoutSetsMapping = {
   kind: "workout_sets";
   startedAt: { ref: ColumnRef; format: DateFormat };
@@ -89,6 +104,7 @@ export type WorkoutSetsMapping = {
   setNumber?: ValueSlot; // defaults to row order within (startedAt, eventSourceId)
   reps: ValueSlot;
   weight: ValueSlot;
+  weightUnit?: WeightUnitConfig;
   rpe?: ValueSlot;
   notes?: ValueSlot;
   rowFilter?: RowFilter;
@@ -270,6 +286,29 @@ export function parseDuration(raw: string): number | null {
   return null;
 }
 
+/** Conversion factor — kept full-precision so kg <-> lb round-trips losslessly. */
+export const KG_PER_LB = 0.45359237;
+export const LB_PER_KG = 1 / KG_PER_LB; // 2.20462262...
+
+/**
+ * Normalize a raw weight value to lb using the mapping's weight-unit
+ * config. Stored at full float precision; per-unit display rounding
+ * happens at render time. When `cfg` is absent we assume lb for
+ * backwards-compat.
+ */
+export function normalizeWeightToLb(
+  raw: number,
+  exerciseName: string,
+  cfg: WeightUnitConfig | undefined
+): number {
+  if (!cfg) return raw;
+  const lower = exerciseName.trim().toLowerCase();
+  const isOverride = (cfg.overrides ?? []).some((e) => e.trim().toLowerCase() === lower);
+  const unit = isOverride ? (cfg.default === "lb" ? "kg" : "lb") : cfg.default;
+  if (unit === "kg") return raw * LB_PER_KG;
+  return raw;
+}
+
 /** Strip commas, $, and whitespace before Number(). Returns null if not finite. */
 export function parseNumber(raw: string): number | null {
   const s = raw.trim().replace(/[,$\s]/g, "");
@@ -422,10 +461,12 @@ function applyWorkoutSet(
   }
 
   const reps = parseNumber(readSlot(headers, row, m.reps));
-  const weight = parseNumber(readSlot(headers, row, m.weight));
-  if (reps === null || weight === null) {
+  const rawWeight = parseNumber(readSlot(headers, row, m.weight));
+  if (reps === null || rawWeight === null) {
     return { out: [], error: "non-numeric reps/weight" };
   }
+  // Normalize to lb using the mapping's weight-unit config.
+  const weight = normalizeWeightToLb(rawWeight, exerciseName, m.weightUnit);
 
   const setNumStr = m.setNumber ? readSlot(headers, row, m.setNumber) : "";
   const parsedSet = setNumStr ? parseNumber(setNumStr) : null;

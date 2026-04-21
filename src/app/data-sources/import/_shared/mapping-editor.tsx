@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type {
   ColumnRef,
   DateFormat,
   ImportMapping,
   RowFilter,
   ValueSlot,
+  WeightUnitConfig,
 } from "@/lib/import-mapping";
 
 // -----------------------------------------------------------------------------
@@ -164,6 +165,7 @@ export function MappingEditor({
   onChange,
   metricNameSuggestions = [],
   sportSuggestions = [],
+  distinctValuesByColumn,
 }: {
   kind: Kind;
   mapping: ImportMapping;
@@ -171,6 +173,13 @@ export function MappingEditor({
   onChange: (m: ImportMapping) => void;
   metricNameSuggestions?: string[];
   sportSuggestions?: string[];
+  /**
+   * Distinct values per CSV column, populated by callers that have the
+   * source data available (wizard parses the upload; edit page can
+   * pre-load from existing imported rows). Used by WeightUnitEditor to
+   * show real exercise names as checkboxes instead of an empty textarea.
+   */
+  distinctValuesByColumn?: Record<string, string[]>;
 }) {
   if (kind === "metrics" && mapping.kind === "metrics") {
     return (
@@ -200,6 +209,7 @@ export function MappingEditor({
         headers={headers}
         onChange={onChange}
         sportSuggestions={sportSuggestions}
+        distinctValuesByColumn={distinctValuesByColumn}
       />
     );
   }
@@ -491,12 +501,32 @@ function WorkoutSetsEditor({
   headers,
   onChange,
   sportSuggestions,
+  distinctValuesByColumn,
 }: {
   mapping: Extract<ImportMapping, { kind: "workout_sets" }>;
   headers: string[];
   onChange: (m: ImportMapping) => void;
   sportSuggestions: string[];
+  distinctValuesByColumn?: Record<string, string[]>;
 }) {
+  // If the user mapped exerciseName to a column AND we have distinct values
+  // for that column, surface them as exercise-unit checkboxes.
+  let exerciseChoices: string[] | undefined;
+  if (mapping.exerciseName.source === "column" && distinctValuesByColumn) {
+    const ref = mapping.exerciseName.ref;
+    const colName = "column" in ref ? ref.column : headers[ref.index - 1];
+    if (colName) {
+      const raw = distinctValuesByColumn[colName];
+      if (raw) {
+        // If the slot has aliases, apply them so checkbox labels match what
+        // actually lands in workout_sets.exercise_name.
+        const aliases = mapping.exerciseName.aliases ?? {};
+        exerciseChoices = [...new Set(raw.map((v) => aliases[v] ?? v))]
+          .filter((v) => v.trim() !== "")
+          .sort((a, b) => a.localeCompare(b));
+      }
+    }
+  }
   return (
     <div className="space-y-5">
       <Field label="Started-at column" required>
@@ -551,6 +581,11 @@ function WorkoutSetsEditor({
       <Field label="Weight" required>
         <SlotPicker slot={mapping.weight} headers={headers} onChange={(weight) => onChange({ ...mapping, weight })} />
       </Field>
+      <WeightUnitEditor
+        cfg={mapping.weightUnit}
+        exerciseChoices={exerciseChoices}
+        onChange={(weightUnit) => onChange({ ...mapping, weightUnit })}
+      />
       <Field label="RPE (optional)">
         <SlotPicker
           slot={mapping.rpe ?? { source: "none" }}
@@ -615,7 +650,7 @@ export function SlotPicker({
   valueSuggestions?: string[];
   onChange: (slot: ValueSlot) => void;
 }) {
-  const datalistId = useRef(`dl-${Math.random().toString(36).slice(2, 9)}`).current;
+  const datalistId = useId();
   const [showAliases, setShowAliases] = useState(false);
 
   const hasAliases =
@@ -712,7 +747,7 @@ function AliasesEditor({
   suggestions: string[];
   onChange: (next: Record<string, string>) => void;
 }) {
-  const datalistId = useRef(`dl-${Math.random().toString(36).slice(2, 9)}`).current;
+  const datalistId = useId();
   const [newRaw, setNewRaw] = useState("");
   const entries = Object.entries(aliases);
 
@@ -964,4 +999,213 @@ export function useSportNames(): string[] {
     return () => { cancelled = true; };
   }, []);
   return names;
+}
+
+/**
+ * Scrollable checkbox grid of exercise names with select-all / clear /
+ * filter affordances. Used by WeightUnitEditor when distinct exercise
+ * names are available from the source.
+ */
+function ExerciseChoiceGrid({
+  choices,
+  selected,
+  onChange,
+}: {
+  choices: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const lowered = filter.trim().toLowerCase();
+  const visible = lowered
+    ? choices.filter((c) => c.toLowerCase().includes(lowered))
+    : choices;
+
+  function toggle(name: string) {
+    const set = new Set(selected);
+    if (set.has(name)) set.delete(name);
+    else set.add(name);
+    onChange([...set].sort((a, b) => a.localeCompare(b)));
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <div className="text-[0.6875rem] font-mono uppercase tracking-wider text-muted">
+          Exception list ({selected.length} of {choices.length} selected)
+        </div>
+        <div className="flex gap-3 text-[0.75rem]">
+          <button
+            type="button"
+            onClick={() => onChange([...visible].sort((a, b) => a.localeCompare(b)))}
+            className="text-foreground underline"
+          >
+            select {lowered ? "filtered" : "all"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-muted underline"
+          >
+            clear
+          </button>
+        </div>
+      </div>
+      <input
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="filter..."
+        className="w-full px-2 py-1 border border-border rounded text-[0.8125rem] mb-2"
+      />
+      <div className="max-h-72 overflow-y-auto border border-border rounded p-2 bg-background">
+        {visible.length === 0 ? (
+          <div className="text-[0.75rem] text-muted py-2">No matches.</div>
+        ) : (
+          visible.map((name) => (
+            <label
+              key={name}
+              className="flex items-center gap-2 py-0.5 text-[0.8125rem] cursor-pointer hover:bg-surface/40 px-1 rounded"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(name)}
+                onChange={() => toggle(name)}
+                className="w-3.5 h-3.5"
+              />
+              <span className="font-mono text-[0.8125rem]">{name}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// WeightUnitEditor
+// -----------------------------------------------------------------------------
+
+/**
+ * Configure how the Weight column is interpreted. Three modes:
+ *   - "All lb"  (no config saved; lb is the implicit default)
+ *   - "All kg"  (normalize every weight to lb on import)
+ *   - "Mixed"   (default unit + per-exercise override list)
+ * The UI writes a WeightUnitConfig to the mapping; applyWorkoutSet does
+ * the conversion.
+ */
+function WeightUnitEditor({
+  cfg,
+  exerciseChoices,
+  onChange,
+}: {
+  cfg: WeightUnitConfig | undefined;
+  /** When provided, render as checkboxes instead of a free-text textarea. */
+  exerciseChoices?: string[];
+  onChange: (next: WeightUnitConfig | undefined) => void;
+}) {
+  // Presence of `overrides` (even an empty array) means the user wants to
+  // hand-curate exceptions. Without it, the cfg is just a single default.
+  const mode = !cfg
+    ? "all-lb"
+    : cfg.overrides !== undefined
+      ? "mixed"
+      : cfg.default === "kg"
+        ? "all-kg"
+        : "all-lb";
+
+  return (
+    <div className="border border-border rounded p-3 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <span className="font-mono text-[0.6875rem] uppercase tracking-wider text-muted">
+          Weight units
+        </span>
+        <span className="font-mono text-[0.6875rem] text-muted">stored as lb; kg is converted</span>
+      </div>
+      <div className="flex flex-wrap gap-2 text-[0.8125rem]">
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="radio"
+            name="weight-unit-mode"
+            checked={mode === "all-lb"}
+            onChange={() => onChange(undefined)}
+          />
+          All lb
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="radio"
+            name="weight-unit-mode"
+            checked={mode === "all-kg"}
+            onChange={() => onChange({ default: "kg" })}
+          />
+          All kg
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input
+            type="radio"
+            name="weight-unit-mode"
+            checked={mode === "mixed"}
+            onChange={() =>
+              onChange({
+                default: cfg?.default ?? "lb",
+                overrides: cfg?.overrides ?? [],
+              })
+            }
+          />
+          Mixed (specify exceptions)
+        </label>
+      </div>
+
+      {mode === "mixed" && cfg && (
+        <div className="mt-2 space-y-2">
+          <div className="flex items-baseline gap-2 text-[0.75rem] text-muted">
+            <span>Default:</span>
+            <select
+              value={cfg.default}
+              onChange={(e) =>
+                onChange({ ...cfg, default: e.target.value as "lb" | "kg" })
+              }
+              className="px-2 py-1 border border-border rounded text-[0.8125rem] bg-background"
+            >
+              <option value="lb">lb</option>
+              <option value="kg">kg</option>
+            </select>
+            <span>
+              Exercises below are treated as{" "}
+              <strong>{cfg.default === "lb" ? "kg" : "lb"}</strong>
+            </span>
+          </div>
+          {exerciseChoices && exerciseChoices.length > 0 ? (
+            <ExerciseChoiceGrid
+              choices={exerciseChoices}
+              selected={cfg.overrides ?? []}
+              onChange={(overrides) => onChange({ ...cfg, overrides })}
+            />
+          ) : (
+            <div>
+              <div className="text-[0.6875rem] font-mono uppercase tracking-wider text-muted mb-1">
+                Exception list (one exercise name per line, case-insensitive)
+              </div>
+              <textarea
+                value={(cfg.overrides ?? []).join("\n")}
+                onChange={(e) =>
+                  onChange({
+                    ...cfg,
+                    overrides: e.target.value
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+                rows={Math.max(4, (cfg.overrides ?? []).length + 1)}
+                placeholder={"Barbell Back Squat\nFlat Barbell Bench Press\nConventional Barbell Deadlift"}
+                className="w-full px-2 py-1.5 border border-border rounded text-[0.8125rem] font-mono"
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
