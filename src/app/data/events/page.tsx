@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { events, sports } from "@/db/schema";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { DataTabs } from "../tabs";
+import { ImportExportBar } from "../import-export-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,10 @@ export default async function AllEventsPage({
       <p className="text-[0.875rem] text-text-secondary mb-6">
         Every row Delta has stored. Click an event to view, edit, add, or delete data points.
       </p>
+
+      <div className="mb-8">
+        <ImportExportBar />
+      </div>
 
       <DataTabs active="events" />
 

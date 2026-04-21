@@ -40,7 +40,7 @@ export default async function GoalsListPage() {
   return (
     <div className="max-w-[820px]">
       <Link href="/data-sources" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data Sources
+        ← Sources
       </Link>
       <div className="flex justify-between items-center mt-3 mb-6">
         <h1 className="text-2xl font-semibold">Goals</h1>

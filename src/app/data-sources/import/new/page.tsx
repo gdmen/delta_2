@@ -7,7 +7,7 @@ export default function NewImportSourcePage() {
   return (
     <div className="max-w-[1200px]">
       <Link href="/data-sources" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data Sources
+        ← Sources
       </Link>
       <h1 className="text-2xl font-semibold mt-3 mb-2">New CSV import source</h1>
       <p className="text-[0.875rem] text-text-secondary mb-8">

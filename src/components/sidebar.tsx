@@ -39,7 +39,7 @@ const NAV_SECTIONS = [
   {
     label: "Settings",
     items: [
-      { href: "/data-sources", label: "Data Sources" },
+      { href: "/data-sources", label: "Sources" },
       { href: "/data", label: "Data" },
     ],
   },

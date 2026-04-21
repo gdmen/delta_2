@@ -59,7 +59,7 @@ export default function BjjInputPage() {
   return (
     <div className="max-w-xl">
       <Link href="/data-sources" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data Sources
+        ← Sources
       </Link>
       <h1 className="text-2xl font-semibold mt-3 mb-6">Log BJJ Session</h1>
 

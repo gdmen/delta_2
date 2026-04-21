@@ -3,6 +3,7 @@ import { metrics, metricTypes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { MetricsTable } from "./metrics-table";
 import { DataTabs } from "./tabs";
+import { ImportExportBar } from "./import-export-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,10 @@ export default async function DataPage() {
       <p className="text-[0.875rem] text-text-secondary mb-6">
         Every row Delta has stored. Click a metric to view, edit, add, or delete data points.
       </p>
+
+      <div className="mb-8">
+        <ImportExportBar />
+      </div>
 
       <DataTabs active="metrics" />
 

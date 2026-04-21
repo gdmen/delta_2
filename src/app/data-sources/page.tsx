@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getSourceActivity } from "@/lib/data-sources/summaries";
 import { Wordmark } from "@/components/wordmark";
-import { ImportExportBar } from "./import-export-bar";
 import { db } from "@/db";
 import { importSources } from "@/db/schema";
 import { asc } from "drizzle-orm";
@@ -103,7 +102,7 @@ export default async function DataSourcesPage() {
 
   return (
     <div className="max-w-[820px]">
-      <h1 className="text-2xl font-semibold mb-2">Data Sources</h1>
+      <h1 className="text-2xl font-semibold mb-2">Sources</h1>
       <p className="text-[0.875rem] text-text-secondary mb-8">
         Every way data flows into <Wordmark />. Click a source to see imported data and setup.
       </p>
@@ -188,9 +187,6 @@ export default async function DataSourcesPage() {
         </Link>
       </div>
 
-      <div className="mt-10">
-        <ImportExportBar />
-      </div>
     </div>
   );
 }
