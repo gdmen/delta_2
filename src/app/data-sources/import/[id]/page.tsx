@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { importSources } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { SourceDataBrowser } from "@/components/source-data-browser";
+import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 import { ImportClient } from "./import-client";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +52,8 @@ export default async function ImportSourcePage({
           <ImportClient sourceId={src.id} sourceName={src.name} />
         </div>
       </details>
+
+      <SourceSyncBehavior source={sourceTag} kind="csv" />
 
       <section>
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { metricTypes } from "@/db/schema";
 import { upsertMetric } from "@/lib/ingest-service";
+import { ReconcileTracker } from "@/lib/reconcile";
 
 interface SaveBody {
   scan_date: string; // YYYY-MM-DD
@@ -42,6 +43,7 @@ export async function POST(request: NextRequest) {
   const saved: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
+  const tracker = new ReconcileTracker();
 
   for (const [field, metricName] of Object.entries(FIELD_TO_METRIC) as Array<[keyof typeof FIELD_TO_METRIC, string]>) {
     const value = body[field];
@@ -61,23 +63,28 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      const sourceId = `bodyspec-${body.scan_date}-${metricName}`;
       await upsertMetric({
         metricTypeId: typeId,
         value,
         recordedAt,
         source: "bodyspec_dexa",
-        sourceId: `bodyspec-${body.scan_date}-${metricName}`,
+        sourceId,
       });
+      tracker.recordMetric(typeId, sourceId, recordedAt);
       saved.push(metricName);
     } catch (err) {
       errors.push(`${metricName}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
+  const reconcile = await tracker.apply("bodyspec_dexa");
+
   return NextResponse.json({
     scanDate: body.scan_date,
     saved,
     skipped,
     errors,
+    reconcile,
   });
 }

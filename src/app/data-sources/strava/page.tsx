@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SourceDataBrowser } from "@/components/source-data-browser";
+import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 import StravaSetupClient from "./setup-client";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ export default function StravaPage() {
           <StravaSetupClient />
         </div>
       </details>
+
+      <SourceSyncBehavior source="strava" />
 
       <section>
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>

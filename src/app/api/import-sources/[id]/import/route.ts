@@ -8,6 +8,7 @@ import {
   buildMetricTypeCache,
   resolveMetricTypeId,
 } from "@/lib/ingest/metric-resolver";
+import { ReconcileTracker } from "@/lib/reconcile";
 import {
   upsertMetric,
   upsertEvent,
@@ -80,6 +81,7 @@ export async function POST(
   const typeCache = await buildMetricTypeCache();
   const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
   const sportByName = new Map(sportRows.map((s) => [s.name, s.id]));
+  const tracker = new ReconcileTracker();
 
   for (let i = 0; i < rows.length; i++) {
     const { out, error } = applyMapping(mapping, headers, rows[i], i);
@@ -89,7 +91,7 @@ export async function POST(
     }
     for (const item of out) {
       try {
-        await writeOutRow(item, sourceTag, typeCache, sportByName, result, i);
+        await writeOutRow(item, sourceTag, typeCache, sportByName, result, i, tracker);
       } catch (err) {
         result.errors.push(
           `row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
@@ -103,7 +105,9 @@ export async function POST(
     result.errors = [...result.errors.slice(0, 20), `... +${result.errors.length - 20} more`];
   }
 
-  return NextResponse.json({ kind: mapping.kind, result });
+  const reconcile = await tracker.apply(sourceTag);
+
+  return NextResponse.json({ kind: mapping.kind, result, reconcile });
 }
 
 async function writeOutRow(
@@ -112,7 +116,8 @@ async function writeOutRow(
   typeCache: Awaited<ReturnType<typeof buildMetricTypeCache>>,
   sportByName: Map<string, number>,
   result: TableResult,
-  rowIdx: number
+  rowIdx: number,
+  tracker: ReconcileTracker
 ): Promise<void> {
   if (item.kind === "metric") {
     const typeId = await resolveMetricTypeId({
@@ -132,6 +137,7 @@ async function writeOutRow(
       sourceId,
     };
     const status = await upsertMetric(input);
+    tracker.recordMetric(typeId, sourceId, item.recordedAt);
     if (status === "accepted") result.accepted++;
     else result.skipped++;
     return;
@@ -158,6 +164,7 @@ async function writeOutRow(
       sourceId,
     };
     const { status, eventId } = await upsertEvent(input);
+    tracker.recordEvent(sourceId, item.startedAt);
     if (status === "accepted") result.accepted++;
     else result.skipped++;
 
@@ -179,10 +186,14 @@ async function writeOutRow(
     const sportId = sportByName.get(item.sport);
     if (!sportId) throw new Error(`unknown sport "${item.sport}"`);
 
-    // Resolve parent event.
+    // Resolve parent event. Whatever the parent's source_id ends up being,
+    // record it in the tracker so reconcile preserves the parent (cascades
+    // remove orphaned children).
     let parentId: number | null = null;
+    let parentSourceId: string | null = null;
     if (item.eventSourceId) {
       const synth = `${sourceTag}-workout-${item.eventSourceId}`;
+      parentSourceId = synth;
       const existing = await db
         .select({ id: events.id })
         .from(events)
@@ -203,7 +214,7 @@ async function writeOutRow(
       }
     } else {
       const existing = await db
-        .select({ id: events.id })
+        .select({ id: events.id, sourceId: events.sourceId })
         .from(events)
         .where(
           and(
@@ -214,8 +225,10 @@ async function writeOutRow(
         )
         .limit(1);
       parentId = existing[0]?.id ?? null;
+      parentSourceId = existing[0]?.sourceId ?? null;
       if (parentId === null) {
         const synth = `${sourceTag}-${item.sport}-${item.eventType}-${item.startedAt}`;
+        parentSourceId = synth;
         const { eventId } = await upsertEvent({
           sportId,
           type: item.eventType,
@@ -228,6 +241,7 @@ async function writeOutRow(
         parentId = eventId;
       }
     }
+    if (parentSourceId) tracker.recordEvent(parentSourceId, item.startedAt);
 
     const status = await upsertWorkoutSet(parentId, {
       exerciseName: item.exerciseName,

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CopyButton } from "@/components/copy-button";
 import { SourceDataBrowser } from "@/components/source-data-browser";
+import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ export default function AppleHealthPage() {
           <Setup />
         </div>
       </details>
+
+      <SourceSyncBehavior source="apple_health" />
 
       <section>
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>

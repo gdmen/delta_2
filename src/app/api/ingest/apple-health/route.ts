@@ -4,6 +4,7 @@ import { batchUpsertMetrics, upsertEvent, MetricInput } from "@/lib/ingest-servi
 import { db } from "@/db";
 import { sports } from "@/db/schema";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
+import { ReconcileTracker } from "@/lib/reconcile";
 
 /**
  * Ingest endpoint for the Health Auto Export iOS app (REST API export).
@@ -195,6 +196,13 @@ export async function POST(request: NextRequest) {
 
   const metricResult = await batchUpsertMetrics(inputs);
 
+  // Record upserts into the reconcile tracker so reconcile (if enabled for
+  // apple_health) knows the batch's per-type date range + source_ids.
+  const tracker = new ReconcileTracker();
+  for (const input of inputs) {
+    tracker.recordMetric(input.metricTypeId, input.sourceId, input.recordedAt);
+  }
+
   let workoutsAccepted = 0;
   let workoutsSkipped = 0;
   const unknownWorkoutNames: string[] = [];
@@ -216,6 +224,7 @@ export async function POST(request: NextRequest) {
         : Math.round((Date.parse(normalizeDate(w.end)) - Date.parse(startIso)) / 60000);
 
     try {
+      const sourceId = `hae-workout-${w.name}-${startIso}`;
       const { status } = await upsertEvent({
         sportId,
         type: mapping.type,
@@ -223,14 +232,17 @@ export async function POST(request: NextRequest) {
         notes: null,
         startedAt: startIso,
         source: "apple_health",
-        sourceId: `hae-workout-${w.name}-${startIso}`,
+        sourceId,
       });
+      tracker.recordEvent(sourceId, startIso);
       if (status === "accepted") workoutsAccepted++;
       else workoutsSkipped++;
     } catch (err) {
       workoutErrors.push(`${w.name} @ ${startIso}: ${err}`);
     }
   }
+
+  const reconcile = await tracker.apply("apple_health");
 
   return NextResponse.json({
     metrics: metricResult,
@@ -240,5 +252,6 @@ export async function POST(request: NextRequest) {
       errors: workoutErrors,
     },
     unknownWorkoutNames,
+    reconcile,
   });
 }

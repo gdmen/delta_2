@@ -141,6 +141,39 @@ export const importSources = sqliteTable("import_sources", {
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 
+/**
+ * Per-source config. Today: just the reconcile toggle. Future per-source
+ * prefs fit here too. One row per `source` tag (matches the `source`
+ * column on metrics/events).
+ */
+export const sourceSettings = sqliteTable("source_settings", {
+  source: text("source").primaryKey(),
+  reconcileEnabled: integer("reconcile_enabled", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+});
+
+/**
+ * Audit trail for reconcile deletions. Zero-deletion ingest runs don't
+ * write here; only batches that actually removed rows. Used by the
+ * "Last reconcile" chip on each source sub-page.
+ *
+ * `metric_type_id` has no FK so rows survive a later metric_types delete.
+ */
+export const reconcileLog = sqliteTable("reconcile_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  source: text("source").notNull(),
+  kind: text("kind", { enum: ["metric", "event"] }).notNull(),
+  metricTypeId: integer("metric_type_id"),
+  deletedCount: integer("deleted_count").notNull(),
+  rangeStart: text("range_start").notNull(),
+  rangeEnd: text("range_end").notNull(),
+  at: text("at").default(sql`(datetime('now'))`).notNull(),
+}, (table) => [
+  index("idx_reconcile_log_source_at").on(table.source, table.at),
+]);
+
 export const dailySummaries = sqliteTable("daily_summaries", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   date: text("date").notNull(),

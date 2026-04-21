@@ -4,6 +4,7 @@ import { sports } from "@/db/schema";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
 import { mapStravaType } from "@/lib/strava/mapping";
 import { upsertEvent } from "@/lib/ingest-service";
+import { ReconcileTracker } from "@/lib/reconcile";
 
 export const maxDuration = 120;
 
@@ -70,25 +71,37 @@ export async function POST(request: NextRequest) {
     errors: [],
   };
 
+  const tracker = new ReconcileTracker();
+
   try {
     for await (const activity of iterateActivities(afterUnix)) {
       result.fetched++;
-      await ingestOne(activity, sportIdByName, result);
+      await ingestOne(activity, sportIdByName, result, tracker);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
     return NextResponse.json(result, { status: 500 });
   }
 
+  // Strava's list API is authoritative for [after, now]. Force the
+  // reconcile range to cover that entire window so a deletion of the most
+  // recent activity (which sits past the upserted max) still gets caught.
+  tracker.setEventRange(
+    new Date(afterUnix * 1000).toISOString(),
+    new Date().toISOString()
+  );
+  const reconcile = await tracker.apply("strava");
+
   await touchLastSync();
 
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, reconcile });
 }
 
 async function ingestOne(
   activity: StravaActivity,
   sportIdByName: Map<string, number>,
-  result: SyncResult
+  result: SyncResult,
+  tracker: ReconcileTracker
 ): Promise<void> {
   const mapping = mapStravaType(activity.type, activity.sport_type);
   if (!mapping) {
@@ -120,6 +133,7 @@ async function ingestOne(
   const notes = notesParts.join(" · ") || null;
 
   try {
+    const sourceId = `strava-${activity.id}`;
     const { status } = await upsertEvent({
       sportId,
       type: mapping.type,
@@ -127,8 +141,9 @@ async function ingestOne(
       notes,
       startedAt: activity.start_date,
       source: "strava",
-      sourceId: `strava-${activity.id}`,
+      sourceId,
     });
+    tracker.recordEvent(sourceId, activity.start_date);
 
     if (status === "accepted") result.accepted++;
     else result.skipped++; // already existed - deduped

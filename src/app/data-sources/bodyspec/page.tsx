@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SourceDataBrowser } from "@/components/source-data-browser";
+import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 import { Wordmark } from "@/components/wordmark";
 import BodySpecUploadClient from "./upload-client";
 
@@ -29,6 +30,10 @@ export default function BodySpecPage() {
           <BodySpecUploadClient />
         </div>
       </details>
+
+      <div className="max-w-[820px]">
+        <SourceSyncBehavior source="bodyspec_dexa" />
+      </div>
 
       <section className="max-w-[820px]">
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
