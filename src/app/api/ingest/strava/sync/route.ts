@@ -173,6 +173,18 @@ async function ingestOne(
         );
       }
     }
+    if (typeof activity.average_heartrate === "number") {
+      const id = typeCache.byName.get("avg_hr");
+      if (id !== undefined) {
+        await upsertEventMetric(eventId, id, Math.round(activity.average_heartrate));
+      }
+    }
+    if (typeof activity.max_heartrate === "number") {
+      const id = typeCache.byName.get("max_hr");
+      if (id !== undefined) {
+        await upsertEventMetric(eventId, id, Math.round(activity.max_heartrate));
+      }
+    }
 
     if (status === "accepted") result.accepted++;
     else result.skipped++; // already existed - deduped

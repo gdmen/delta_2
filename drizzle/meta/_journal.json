@@ -57,6 +57,13 @@
       "when": 1776807990317,
       "tag": "0007_seed_distance_elevation",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1776817628599,
+      "tag": "0008_seed_heart_rate_metrics",
+      "breakpoints": true
     }
   ]
 }
