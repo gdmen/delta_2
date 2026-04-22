@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { sports } from "@/db/schema";
+import { sports, ingestConfigs } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
 import { mapStravaType } from "@/lib/strava/mapping";
 import { upsertEvent, upsertEventMetric } from "@/lib/ingest-service";
 import { buildMetricTypeCache, MetricTypeCache } from "@/lib/ingest/metric-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
-// Strava emits SI (meters). distance_km = m ÷ 1000; elevation_gain_m = m.
+// Strava emits SI (meters). distance_km for the canonical metric;
+// miles + feet for the notes string (user preference).
 const METERS_TO_KM = 1 / 1000;
+const METERS_TO_MILES = 1 / 1609.344;
+const METERS_TO_FEET = 3.28084;
 
 export const maxDuration = 120;
 
@@ -128,11 +132,12 @@ async function ingestOne(
   const notesParts: string[] = [];
   if (activity.name) notesParts.push(activity.name);
   if (activity.distance) {
-    const miles = (activity.distance / 1609.344).toFixed(2);
-    notesParts.push(`${miles} mi`);
+    notesParts.push(`${(activity.distance * METERS_TO_MILES).toFixed(2)} mi`);
   }
   if (activity.total_elevation_gain) {
-    notesParts.push(`${Math.round(activity.total_elevation_gain * 3.281)} ft climb`);
+    notesParts.push(
+      `${Math.round(activity.total_elevation_gain * METERS_TO_FEET)} ft climb`,
+    );
   }
   if (activity.average_heartrate) {
     notesParts.push(`avg HR ${Math.round(activity.average_heartrate)}`);
@@ -152,39 +157,28 @@ async function ingestOne(
     });
     tracker.recordEvent(sourceId, activity.start_date);
 
-    // Attach distance + elevation as event_metrics. Upsert keyed on
-    // (eventId, metricTypeId) means re-syncs refresh the values rather
-    // than duplicating. Skipped silently if a canonical type is missing
-    // (migration 0007 seeds them; this guard is defense-in-depth).
-    const distanceKm = activity.distance * METERS_TO_KM;
-    if (Number.isFinite(distanceKm)) {
-      const id = typeCache.byName.get("distance_km");
-      if (id !== undefined) {
-        await upsertEventMetric(eventId, id, Number(distanceKm.toFixed(3)));
-      }
+    // Attach per-event metrics. Upsert is keyed on (eventId, metricTypeId)
+    // so re-syncs refresh values rather than duplicating. Canonical metric
+    // types are migration-seeded; the undefined guard is defense-in-depth.
+    const attach: Array<[canonical: string, value: number]> = [];
+    if (Number.isFinite(activity.distance)) {
+      attach.push(["distance_km", Number((activity.distance * METERS_TO_KM).toFixed(3))]);
     }
     if (typeof activity.total_elevation_gain === "number") {
-      const id = typeCache.byName.get("elevation_gain_m");
-      if (id !== undefined) {
-        await upsertEventMetric(
-          eventId,
-          id,
-          Math.round(activity.total_elevation_gain)
-        );
-      }
+      attach.push(["elevation_gain_m", Math.round(activity.total_elevation_gain)]);
     }
     if (typeof activity.average_heartrate === "number") {
-      const id = typeCache.byName.get("avg_hr");
-      if (id !== undefined) {
-        await upsertEventMetric(eventId, id, Math.round(activity.average_heartrate));
-      }
+      attach.push(["avg_hr", Math.round(activity.average_heartrate)]);
     }
     if (typeof activity.max_heartrate === "number") {
-      const id = typeCache.byName.get("max_hr");
-      if (id !== undefined) {
-        await upsertEventMetric(eventId, id, Math.round(activity.max_heartrate));
-      }
+      attach.push(["max_hr", Math.round(activity.max_heartrate)]);
     }
+    await Promise.all(
+      attach.map(([name, value]) => {
+        const id = typeCache.byName.get(name);
+        return id === undefined ? undefined : upsertEventMetric(eventId, id, value);
+      }),
+    );
 
     if (status === "accepted") result.accepted++;
     else result.skipped++; // already existed - deduped
@@ -203,11 +197,7 @@ export async function GET() {
     return NextResponse.json({ connected: false });
   }
 
-  // Reach for last_sync_at.
-  const { db: database } = await import("@/db");
-  const { ingestConfigs } = await import("@/db/schema");
-  const { eq } = await import("drizzle-orm");
-  const rows = await database
+  const rows = await db
     .select({ lastSyncAt: ingestConfigs.lastSyncAt })
     .from(ingestConfigs)
     .where(eq(ingestConfigs.source, "strava"))

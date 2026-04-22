@@ -24,10 +24,10 @@ import {
   upsertEvent,
   upsertEventMetric,
   upsertWorkoutSet,
-  type MetricInput,
-  type EventInput,
+  resolveEventId,
   type WorkoutSetInput,
 } from "@/lib/ingest-service";
+import { isStatus } from "@/lib/enums";
 
 /**
  * POST /api/import
@@ -215,20 +215,12 @@ export async function POST(request: NextRequest) {
 // -----------------------------------------------------------------------------
 
 async function importMetrics(text: string): Promise<TableResult> {
-  const result = emptyResult();
-  const { headers, rows } = parseCsv(text);
-  let idx: Map<string, number>;
-  try {
-    idx = headerIndex(headers, ["recorded_at", "metric", "value"]);
-  } catch (err) {
-    result.errors.push(`metrics.csv: ${err instanceof Error ? err.message : String(err)}`);
-    return result;
-  }
-
   const typeCache = await buildMetricTypeCache();
-
-  for (const [i, row] of rows.entries()) {
-    try {
+  return processCsv(
+    "metrics.csv",
+    text,
+    ["recorded_at", "metric", "value"],
+    async (row, idx) => {
       const recordedAt = row[idx.get("recorded_at")!];
       const metricName = row[idx.get("metric")!];
       const valueStr = row[idx.get("value")!];
@@ -237,43 +229,31 @@ async function importMetrics(text: string): Promise<TableResult> {
       let sourceId = idx.has("source_id") ? row[idx.get("source_id")!] : "";
 
       if (!recordedAt || !metricName || valueStr === "") {
-        result.errors.push(`metrics.csv row ${i + 2}: missing required field`);
-        continue;
+        throw new Error("missing required field");
       }
       const value = Number(valueStr);
-      if (!Number.isFinite(value)) {
-        result.errors.push(`metrics.csv row ${i + 2}: non-numeric value "${valueStr}"`);
-        continue;
-      }
+      if (!Number.isFinite(value)) throw new Error(`non-numeric value "${valueStr}"`);
 
       if (!sourceId) sourceId = `csv_import-${metricName}-${recordedAt}`;
 
-      const typeId = await resolveMetricTypeId({
+      const metricTypeId = await resolveMetricTypeId({
         rawName: metricName,
-        // Identity map: the CSV already carries canonical names.
         map: { [metricName]: metricName },
         sourceSystem: "csv_import",
         unit: unit || undefined,
         cache: typeCache,
       });
 
-      const input: MetricInput = {
-        metricTypeId: typeId,
+      const status = await upsertMetric({
+        metricTypeId,
         value,
         recordedAt,
         source,
         sourceId,
-      };
-
-      const status = await upsertMetric(input);
-      if (status === "accepted") result.accepted++;
-      else result.skipped++;
-    } catch (err) {
-      result.errors.push(`metrics.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  return result;
+      });
+      return status === "accepted" ? "accepted" : "skipped";
+    },
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -281,20 +261,12 @@ async function importMetrics(text: string): Promise<TableResult> {
 // -----------------------------------------------------------------------------
 
 async function importEvents(text: string): Promise<TableResult> {
-  const result = emptyResult();
-  const { headers, rows } = parseCsv(text);
-  let idx: Map<string, number>;
-  try {
-    idx = headerIndex(headers, ["started_at", "sport", "type"]);
-  } catch (err) {
-    result.errors.push(`events.csv: ${err instanceof Error ? err.message : String(err)}`);
-    return result;
-  }
-
   const sportCache = await loadSportCache();
-
-  for (const [i, row] of rows.entries()) {
-    try {
+  return processCsv(
+    "events.csv",
+    text,
+    ["started_at", "sport", "type"],
+    async (row, idx) => {
       const startedAt = row[idx.get("started_at")!];
       const sportName = row[idx.get("sport")!];
       const type = row[idx.get("type")!];
@@ -303,28 +275,22 @@ async function importEvents(text: string): Promise<TableResult> {
       const source = (idx.has("source") ? row[idx.get("source")!] : "") || "csv_import";
       let sourceId = idx.has("source_id") ? row[idx.get("source_id")!] : "";
 
-      if (!startedAt || !sportName || !type) {
-        result.errors.push(`events.csv row ${i + 2}: missing required field`);
-        continue;
-      }
+      if (!startedAt || !sportName || !type) throw new Error("missing required field");
       const sportId = sportCache.get(sportName);
       if (!sportId) {
-        result.errors.push(
-          `events.csv row ${i + 2}: unknown sport "${sportName}" (known: ${[...sportCache.keys()].join(", ")})`
+        throw new Error(
+          `unknown sport "${sportName}" (known: ${[...sportCache.keys()].join(", ")})`,
         );
-        continue;
       }
       const duration = durStr === "" ? null : Number(durStr);
       if (duration !== null && !Number.isFinite(duration)) {
-        result.errors.push(`events.csv row ${i + 2}: non-numeric duration "${durStr}"`);
-        continue;
+        throw new Error(`non-numeric duration "${durStr}"`);
       }
 
       if (!sourceId) sourceId = `csv_import-${sportName}-${type}-${startedAt}`;
 
-      // Belt-and-suspenders: if an existing row matches on the natural
-      // key (sport, type, started_at) but has no source_id, adopt the
-      // synthesized one so this and future imports all dedupe against it.
+      // If an existing row matches on the natural key but has no source_id,
+      // adopt the synthesized one so future imports all dedupe against it.
       const natural = await db
         .select({ id: events.id, sourceId: events.sourceId })
         .from(events)
@@ -332,17 +298,16 @@ async function importEvents(text: string): Promise<TableResult> {
           and(
             eq(events.startedAt, startedAt),
             eq(events.sportId, sportId),
-            eq(events.type, type)
-          )
+            eq(events.type, type),
+          ),
         )
         .limit(1);
       if (natural.length > 0 && !natural[0].sourceId) {
         await db.update(events).set({ sourceId }).where(eq(events.id, natural[0].id));
-        result.skipped++;
-        continue;
+        return "skipped";
       }
 
-      const input: EventInput = {
+      const { status } = await upsertEvent({
         sportId,
         type,
         durationMinutes: duration,
@@ -350,17 +315,10 @@ async function importEvents(text: string): Promise<TableResult> {
         startedAt,
         source,
         sourceId,
-      };
-
-      const { status } = await upsertEvent(input);
-      if (status === "accepted") result.accepted++;
-      else result.skipped++;
-    } catch (err) {
-      result.errors.push(`events.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  return result;
+      });
+      return status === "accepted" ? "accepted" : "skipped";
+    },
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -368,27 +326,13 @@ async function importEvents(text: string): Promise<TableResult> {
 // -----------------------------------------------------------------------------
 
 async function importEventMetrics(text: string): Promise<TableResult> {
-  const result = emptyResult();
-  const { headers, rows } = parseCsv(text);
-  let idx: Map<string, number>;
-  try {
-    idx = headerIndex(headers, [
-      "event_started_at",
-      "sport",
-      "event_type",
-      "metric",
-      "value",
-    ]);
-  } catch (err) {
-    result.errors.push(`event_metrics.csv: ${err instanceof Error ? err.message : String(err)}`);
-    return result;
-  }
-
   const sportCache = await loadSportCache();
   const typeCache = await buildMetricTypeCache();
-
-  for (const [i, row] of rows.entries()) {
-    try {
+  return processCsv(
+    "event_metrics.csv",
+    text,
+    ["event_started_at", "sport", "event_type", "metric", "value"],
+    async (row, idx) => {
       const startedAt = row[idx.get("event_started_at")!];
       const sportName = row[idx.get("sport")!];
       const eventType = row[idx.get("event_type")!];
@@ -398,47 +342,19 @@ async function importEventMetrics(text: string): Promise<TableResult> {
       const valueStr = row[idx.get("value")!];
 
       if (!startedAt || !sportName || !eventType || !metricName || valueStr === "") {
-        result.errors.push(`event_metrics.csv row ${i + 2}: missing required field`);
-        continue;
+        throw new Error("missing required field");
       }
       const value = Number(valueStr);
-      if (!Number.isFinite(value)) {
-        result.errors.push(`event_metrics.csv row ${i + 2}: non-numeric value "${valueStr}"`);
-        continue;
-      }
+      if (!Number.isFinite(value)) throw new Error(`non-numeric value "${valueStr}"`);
       const sportId = sportCache.get(sportName);
-      if (!sportId) {
-        result.errors.push(`event_metrics.csv row ${i + 2}: unknown sport "${sportName}"`);
-        continue;
-      }
+      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
 
-      // Parent event resolution: source_id first, else natural key.
-      let parentId: number | null = null;
-      if (eventSourceId) {
-        const existing = await db
-          .select({ id: events.id })
-          .from(events)
-          .where(eq(events.sourceId, eventSourceId))
-          .limit(1);
-        parentId = existing[0]?.id ?? null;
-      }
-      if (parentId === null) {
-        const existing = await db
-          .select({ id: events.id })
-          .from(events)
-          .where(
-            and(
-              eq(events.startedAt, startedAt),
-              eq(events.sportId, sportId),
-              eq(events.type, eventType)
-            )
-          )
-          .limit(1);
-        parentId = existing[0]?.id ?? null;
-      }
-
-      // No parent: auto-create a barebones event so the metric has somewhere
-      // to hang. Mirrors the workout_sets.csv behaviour.
+      let parentId = await resolveEventId({
+        sourceId: eventSourceId,
+        startedAt,
+        sportId,
+        type: eventType,
+      });
       if (parentId === null) {
         const synthId = eventSourceId || `csv_import-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
@@ -455,7 +371,6 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 
       const metricTypeId = await resolveMetricTypeId({
         rawName: metricName,
-        // Identity map: exporter emitted canonical names.
         map: { [metricName]: metricName },
         sourceSystem: "csv_import",
         unit: unit || undefined,
@@ -463,16 +378,9 @@ async function importEventMetrics(text: string): Promise<TableResult> {
       });
 
       const status = await upsertEventMetric(parentId, metricTypeId, value);
-      if (status === "accepted") result.accepted++;
-      else result.updated++;
-    } catch (err) {
-      result.errors.push(
-        `event_metrics.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  return result;
+      return status === "accepted" ? "accepted" : "updated";
+    },
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -480,28 +388,12 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 // -----------------------------------------------------------------------------
 
 async function importWorkoutSets(text: string): Promise<TableResult> {
-  const result = emptyResult();
-  const { headers, rows } = parseCsv(text);
-  let idx: Map<string, number>;
-  try {
-    idx = headerIndex(headers, [
-      "event_started_at",
-      "sport",
-      "event_type",
-      "exercise_name",
-      "set_number",
-      "reps",
-      "weight",
-    ]);
-  } catch (err) {
-    result.errors.push(`workout_sets.csv: ${err instanceof Error ? err.message : String(err)}`);
-    return result;
-  }
-
   const sportCache = await loadSportCache();
-
-  for (const [i, row] of rows.entries()) {
-    try {
+  return processCsv(
+    "workout_sets.csv",
+    text,
+    ["event_started_at", "sport", "event_type", "exercise_name", "set_number", "reps", "weight"],
+    async (row, idx) => {
       const startedAt = row[idx.get("event_started_at")!];
       const sportName = row[idx.get("sport")!];
       const eventType = row[idx.get("event_type")!];
@@ -514,45 +406,17 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
       const notes = idx.has("notes") ? row[idx.get("notes")!] : "";
 
       if (!startedAt || !sportName || !eventType || !exerciseName) {
-        result.errors.push(`workout_sets.csv row ${i + 2}: missing required field`);
-        continue;
+        throw new Error("missing required field");
       }
-
       const sportId = sportCache.get(sportName);
-      if (!sportId) {
-        result.errors.push(`workout_sets.csv row ${i + 2}: unknown sport "${sportName}"`);
-        continue;
-      }
+      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
 
-      // Find parent event. Prefer event_source_id if provided, otherwise
-      // match on (started_at, sport_id, type).
-      let parentId: number | null = null;
-      if (eventSourceId) {
-        const existing = await db
-          .select({ id: events.id })
-          .from(events)
-          .where(eq(events.sourceId, eventSourceId))
-          .limit(1);
-        parentId = existing[0]?.id ?? null;
-      }
-      if (parentId === null) {
-        const existing = await db
-          .select({ id: events.id })
-          .from(events)
-          .where(
-            and(
-              eq(events.startedAt, startedAt),
-              eq(events.sportId, sportId),
-              eq(events.type, eventType)
-            )
-          )
-          .limit(1);
-        parentId = existing[0]?.id ?? null;
-      }
-
-      // No parent found: auto-create a barebones event so the sets have
-      // something to hang off of. Use a stable synthetic source_id so a
-      // re-import finds it.
+      let parentId = await resolveEventId({
+        sourceId: eventSourceId,
+        startedAt,
+        sportId,
+        type: eventType,
+      });
       if (parentId === null) {
         const synthId = eventSourceId || `csv_import-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
@@ -580,21 +444,13 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
         !Number.isFinite(input.reps) ||
         !Number.isFinite(input.weight)
       ) {
-        result.errors.push(`workout_sets.csv row ${i + 2}: non-numeric set/reps/weight`);
-        continue;
+        throw new Error("non-numeric set/reps/weight");
       }
 
       const status = await upsertWorkoutSet(parentId, input);
-      if (status === "accepted") result.accepted++;
-      else result.updated++;
-    } catch (err) {
-      result.errors.push(
-        `workout_sets.csv row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  return result;
+      return status === "accepted" ? "accepted" : "updated";
+    },
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -788,9 +644,7 @@ async function importGoals(text: string): Promise<TableResult> {
       if (!sportName || !metricName || targetStr === "" || !deadline) {
         throw new Error("missing required field");
       }
-      if (status !== "active" && status !== "completed" && status !== "abandoned") {
-        throw new Error(`invalid status "${status}"`);
-      }
+      if (!isStatus(status)) throw new Error(`invalid status "${status}"`);
       const target = Number(targetStr);
       if (!Number.isFinite(target)) {
         throw new Error(`non-numeric target_value "${targetStr}"`);
@@ -848,9 +702,7 @@ async function importFocuses(text: string): Promise<TableResult> {
         : "";
 
       if (!name || !sportName || !startDate) throw new Error("missing required field");
-      if (status !== "active" && status !== "completed" && status !== "abandoned") {
-        throw new Error(`invalid status "${status}"`);
-      }
+      if (!isStatus(status)) throw new Error(`invalid status "${status}"`);
       const sportId = sportCache.get(sportName);
       if (!sportId) throw new Error(`unknown sport "${sportName}"`);
 

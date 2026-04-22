@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { metrics, metricTypes, events, sports, dailySummaries } from "@/db/schema";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { metrics, metricTypes, events, sports } from "@/db/schema";
+import { and, eq, gte, lte } from "drizzle-orm";
 
 export interface DailySummary {
   date: string;

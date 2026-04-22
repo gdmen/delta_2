@@ -17,6 +17,7 @@ import {
   focusEntries,
 } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { serializeCsv } from "@/lib/csv";
 
 /**
@@ -138,7 +139,10 @@ export async function GET() {
 
   // --- focuses.csv ---------------------------------------------------------
   // Natural key: (sport, name, start_date). Linked goal (optional) carries
-  // its own (sport, metric, deadline) tuple the importer resolves.
+  // its own (sport, metric, deadline) tuple the importer resolves. Single
+  // LEFT JOIN through goals → alias(sports) + metric_types so the goal's
+  // natural key comes back inline without a follow-up query.
+  const goalSports = alias(sports, "goal_sports");
   const focusRows = await db
     .select({
       name: focuses.name,
@@ -147,34 +151,16 @@ export async function GET() {
       endDate: focuses.endDate,
       status: focuses.status,
       technicalNotes: focuses.technicalNotes,
-      goalId: focuses.goalId,
+      goalSport: goalSports.name,
+      goalMetric: metricTypes.name,
+      goalDeadline: goals.deadline,
     })
     .from(focuses)
     .innerJoin(sports, eq(focuses.sportId, sports.id))
+    .leftJoin(goals, eq(focuses.goalId, goals.id))
+    .leftJoin(goalSports, eq(goals.sportId, goalSports.id))
+    .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .orderBy(asc(focuses.startDate));
-
-  // Pre-resolve linked goals in one query so each focus row can carry a
-  // (goal_sport, goal_metric, goal_deadline) natural key the importer
-  // can look up. Map goal.id -> { sport, metric, deadline }.
-  const linkedGoalIds = focusRows
-    .map((f) => f.goalId)
-    .filter((id): id is number => id != null);
-  const goalLookup = new Map<number, { sport: string; metric: string; deadline: string }>();
-  if (linkedGoalIds.length > 0) {
-    const rows = await db
-      .select({
-        id: goals.id,
-        sport: sports.name,
-        metric: metricTypes.name,
-        deadline: goals.deadline,
-      })
-      .from(goals)
-      .innerJoin(sports, eq(goals.sportId, sports.id))
-      .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id));
-    for (const r of rows) {
-      goalLookup.set(r.id, { sport: r.sport, metric: r.metric, deadline: r.deadline });
-    }
-  }
 
   const focusesCsv = serializeCsv(
     [
@@ -188,20 +174,17 @@ export async function GET() {
       "goal_metric",
       "goal_deadline",
     ],
-    focusRows.map((r) => {
-      const goal = r.goalId != null ? goalLookup.get(r.goalId) : undefined;
-      return [
-        r.name,
-        r.sport,
-        r.startDate,
-        r.endDate ?? "",
-        r.status,
-        r.technicalNotes ?? "",
-        goal?.sport ?? "",
-        goal?.metric ?? "",
-        goal?.deadline ?? "",
-      ];
-    }),
+    focusRows.map((r) => [
+      r.name,
+      r.sport,
+      r.startDate,
+      r.endDate ?? "",
+      r.status,
+      r.technicalNotes ?? "",
+      r.goalSport ?? "",
+      r.goalMetric ?? "",
+      r.goalDeadline ?? "",
+    ]),
   );
 
   // --- focus_metric_links.csv ----------------------------------------------

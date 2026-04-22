@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { metrics, events, workoutSets, dailySummaries, eventMetrics } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export interface IngestResult {
   accepted: number;
@@ -60,6 +60,40 @@ export async function upsertMetric(input: MetricInput): Promise<"accepted" | "sk
 
   await invalidateDailySummary(input.metricTypeId, input.recordedAt);
   return "accepted";
+}
+
+/**
+ * Look up an existing event by source_id first, then fall back to the
+ * (started_at, sport_id, type) natural key. Used by CSV importers that
+ * attach child rows (event_metrics, workout_sets) to parent events —
+ * source_id wins when present, natural key handles manual rows.
+ */
+export async function resolveEventId(input: {
+  sourceId: string;
+  startedAt: string;
+  sportId: number;
+  type: string;
+}): Promise<number | null> {
+  if (input.sourceId) {
+    const bySourceId = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.sourceId, input.sourceId))
+      .limit(1);
+    if (bySourceId[0]) return bySourceId[0].id;
+  }
+  const byNatural = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(
+      and(
+        eq(events.startedAt, input.startedAt),
+        eq(events.sportId, input.sportId),
+        eq(events.type, input.type),
+      ),
+    )
+    .limit(1);
+  return byNatural[0]?.id ?? null;
 }
 
 export async function upsertEvent(input: EventInput): Promise<{ status: "accepted" | "skipped"; eventId: number }> {

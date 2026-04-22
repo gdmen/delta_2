@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { metrics, metricTypes } from "@/db/schema";
-import { eq, gte, desc, asc } from "drizzle-orm";
+import { metrics } from "@/db/schema";
+import { and, eq, gte, desc, asc } from "drizzle-orm";
 
 export interface GoalSummary {
   id: number;
@@ -27,10 +27,6 @@ export interface GoalProgress {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_WEEK = 7 * MS_PER_DAY;
-
-function daysBetween(a: Date, b: Date): number {
-  return Math.max(0, Math.ceil((b.getTime() - a.getTime()) / MS_PER_DAY));
-}
 
 /**
  * Linear regression slope (y per x) via least-squares.
@@ -61,33 +57,54 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
   const daysRemaining = Math.max(0, Math.ceil((deadlineTs - now) / MS_PER_DAY));
   const weeksRemaining = daysRemaining / 7;
 
-  // Pull all samples for this metric type, ordered newest first.
-  // In practice this is bounded (hundreds of rows at most).
-  const latestRows = await db
-    .select({ value: metrics.value, recordedAt: metrics.recordedAt })
-    .from(metrics)
-    .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .where(eq(metricTypes.id, goal.metricTypeId))
-    .orderBy(desc(metrics.recordedAt))
-    .limit(1);
+  // Parallel fire the four fixed-size lookups; they don't depend on each other.
+  const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();
+  // goal.createdAt is SQLite datetime('now') ("YYYY-MM-DD HH:MM:SS", UTC).
+  // metrics.recordedAt is always ISO ("YYYY-MM-DDTHH:MM:SS..."). Convert so
+  // string comparison in `gte` below lines up with chronological ordering.
+  const createdAtIso = goal.createdAt.includes("T")
+    ? goal.createdAt
+    : goal.createdAt.replace(" ", "T") + "Z";
+  const [latestRows, afterCreateRows, earliestRows, recentRows] = await Promise.all([
+    db
+      .select({ value: metrics.value })
+      .from(metrics)
+      .where(eq(metrics.metricTypeId, goal.metricTypeId))
+      .orderBy(desc(metrics.recordedAt))
+      .limit(1),
+    db
+      .select({ value: metrics.value })
+      .from(metrics)
+      .where(
+        and(
+          eq(metrics.metricTypeId, goal.metricTypeId),
+          gte(metrics.recordedAt, createdAtIso),
+        ),
+      )
+      .orderBy(asc(metrics.recordedAt))
+      .limit(1),
+    db
+      .select({ value: metrics.value })
+      .from(metrics)
+      .where(eq(metrics.metricTypeId, goal.metricTypeId))
+      .orderBy(asc(metrics.recordedAt))
+      .limit(1),
+    db
+      .select({ value: metrics.value, recordedAt: metrics.recordedAt })
+      .from(metrics)
+      .where(
+        and(
+          eq(metrics.metricTypeId, goal.metricTypeId),
+          gte(metrics.recordedAt, fourWeeksAgo),
+        ),
+      )
+      .orderBy(asc(metrics.recordedAt)),
+  ]);
 
   const currentValue = latestRows[0]?.value ?? null;
-
-  // Start value: first sample on or after goal creation (so we measure progress since the goal was set).
-  const startRows = await db
-    .select({ value: metrics.value, recordedAt: metrics.recordedAt })
-    .from(metrics)
-    .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .where(
-      eq(metricTypes.id, goal.metricTypeId)
-    )
-    .orderBy(asc(metrics.recordedAt))
-    .limit(200);
-
-  // Take the first sample at or after createdAt, fall back to earliest sample overall.
-  const createdAt = new Date(goal.createdAt).getTime();
-  const afterCreate = startRows.find((r) => new Date(r.recordedAt).getTime() >= createdAt);
-  const startValue = afterCreate?.value ?? startRows[0]?.value ?? null;
+  // Start value: earliest sample at or after goal creation, falling back to
+  // the earliest sample overall (useful when a goal was set retroactively).
+  const startValue = afterCreateRows[0]?.value ?? earliestRows[0]?.value ?? null;
 
   const direction: "up" | "down" = startValue !== null
     ? (goal.targetValue >= startValue ? "up" : "down")
@@ -106,21 +123,11 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
     requiredRatePerWeek = (goal.targetValue - currentValue) / weeksRemaining;
   }
 
-  // Actual rate: linear regression over last 4 weeks.
-  const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();
-  const recentRows = await db
-    .select({ value: metrics.value, recordedAt: metrics.recordedAt })
-    .from(metrics)
-    .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .where(
-      eq(metricTypes.id, goal.metricTypeId)
-    )
-    .orderBy(asc(metrics.recordedAt));
-
-  const recent = recentRows
-    .filter((r) => r.recordedAt >= fourWeeksAgo)
-    .map((r) => ({ t: new Date(r.recordedAt).getTime(), v: r.value }));
-
+  // Actual rate: linear regression over the last 4 weeks (SQL-filtered above).
+  const recent = recentRows.map((r) => ({
+    t: new Date(r.recordedAt).getTime(),
+    v: r.value,
+  }));
   const actualRatePerWeek = regressionSlopePerWeek(recent);
 
   // Status classification.

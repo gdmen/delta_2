@@ -5,6 +5,7 @@ import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { DataTabs } from "../tabs";
 import { ImportExportBar } from "../import-export-bar";
 import { PaginationControls } from "@/components/pagination-controls";
+import { formatShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -224,13 +225,3 @@ function isIsoDate(s: string | undefined): s is string {
   return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function formatShort(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace("T", " ");
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}

@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { focuses, focusEntries } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { type Status } from "@/lib/enums";
 
 interface UpdateFocusBody {
   name?: string;
-  status?: "active" | "completed" | "abandoned";
+  status?: Status;
   technicalNotes?: string;
   verdict?: string;
   goalId?: number | null;

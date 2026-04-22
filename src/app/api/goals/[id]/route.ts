@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goals, focuses } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { STATUSES, type Status, isStatus } from "@/lib/enums";
 
 interface UpdateGoalBody {
   targetValue?: number;
   deadline?: string; // YYYY-MM-DD
-  status?: "active" | "completed" | "abandoned";
+  status?: Status;
   // Only meaningful when status is set to "abandoned". If true, every active
   // focus pointing at this goal is also moved to "abandoned" in the same
   // request so callers don't have to orchestrate two PATCHes.
@@ -42,9 +43,9 @@ export async function PATCH(
     updates.deadline = body.deadline;
   }
   if (body.status !== undefined) {
-    if (!["active", "completed", "abandoned"].includes(body.status)) {
+    if (!isStatus(body.status)) {
       return NextResponse.json(
-        { error: "status must be active, completed, or abandoned" },
+        { error: `status must be one of: ${STATUSES.join(", ")}` },
         { status: 400 }
       );
     }

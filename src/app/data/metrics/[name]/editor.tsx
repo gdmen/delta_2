@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatShort } from "@/lib/format";
 
 interface MetricRow {
   id: number;
@@ -166,7 +167,7 @@ export function MetricHistoryEditor({
                         className="px-2 py-1 border border-border rounded text-[0.8125rem] font-mono"
                       />
                     ) : (
-                      formatTs(r.recordedAt)
+                      formatShort(r.recordedAt)
                     )}
                   </td>
                   <td className="px-3 py-2 text-right font-mono tabular-nums">
@@ -252,13 +253,3 @@ export function MetricHistoryEditor({
   );
 }
 
-function formatTs(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}

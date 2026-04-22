@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { focuses, sports, goals, metricTypes, focusEntries } from "@/db/schema";
-import { eq, desc, ne } from "drizzle-orm";
-import { getDailySummaries, daysAgo, today, DailySummary } from "./pre-aggregate";
+import { eq, desc, ne, inArray } from "drizzle-orm";
+import { getDailySummaries, daysAgo, DailySummary } from "./pre-aggregate";
 import { computeGoalProgress } from "@/lib/goal-calc";
 
 export interface CoachContext {
@@ -58,35 +58,46 @@ export async function assembleBriefingContext(days = 7): Promise<CoachContext> {
     .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .where(eq(focuses.status, "active"));
 
-  const activeFocuses = await Promise.all(
-    focusRows.map(async (f) => {
-      const entries = await db
-        .select({ content: focusEntries.content })
-        .from(focusEntries)
-        .where(eq(focusEntries.focusId, f.id))
-        .orderBy(desc(focusEntries.createdAt))
-        .limit(3);
+  // Batch-fetch all recent entries for all active focuses in a single query,
+  // then bucket by focus id and take the top 3 per focus in JS.
+  const focusIds = focusRows.map((f) => f.id);
+  const entriesByFocus = new Map<number, string[]>();
+  if (focusIds.length > 0) {
+    const allEntries = await db
+      .select({
+        focusId: focusEntries.focusId,
+        content: focusEntries.content,
+      })
+      .from(focusEntries)
+      .where(inArray(focusEntries.focusId, focusIds))
+      .orderBy(desc(focusEntries.createdAt));
+    for (const e of allEntries) {
+      const bucket = entriesByFocus.get(e.focusId) ?? [];
+      if (bucket.length < 3) {
+        bucket.push(e.content);
+        entriesByFocus.set(e.focusId, bucket);
+      }
+    }
+  }
 
-      const weeksActive = Math.max(
-        1,
-        Math.ceil((Date.now() - new Date(f.startDate).getTime()) / (7 * 24 * 60 * 60 * 1000))
-      );
-
-      const linkedGoal =
-        f.goalId && f.goalMetric && f.goalTarget !== null && f.goalUnit && f.goalDeadline
-          ? `${f.goalMetric} → ${f.goalTarget}${f.goalUnit} by ${f.goalDeadline}`
-          : null;
-
-      return {
-        name: f.name,
-        sport: f.sportName,
-        weeksActive,
-        technicalNotes: f.technicalNotes,
-        recentEntries: entries.map((e) => e.content),
-        linkedGoal,
-      };
-    })
-  );
+  const activeFocuses = focusRows.map((f) => {
+    const weeksActive = Math.max(
+      1,
+      Math.ceil((Date.now() - new Date(f.startDate).getTime()) / (7 * 24 * 60 * 60 * 1000)),
+    );
+    const linkedGoal =
+      f.goalId && f.goalMetric && f.goalTarget !== null && f.goalUnit && f.goalDeadline
+        ? `${f.goalMetric} → ${f.goalTarget}${f.goalUnit} by ${f.goalDeadline}`
+        : null;
+    return {
+      name: f.name,
+      sport: f.sportName,
+      weeksActive,
+      technicalNotes: f.technicalNotes,
+      recentEntries: entriesByFocus.get(f.id) ?? [],
+      linkedGoal,
+    };
+  });
 
   const goalRows = await db
     .select({

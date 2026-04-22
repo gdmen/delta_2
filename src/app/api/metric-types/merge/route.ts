@@ -125,7 +125,6 @@ export async function POST(request: NextRequest) {
       const merged = byId.get(mergeId)!;
       const rescale = scales[mergeId] ?? 1;
 
-      // 1. metrics — re-point and rescale value if applicable.
       const metricsUpd = tx
         .update(metrics)
         .set({
@@ -136,7 +135,7 @@ export async function POST(request: NextRequest) {
         .returning({ id: metrics.id })
         .all();
 
-      // 2. event_metrics — pre-dedupe then re-point (unique on event_id,metric_type_id).
+      // event_metrics has a UNIQUE(event_id, metric_type_id); dedupe before re-pointing.
       const canonicalEventIds = tx
         .select({ eid: eventMetrics.eventId })
         .from(eventMetrics)
@@ -164,11 +163,9 @@ export async function POST(request: NextRequest) {
         .where(eq(eventMetrics.metricTypeId, mergeId))
         .run();
 
-      // 3. daily_summaries — aggregate collisions via INSERT...SELECT with
-      //    ON CONFLICT DO UPDATE, then delete the merged rows. Using raw SQL
-      //    because drizzle's builder doesn't ergonomically express
-      //    INSERT-FROM-SELECT + ON CONFLICT with an aliased excluded row.
-      //    Weighted avg: (avg*count + avg2*count2) / sumCount.
+      // daily_summaries collision collapse. Raw SQL because drizzle's builder
+      // doesn't ergonomically express INSERT-FROM-SELECT + ON CONFLICT with
+      // an aliased `excluded` row. Weighted avg: (avg*count + avg2*count2) / sumCount.
       const summariesBefore = tx
         .select({ id: dailySummaries.id })
         .from(dailySummaries)
@@ -208,10 +205,9 @@ export async function POST(request: NextRequest) {
         tx.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, mergeId)).run();
       }
 
-      // 4. goals — simple retarget (no unique constraint on metric_type_id).
       tx.update(goals).set({ metricTypeId: canonicalId }).where(eq(goals.metricTypeId, mergeId)).run();
 
-      // 5. focus_metric_links — pre-dedupe then retarget.
+      // focus_metric_links has no unique constraint; dedupe by (focus_id, metric_type_id).
       const canonicalFocusIds = tx
         .select({ fid: focusMetricLinks.focusId })
         .from(focusMetricLinks)
@@ -235,16 +231,15 @@ export async function POST(request: NextRequest) {
         .where(eq(focusMetricLinks.metricTypeId, mergeId))
         .run();
 
-      // 6. Record the alias so future ingests route here directly.
+      // Record the alias so future ingests route here directly.
       tx
         .insert(metricTypeAliases)
         .values({ alias: merged.name, canonicalMetricTypeId: canonicalId })
         .onConflictDoNothing()
         .run();
 
-      // 7. Delete the merged metric_types row. ON DELETE CASCADE on the
-      //    alias FK means any aliases that pointed AT this merged type
-      //    get cleaned up automatically.
+      // ON DELETE CASCADE on the alias FK auto-cleans any aliases that
+      // pointed AT this merged type.
       tx.delete(metricTypes).where(eq(metricTypes.id, mergeId)).run();
 
       out.push({

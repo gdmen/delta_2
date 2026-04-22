@@ -4,6 +4,7 @@ import { Wordmark } from "@/components/wordmark";
 import { db } from "@/db";
 import { importSources } from "@/db/schema";
 import { asc } from "drizzle-orm";
+import { formatShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -217,13 +218,3 @@ function StatusBadge({ status }: { status: Status }) {
   );
 }
 
-function formatShort(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace("T", " ");
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}

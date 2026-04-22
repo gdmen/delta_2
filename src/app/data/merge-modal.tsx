@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 export interface MergeCandidate {
@@ -36,15 +36,14 @@ export function MergeModal({ candidates, onClose }: Props) {
   const unitMismatch = merged.some((m) => m.unit !== canonical.unit);
   const totalMoved = merged.reduce((sum, m) => sum + m.count, 0);
 
-  const canSubmit = useMemo(() => {
-    if (busy) return false;
-    if (!unitMismatch) return true;
-    if (!rescale) return false;
-    return merged.every((m) => {
-      const v = Number(scales[m.id]);
-      return Number.isFinite(v) && v !== 0;
-    });
-  }, [busy, unitMismatch, rescale, merged, scales]);
+  const canSubmit =
+    !busy &&
+    (!unitMismatch ||
+      (rescale &&
+        merged.every((m) => {
+          const v = Number(scales[m.id]);
+          return Number.isFinite(v) && v !== 0;
+        })));
 
   async function handleConfirm() {
     setBusy(true);

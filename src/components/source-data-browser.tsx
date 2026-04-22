@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { metrics, events, metricTypes, sports } from "@/db/schema";
 import { sql, eq } from "drizzle-orm";
+import { formatShort } from "@/lib/format";
 
 /**
  * Per-source "what has been imported" summary.
@@ -142,14 +143,3 @@ export async function SourceDataBrowser({ source }: { source: string }) {
   );
 }
 
-function formatShort(iso: string): string {
-  // "2026-04-16T17:51:27-07:00" -> "2026-04-16 17:51"
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 16).replace("T", " ");
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-}

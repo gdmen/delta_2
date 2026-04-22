@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { workoutSets, events, sports } from "@/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 /**
  * Big-3 stats for the powerlifting page. Derives everything from
