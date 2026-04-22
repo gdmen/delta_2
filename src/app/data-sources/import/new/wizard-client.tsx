@@ -4,7 +4,11 @@ import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileDropZone } from "@/components/file-drop-zone";
 import { parseCsv } from "@/lib/csv";
-import type { ColumnRef, ImportMapping } from "@/lib/import-mapping";
+import {
+  collectReferencedColumns,
+  type ColumnRef,
+  type ImportMapping,
+} from "@/lib/import-mapping";
 import {
   KindPicker,
   MappingEditor,
@@ -204,6 +208,8 @@ export function WizardClient() {
           distinctValuesByColumn={distinctValuesByColumn}
         />
 
+        <UnusedColumnsSection headers={preview.headers} mapping={mapping} />
+
         <section>
           <h3 className="font-mono text-[0.6875rem] uppercase tracking-wider text-muted mb-3">
             Preview - first 5 parsed rows
@@ -269,5 +275,39 @@ export function WizardClient() {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Lists CSV headers the current mapping isn't reading. Helps the user
+ * notice data they're silently discarding before they save the mapping.
+ */
+function UnusedColumnsSection({
+  headers,
+  mapping,
+}: {
+  headers: string[];
+  mapping: ImportMapping;
+}) {
+  const referenced = collectReferencedColumns(mapping);
+  const unused = headers.filter((h) => h && !referenced.has(h));
+  if (unused.length === 0) return null;
+  return (
+    <section>
+      <h3 className="font-mono text-[0.6875rem] uppercase tracking-wider text-muted mb-2">
+        Unused columns · {unused.length} of {headers.length}
+      </h3>
+      <p className="text-[0.75rem] text-muted mb-2">
+        These CSV columns aren&apos;t referenced by the mapping and will be
+        ignored on import.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {unused.map((h) => (
+          <code key={h} className="font-mono text-[0.75rem] bg-surface px-2 py-0.5 rounded border border-border">
+            {h}
+          </code>
+        ))}
+      </div>
+    </section>
   );
 }

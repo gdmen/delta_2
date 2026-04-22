@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ColumnRef, ImportMapping, ValueSlot } from "@/lib/import-mapping";
+import {
+  collectReferencedColumns,
+  type ImportMapping,
+} from "@/lib/import-mapping";
 import {
   MappingEditor,
   useMetricTypeNames,
@@ -56,7 +59,7 @@ export function EditClient({
 
   const metricNames = useMetricTypeNames();
   const sportNames = useSportNames();
-  const headers = collectKnownHeaders(mapping);
+  const headers = [...collectReferencedColumns(mapping)];
 
   // Load existing metric_types this source has written to (for migration detection).
   useEffect(() => {
@@ -304,47 +307,6 @@ function MigrationPanel({
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-
-/** Collect column names this mapping references so editor dropdowns aren't empty. */
-function collectKnownHeaders(m: ImportMapping): string[] {
-  const acc = new Set<string>();
-  const addSlot = (s: ValueSlot | undefined) => {
-    if (!s || s.source !== "column") return;
-    if ("column" in s.ref) acc.add(s.ref.column);
-  };
-  const addRef = (r: { ref: ColumnRef } | undefined) => {
-    if (r && "column" in r.ref && r.ref.column) acc.add(r.ref.column);
-  };
-
-  if ("recordedAt" in m) addRef(m.recordedAt);
-  if ("startedAt" in m) addRef(m.startedAt);
-  if (m.kind === "metrics") {
-    for (const mt of m.metrics) {
-      addSlot(mt.name);
-      addSlot(mt.value);
-      addSlot(mt.unit);
-    }
-    addSlot(m.sourceId);
-  } else if (m.kind === "events") {
-    addSlot(m.sport);
-    addSlot(m.type);
-    addSlot(m.durationMinutes);
-    addSlot(m.notes);
-    addSlot(m.sourceId);
-  } else {
-    addSlot(m.sport);
-    addSlot(m.eventType);
-    addSlot(m.eventSourceId);
-    addSlot(m.exerciseName);
-    addSlot(m.setNumber);
-    addSlot(m.reps);
-    addSlot(m.weight);
-    addSlot(m.rpe);
-    addSlot(m.notes);
-  }
-  if (m.rowFilter && "column" in m.rowFilter) acc.add(m.rowFilter.column);
-  return [...acc];
-}
 
 /** Literal metric names declared in the new mapping (metrics kind only). */
 function literalMetricNames(m: ImportMapping): string[] {

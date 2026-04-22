@@ -112,6 +112,58 @@ export type WorkoutSetsMapping = {
 
 export type ImportMapping = MetricsMapping | EventsMapping | WorkoutSetsMapping;
 
+/**
+ * Every column name this mapping reads from. Covers top-level ValueSlots,
+ * the date-ref columns, nested per-metric targets (both the metrics-kind
+ * array and the events-kind `metrics` sidecar), and the rowFilter column.
+ * Used to (a) populate dropdown options when we don't have a live CSV header
+ * list, and (b) compute which uploaded CSV columns the mapping is ignoring.
+ */
+export function collectReferencedColumns(m: ImportMapping): Set<string> {
+  const acc = new Set<string>();
+  const addSlot = (s: ValueSlot | undefined) => {
+    if (!s || s.source !== "column") return;
+    if ("column" in s.ref && s.ref.column) acc.add(s.ref.column);
+  };
+  const addRef = (r: { ref: ColumnRef } | undefined) => {
+    if (r && "column" in r.ref && r.ref.column) acc.add(r.ref.column);
+  };
+  const addMetricTargets = (targets: MetricTarget[] | undefined) => {
+    for (const t of targets ?? []) {
+      addSlot(t.name);
+      addSlot(t.value);
+      addSlot(t.unit);
+    }
+  };
+
+  if (m.kind === "metrics") {
+    addRef(m.recordedAt);
+    addMetricTargets(m.metrics);
+    addSlot(m.sourceId);
+  } else if (m.kind === "events") {
+    addRef(m.startedAt);
+    addSlot(m.sport);
+    addSlot(m.type);
+    addSlot(m.durationMinutes);
+    addSlot(m.notes);
+    addSlot(m.sourceId);
+    addMetricTargets(m.metrics);
+  } else {
+    addRef(m.startedAt);
+    addSlot(m.sport);
+    addSlot(m.eventType);
+    addSlot(m.eventSourceId);
+    addSlot(m.exerciseName);
+    addSlot(m.setNumber);
+    addSlot(m.reps);
+    addSlot(m.weight);
+    addSlot(m.rpe);
+    addSlot(m.notes);
+  }
+  if (m.rowFilter && "column" in m.rowFilter) acc.add(m.rowFilter.column);
+  return acc;
+}
+
 // -----------------------------------------------------------------------------
 // Output shapes (kind-discriminated records fed to the importer)
 // -----------------------------------------------------------------------------
