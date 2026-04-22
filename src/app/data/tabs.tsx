@@ -5,11 +5,12 @@ import Link from "next/link";
  * and /data/events (events tab). The active tab is derived from the
  * route, so each tab link is an honest Next.js navigation.
  */
-export function DataTabs({ active }: { active: "metrics" | "events" }) {
+export function DataTabs({ active }: { active: "metrics" | "events" | "sports" }) {
   return (
     <div className="flex gap-0 border-b border-border mb-6">
       <TabLink href="/data" label="Metrics" active={active === "metrics"} />
       <TabLink href="/data/events" label="Events" active={active === "events"} />
+      <TabLink href="/data/sports" label="Sports" active={active === "sports"} />
     </div>
   );
 }

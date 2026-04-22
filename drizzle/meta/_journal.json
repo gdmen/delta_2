@@ -64,6 +64,13 @@
       "when": 1776817628599,
       "tag": "0008_seed_heart_rate_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1776873040756,
+      "tag": "0009_seed_sports",
+      "breakpoints": true
     }
   ]
 }

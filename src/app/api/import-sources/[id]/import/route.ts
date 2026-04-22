@@ -144,8 +144,7 @@ async function writeOutRow(
   }
 
   if (item.kind === "event") {
-    const sportId = sportByName.get(item.sport);
-    if (!sportId) throw new Error(`unknown sport "${item.sport}"`);
+    const sportId = await resolveSportId(item.sport, sourceTag, sportByName);
     // When the mapping doesn't supply a source_id, include the row index
     // so multiple rows that share a date/sport/type (e.g. three Stationary
     // Bike sets on the same day) each become their own event and each
@@ -183,8 +182,7 @@ async function writeOutRow(
   }
 
   if (item.kind === "workout_set") {
-    const sportId = sportByName.get(item.sport);
-    if (!sportId) throw new Error(`unknown sport "${item.sport}"`);
+    const sportId = await resolveSportId(item.sport, sourceTag, sportByName);
 
     // Resolve parent event. Whatever the parent's source_id ends up being,
     // record it in the tracker so reconcile preserves the parent (cascades
@@ -255,4 +253,66 @@ async function writeOutRow(
     else result.updated++;
     return;
   }
+}
+
+// Palette for auto-created sports. Disjoint from the 5 seeded sport colors
+// so new rows are visually distinct. Cycled by source-tag hash so the same
+// source consistently picks the same colour across its imports.
+const SPORT_PALETTE = [
+  "#0ea5e9",
+  "#f97316",
+  "#84cc16",
+  "#a855f7",
+  "#14b8a6",
+  "#ef4444",
+  "#eab308",
+  "#ec4899",
+];
+
+function hashPaletteColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return SPORT_PALETTE[h % SPORT_PALETTE.length];
+}
+
+/**
+ * Look up a sport by the raw name coming out of the CSV mapping. If it
+ * doesn't exist, auto-create under `<sourceTag>:<rawName>` so the row can
+ * land — the user can later merge it into a canonical sport from the Sports
+ * data tab. Mirrors the metric-type resolver pattern.
+ */
+async function resolveSportId(
+  rawName: string,
+  sourceTag: string,
+  cache: Map<string, number>,
+): Promise<number> {
+  const direct = cache.get(rawName);
+  if (direct !== undefined) return direct;
+
+  const prefixed = `${sourceTag}:${rawName}`;
+  const alreadyPrefixed = cache.get(prefixed);
+  if (alreadyPrefixed !== undefined) {
+    cache.set(rawName, alreadyPrefixed);
+    return alreadyPrefixed;
+  }
+
+  const color = hashPaletteColor(prefixed);
+  const inserted = await db
+    .insert(sports)
+    .values({ name: prefixed, color })
+    .onConflictDoNothing()
+    .returning({ id: sports.id });
+  let id = inserted[0]?.id;
+  if (id === undefined) {
+    const row = await db
+      .select({ id: sports.id })
+      .from(sports)
+      .where(eq(sports.name, prefixed))
+      .limit(1);
+    id = row[0]?.id;
+  }
+  if (id === undefined) throw new Error(`Failed to create sport "${prefixed}"`);
+  cache.set(rawName, id);
+  cache.set(prefixed, id);
+  return id;
 }
