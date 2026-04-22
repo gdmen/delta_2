@@ -23,13 +23,6 @@ const NAV_SECTIONS = [
     })),
   },
   {
-    label: "Coach",
-    items: [
-      { href: "/coach", label: "Briefing" },
-      { href: "/coach/chat", label: "Chat" },
-    ],
-  },
-  {
     label: "Targets",
     items: [
       { href: "/goals", label: "Goals" },

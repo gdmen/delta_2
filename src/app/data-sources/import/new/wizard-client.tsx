@@ -17,7 +17,6 @@ import {
   useSportNames,
   type Kind,
 } from "../_shared/mapping-editor";
-import { ImportAssistantPanel } from "./assistant-panel";
 
 interface PreviewResponse {
   headers: string[];
@@ -258,22 +257,6 @@ export function WizardClient() {
         </section>
       </div>
 
-      <ImportAssistantPanel
-        headers={preview.headers}
-        sampleRows={preview.sampleRows}
-        totalRows={preview.totalRows}
-        kind={kind}
-        currentMapping={mapping}
-        metricTypes={metricNames}
-        sports={sportNames}
-        onApplyMapping={(m) => {
-          // Trust the model to return a valid mapping. Keeping kind in sync
-          // with the applied mapping's kind saves the user a click if
-          // Claude decided a different kind fits better.
-          if (m.kind && m.kind !== kind) setKind(m.kind);
-          updateMapping(m);
-        }}
-      />
     </div>
   );
 }
