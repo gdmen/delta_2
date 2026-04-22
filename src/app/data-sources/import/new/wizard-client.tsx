@@ -53,7 +53,9 @@ export function WizardClient() {
     }
     const json = (await res.json()) as PreviewResponse;
     setPreview(json);
-    setMapping(defaultMappingForKind(currentKind, json.autoMatch ?? {}));
+    const initialMapping = defaultMappingForKind(currentKind, json.autoMatch ?? {});
+    setMapping(initialMapping);
+    void previewWithMappingFor(file, initialMapping);
 
     // Parse the file once on the client to derive distinct values per
     // column. Powers the WeightUnitEditor's exercise-name checkbox grid
@@ -86,23 +88,29 @@ export function WizardClient() {
       const res = await fetch("/api/import-sources/preview", { method: "POST", body: fd });
       const json = (await res.json()) as PreviewResponse;
       setPreview(json);
-      setMapping(defaultMappingForKind(next, json.autoMatch ?? {}));
+      const nextMapping = defaultMappingForKind(next, json.autoMatch ?? {});
+      setMapping(nextMapping);
+      void previewWithMappingFor(csvFile, nextMapping);
     }
   }
+
+  const previewWithMappingFor = useCallback(async (file: File, m: ImportMapping) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("mapping", JSON.stringify(m));
+    const res = await fetch("/api/import-sources/preview", { method: "POST", body: fd });
+    if (!res.ok) return;
+    const json = (await res.json()) as PreviewResponse;
+    setParsed(json.parsed ?? null);
+    setParseErrors(json.parseErrors ?? []);
+  }, []);
 
   const previewWithMapping = useCallback(
     async (m: ImportMapping) => {
       if (!csvFile) return;
-      const fd = new FormData();
-      fd.append("file", csvFile);
-      fd.append("mapping", JSON.stringify(m));
-      const res = await fetch("/api/import-sources/preview", { method: "POST", body: fd });
-      if (!res.ok) return;
-      const json = (await res.json()) as PreviewResponse;
-      setParsed(json.parsed ?? null);
-      setParseErrors(json.parseErrors ?? []);
+      await previewWithMappingFor(csvFile, m);
     },
-    [csvFile]
+    [csvFile, previewWithMappingFor]
   );
 
   function updateMapping(m: ImportMapping) {
