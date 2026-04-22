@@ -4,7 +4,7 @@
 -- imperial when needed.
 INSERT OR IGNORE INTO `metric_types` (`name`, `unit`, `frequency_hint`) VALUES
   ('distance_km', 'km', 'occasional'),
-  ('elevation_gain_m', 'm', 'occasional');
+  ('elevation_gain_m', 'm', 'occasional');--> statement-breakpoint
 -- If the resolver auto-created these as `daily` (its default), fix them:
 -- they're per-event, never a daily aggregate.
 UPDATE `metric_types`

@@ -4,7 +4,7 @@
 -- (implicit bpm, no unit in the name).
 INSERT OR IGNORE INTO `metric_types` (`name`, `unit`, `frequency_hint`) VALUES
   ('avg_hr', 'bpm', 'occasional'),
-  ('max_hr', 'bpm', 'occasional');
+  ('max_hr', 'bpm', 'occasional');--> statement-breakpoint
 -- If the resolver auto-created these as `daily` (its default), fix them:
 -- they're per-event, never a daily aggregate.
 UPDATE `metric_types`
