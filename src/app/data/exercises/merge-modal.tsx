@@ -4,50 +4,45 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { pickMaxBy } from "@/lib/collections";
 
-export interface SportMergeCandidate {
-  id: number;
+export interface ExerciseMergeCandidate {
   name: string;
-  color: string;
+  sets: number;
   eventCount: number;
-  focusCount: number;
-  goalCount: number;
 }
 
 interface Props {
-  candidates: SportMergeCandidate[];
+  candidates: ExerciseMergeCandidate[];
   onClose: () => void;
 }
 
 /**
- * Merge modal for sports. Simpler than the metric-types merge: no units,
- * no rescaling, no daily_summaries — just re-point events / focuses / goals
- * / metric_types.sport_id from the merged rows to the canonical, then delete
- * the merged sports.
+ * Merge modal for exercise names. Pick one of the selected names as
+ * canonical; all workout_sets rows using the others get rewritten.
+ * Exercises aren't a table, so there's nothing to delete — it's a pure
+ * UPDATE against workout_sets.
  */
-export function SportsMergeModal({ candidates, onClose }: Props) {
+export function ExercisesMergeModal({ candidates, onClose }: Props) {
   const router = useRouter();
-  const [canonicalId, setCanonicalId] = useState<number>(
-    pickMaxBy(candidates, (c) => c.eventCount).id,
+  const [canonical, setCanonical] = useState<string>(
+    pickMaxBy(candidates, (c) => c.sets).name,
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canonical = candidates.find((c) => c.id === canonicalId)!;
-  const merged = candidates.filter((c) => c.id !== canonicalId);
-  const totalEventsMoved = merged.reduce((sum, m) => sum + m.eventCount, 0);
-  const totalFocusesMoved = merged.reduce((sum, m) => sum + m.focusCount, 0);
-  const totalGoalsMoved = merged.reduce((sum, m) => sum + m.goalCount, 0);
+  const merged = candidates.filter((c) => c.name !== canonical);
+  const totalSetsMoved = merged.reduce((sum, m) => sum + m.sets, 0);
+  const totalEventsAffected = merged.reduce((sum, m) => sum + m.eventCount, 0);
 
   async function handleConfirm() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/sports/merge", {
+      const res = await fetch("/api/exercises/merge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          canonicalId,
-          mergeIds: merged.map((m) => m.id),
+          canonical,
+          mergeNames: merged.map((m) => m.name),
         }),
       });
       if (!res.ok) {
@@ -72,10 +67,10 @@ export function SportsMergeModal({ candidates, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold">Merge {candidates.length} sports</h2>
+          <h2 className="text-lg font-semibold">Merge {candidates.length} exercises</h2>
           <p className="text-[0.8125rem] text-text-secondary mt-1">
-            Pick which name wins. Events, focuses, and goals attached to the
-            other sports move to the canonical. Merged sports are deleted.
+            Pick the canonical name. Sets recorded under the other names are
+            rewritten to use it.
           </p>
         </div>
 
@@ -87,25 +82,21 @@ export function SportsMergeModal({ candidates, onClose }: Props) {
             <div className="space-y-1.5">
               {candidates.map((c) => (
                 <label
-                  key={c.id}
+                  key={c.name}
                   className="flex items-center gap-3 px-3 py-2 border border-border rounded cursor-pointer hover:bg-surface"
                 >
                   <input
                     type="radio"
                     name="canonical"
-                    checked={canonicalId === c.id}
-                    onChange={() => setCanonicalId(c.id)}
-                  />
-                  <span
-                    className="inline-block w-2 h-2 rounded-full"
-                    style={{ backgroundColor: c.color }}
+                    checked={canonical === c.name}
+                    onChange={() => setCanonical(c.name)}
                   />
                   <div className="flex-1 flex items-baseline justify-between gap-2 min-w-0">
                     <span className="font-mono text-[0.875rem] truncate">{c.name}</span>
                     <span className="font-mono text-[0.6875rem] text-muted shrink-0">
-                      {c.eventCount.toLocaleString()} event{c.eventCount === 1 ? "" : "s"}
-                      {c.focusCount > 0 && ` · ${c.focusCount} focus${c.focusCount === 1 ? "" : "es"}`}
-                      {c.goalCount > 0 && ` · ${c.goalCount} goal${c.goalCount === 1 ? "" : "s"}`}
+                      {c.sets.toLocaleString()} set{c.sets === 1 ? "" : "s"} ·{" "}
+                      {c.eventCount.toLocaleString()} event
+                      {c.eventCount === 1 ? "" : "s"}
                     </span>
                   </div>
                 </label>
@@ -118,25 +109,13 @@ export function SportsMergeModal({ candidates, onClose }: Props) {
               Summary
             </div>
             <div>
-              <span className="font-mono">{totalEventsMoved.toLocaleString()}</span>{" "}
-              event{totalEventsMoved === 1 ? "" : "s"} move to{" "}
-              <code className="font-mono">{canonical.name}</code>.
+              <span className="font-mono">{totalSetsMoved.toLocaleString()}</span>{" "}
+              set{totalSetsMoved === 1 ? "" : "s"} renamed to{" "}
+              <code className="font-mono">{canonical}</code>.
             </div>
-            {totalFocusesMoved > 0 && (
-              <div>
-                <span className="font-mono">{totalFocusesMoved}</span> focus
-                {totalFocusesMoved === 1 ? "" : "es"} retargeted.
-              </div>
-            )}
-            {totalGoalsMoved > 0 && (
-              <div>
-                <span className="font-mono">{totalGoalsMoved}</span> goal
-                {totalGoalsMoved === 1 ? "" : "s"} retargeted.
-              </div>
-            )}
-            <div>
-              <span className="font-mono">{merged.length}</span> sport
-              {merged.length === 1 ? "" : "s"} deleted.
+            <div className="text-muted">
+              Touching {totalEventsAffected.toLocaleString()} event
+              {totalEventsAffected === 1 ? "" : "s"}.
             </div>
             <div className="text-muted text-[0.75rem] mt-2">
               This cannot be undone. Consider backing up{" "}

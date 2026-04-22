@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { pickMaxBy } from "@/lib/collections";
 
 export interface MergeCandidate {
   id: number;
@@ -22,9 +23,9 @@ interface Props {
  */
 export function MergeModal({ candidates, onClose }: Props) {
   const router = useRouter();
+  // Default to the row with the most data — least likely to be the orphan.
   const [canonicalId, setCanonicalId] = useState<number>(
-    // Default to the row with the most data — least likely to be the orphan.
-    candidates.reduce((a, b) => (a.count >= b.count ? a : b)).id
+    pickMaxBy(candidates, (c) => c.count).id,
   );
   const [rescale, setRescale] = useState(false);
   const [scales, setScales] = useState<Record<number, string>>({});

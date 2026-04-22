@@ -1,22 +1,21 @@
 "use client";
 
-import Link from "next/link";
-import { MergeModal } from "./merge-modal";
+import { ExercisesMergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
 import { useTableSelection } from "@/components/use-table-selection";
 
-interface MetricTypeRow {
-  id: number;
+interface ExerciseRow {
   name: string;
-  unit: string;
-  count: number;
+  sets: number;
+  eventCount: number;
+  firstAt: string | null;
   lastAt: string | null;
 }
 
-export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
+export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
   const s = useTableSelection(
     rows,
-    (r) => r.id,
+    (r) => r.name,
     (r) => r.name,
   );
 
@@ -27,7 +26,7 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
           type="search"
           value={s.filter}
           onChange={(e) => s.setFilter(e.target.value)}
-          placeholder="Filter metrics..."
+          placeholder="Filter exercises..."
           className="w-full max-w-xs px-3 py-1.5 border border-border rounded text-[0.875rem]"
         />
         {s.selected.size > 0 && (
@@ -55,50 +54,52 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
             <tr>
               <th className="w-8 px-2 py-2"></th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Metric</th>
-              <th className="text-right font-mono font-semibold px-3 py-2 w-24">Rows</th>
+              <th className="text-left font-mono font-semibold px-3 py-2">Exercise</th>
+              <th className="text-right font-mono font-semibold px-3 py-2 w-20">Sets</th>
+              <th className="text-right font-mono font-semibold px-3 py-2 w-24">Events</th>
+              <th className="text-right font-mono font-semibold px-3 py-2 w-40">First</th>
               <th className="text-right font-mono font-semibold px-3 py-2 w-40">Last</th>
             </tr>
           </thead>
           <tbody>
             {s.filtered.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-muted text-[0.8125rem]">
-                  No metrics match &quot;{s.filter}&quot;.
+                <td colSpan={6} className="px-3 py-6 text-center text-muted text-[0.8125rem]">
+                  {rows.length === 0
+                    ? "No exercises yet — import a workout_sets CSV."
+                    : `No exercises match "${s.filter}".`}
                 </td>
               </tr>
             ) : (
-              s.filtered.map((t) => {
-                const checked = s.isSelected(t);
+              s.filtered.map((r) => {
+                const checked = s.isSelected(r);
                 return (
                   <tr
-                    key={t.id}
-                    className={`relative border-t border-border hover:bg-surface/40 ${
+                    key={r.name}
+                    className={`border-t border-border hover:bg-surface/40 ${
                       checked ? "bg-surface/60" : ""
                     }`}
                   >
-                    <td className="px-2 py-2 text-center relative z-10">
+                    <td className="px-2 py-2 text-center">
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => s.toggle(t)}
-                        aria-label={`Select ${t.name}`}
+                        onChange={() => s.toggle(r)}
+                        aria-label={`Select ${r.name}`}
                       />
                     </td>
-                    <td className="px-3 py-2 font-mono">
-                      <Link
-                        href={`/data/metrics/${encodeURIComponent(t.name)}`}
-                        className="absolute inset-0"
-                        aria-label={`Open ${t.name}`}
-                      />
-                      {t.name}
-                      {t.unit && <span className="text-muted"> ({t.unit})</span>}
-                    </td>
+                    <td className="px-3 py-2 font-mono">{r.name}</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {t.count.toLocaleString()}
+                      {r.sets.toLocaleString()}
                     </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
-                      {t.lastAt ? formatShort(t.lastAt) : "-"}
+                      {r.eventCount.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
+                      {r.firstAt ? formatShort(r.firstAt) : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
+                      {r.lastAt ? formatShort(r.lastAt) : "-"}
                     </td>
                   </tr>
                 );
@@ -109,17 +110,16 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
       </div>
       {s.filter && (
         <div className="mt-2 text-[0.75rem] text-muted">
-          {s.filtered.length} of {rows.length} metric{rows.length === 1 ? "" : "s"}
+          {s.filtered.length} of {rows.length} exercise{rows.length === 1 ? "" : "s"}
         </div>
       )}
 
       {s.mergeOpen && s.selectedRows.length >= 2 && (
-        <MergeModal
+        <ExercisesMergeModal
           candidates={s.selectedRows.map((r) => ({
-            id: r.id,
             name: r.name,
-            unit: r.unit,
-            count: r.count,
+            sets: r.sets,
+            eventCount: r.eventCount,
           }))}
           onClose={s.closeMergeAndClear}
         />

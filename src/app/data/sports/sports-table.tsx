@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import Link from "next/link";
-import { SportsMergeModal, type SportMergeCandidate } from "./merge-modal";
+import { SportsMergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
+import { useTableSelection } from "@/components/use-table-selection";
 
 interface SportRow {
   id: number;
@@ -16,51 +16,23 @@ interface SportRow {
 }
 
 export function SportsTable({ rows }: { rows: SportRow[] }) {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [mergeOpen, setMergeOpen] = useState(false);
-
-  const selectedRows = useMemo(
-    () => rows.filter((r) => selected.has(r.id)),
-    [rows, selected],
-  );
-
-  const mergeCandidates: SportMergeCandidate[] = selectedRows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    color: r.color,
-    eventCount: r.eventCount,
-    focusCount: r.focusCount,
-    goalCount: r.goalCount,
-  }));
-
-  function toggle(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function clearSelection() {
-    setSelected(new Set());
-  }
+  const s = useTableSelection(rows, (r) => r.id);
 
   return (
     <div>
-      {selected.size > 0 && (
+      {s.selected.size > 0 && (
         <div className="mb-3 flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setMergeOpen(true)}
-            disabled={selected.size < 2}
+            onClick={s.openMerge}
+            disabled={s.selected.size < 2}
             className="px-3 py-1.5 bg-foreground text-background text-[0.8125rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
           >
-            Merge {selected.size} selected…
+            Merge {s.selected.size} selected…
           </button>
           <button
             type="button"
-            onClick={clearSelection}
+            onClick={s.clearSelection}
             className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground"
           >
             Clear
@@ -88,7 +60,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
               </tr>
             ) : (
               rows.map((r) => {
-                const checked = selected.has(r.id);
+                const checked = s.isSelected(r);
                 return (
                   <tr
                     key={r.id}
@@ -100,7 +72,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggle(r.id)}
+                        onChange={() => s.toggle(r)}
                         aria-label={`Select ${r.name}`}
                       />
                     </td>
@@ -136,13 +108,17 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
         </table>
       </div>
 
-      {mergeOpen && selectedRows.length >= 2 && (
+      {s.mergeOpen && s.selectedRows.length >= 2 && (
         <SportsMergeModal
-          candidates={mergeCandidates}
-          onClose={() => {
-            setMergeOpen(false);
-            clearSelection();
-          }}
+          candidates={s.selectedRows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            color: r.color,
+            eventCount: r.eventCount,
+            focusCount: r.focusCount,
+            goalCount: r.goalCount,
+          }))}
+          onClose={s.closeMergeAndClear}
         />
       )}
     </div>
