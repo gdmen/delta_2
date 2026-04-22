@@ -69,7 +69,14 @@ else
 fi
 
 step "Smoke test"
-curl -sS -I http://localhost:3000/ | head -1
+# 401 is healthy when SITE_PASSWORD is set — the Basic Auth gate in
+# src/proxy.ts proves the app is up and responding. Fail only on real
+# outages (5xx, connection refused, etc.).
+status=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:3000/ || echo "000")
+case "$status" in
+  200|401) echo "  HTTP $status (healthy)" ;;
+  *) echo "  HTTP $status (unexpected)"; exit 1 ;;
+esac
 
 step "Done."
 echo "  Logs: sudo journalctl -u delta2 -f"
