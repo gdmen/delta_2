@@ -95,7 +95,15 @@ export default async function MetricHistoryPage({
         linkWithPage={linkWithPage}
         className="mb-4"
       />
-      <MetricHistoryEditor metricTypeId={type.id} unit={type.unit} initialRows={rows} />
+      {/* key forces a remount when paginating — the editor uses useState
+          to host optimistic edits, so without a key change it keeps showing
+          page 1's rows after navigation. */}
+      <MetricHistoryEditor
+        key={`${type.id}-${currentPage}`}
+        metricTypeId={type.id}
+        unit={type.unit}
+        initialRows={rows}
+      />
       <PaginationControls
         currentPage={currentPage}
         pageCount={pageCount}
