@@ -9,7 +9,20 @@ interface TableResult {
   errors: string[];
 }
 
-type TableName = "metrics" | "events" | "event_metrics" | "workout_sets";
+type TableName =
+  | "sports"
+  | "metric_types"
+  | "metric_type_aliases"
+  | "import_sources"
+  | "source_settings"
+  | "goals"
+  | "focuses"
+  | "focus_metric_links"
+  | "focus_entries"
+  | "metrics"
+  | "events"
+  | "event_metrics"
+  | "workout_sets";
 type ImportResponse = Partial<Record<TableName, TableResult>> & {
   error?: string;
 };
@@ -67,11 +80,23 @@ export function ImportExportBar() {
       {result && <ImportResult result={result} />}
 
       <p className="text-[0.75rem] text-muted">
-        Export bundles <code className="font-mono">metrics.csv</code>,{" "}
-        <code className="font-mono">events.csv</code>,{" "}
-        <code className="font-mono">event_metrics.csv</code>, and{" "}
-        <code className="font-mono">workout_sets.csv</code>. Import accepts the same shapes in a
-        ZIP or any individual CSV. Re-importing the same file is a no-op.
+        Export bundles everything needed to recreate the app from scratch:
+        foundational catalog (<code className="font-mono">sports</code>,{" "}
+        <code className="font-mono">metric_types</code>,{" "}
+        <code className="font-mono">metric_type_aliases</code>,{" "}
+        <code className="font-mono">import_sources</code>,{" "}
+        <code className="font-mono">source_settings</code>), targets
+        (<code className="font-mono">goals</code>,{" "}
+        <code className="font-mono">focuses</code>,{" "}
+        <code className="font-mono">focus_metric_links</code>,{" "}
+        <code className="font-mono">focus_entries</code>), and measured data
+        (<code className="font-mono">metrics</code>,{" "}
+        <code className="font-mono">events</code>,{" "}
+        <code className="font-mono">event_metrics</code>,{" "}
+        <code className="font-mono">workout_sets</code>). Import accepts the
+        same shapes in a ZIP or any individual CSV. Re-importing the same
+        file is a no-op. Strava/Apple Health tokens must be re-connected
+        after a wipe+restore.
       </p>
     </div>
   );
@@ -87,6 +112,15 @@ function ImportResult({ result }: { result: ImportResponse }) {
   }
 
   const tables: Array<[TableName, TableResult | undefined]> = [
+    ["sports", result.sports],
+    ["metric_types", result.metric_types],
+    ["metric_type_aliases", result.metric_type_aliases],
+    ["import_sources", result.import_sources],
+    ["source_settings", result.source_settings],
+    ["goals", result.goals],
+    ["focuses", result.focuses],
+    ["focus_metric_links", result.focus_metric_links],
+    ["focus_entries", result.focus_entries],
     ["metrics", result.metrics],
     ["events", result.events],
     ["event_metrics", result.event_metrics],
