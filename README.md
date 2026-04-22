@@ -4,6 +4,13 @@ A self-hosted fitness coaching dashboard with an AI coach. Tracks powerlifting, 
 
 Two hearts: a **dashboard** (key metrics, PR curves, goal progress) and a **coach** (morning briefings, chat, case files per training focus). The differentiator is `focus-as-primitive` — training focuses are first-class objects the coach reads and correlates with metrics.
 
+## Features
+
+- **Data ingestion.** Apple Health via iOS Shortcut, Strava via OAuth sync (distance + elevation attached as per-event metrics), BodySpec DEXA via PDF upload, generic CSV import wizard with saved column mappings per source.
+- **Metric canonicalization.** Duplicate metric types from different sources (e.g. `fiber_g` / `apple_health:fiber` / `dietary_fiber`) can be merged from `/data`. A DB-backed alias table routes future ingests of any merged name directly to the canonical type.
+- **Data browser.** `/data` lists every metric type with row counts; `/data/events` is a paginated, free-text filterable event log; drill-in pages are editable. Full ZIP export + re-import round-trip for metrics, events, event_metrics, and workout_sets.
+- **Coach.** Morning briefings, chat (with tool-use for metric queries), per-focus case files.
+
 ## Tech Stack
 
 - Next.js 16 (App Router) + TypeScript
@@ -44,38 +51,46 @@ Open http://localhost:3000.
 
 ## Apple Health Integration
 
-The app ingests Apple Health data via an iOS Shortcut that POSTs JSON to `/api/ingest/apple-health`.
+The app ingests Apple Health via the [Health Auto Export](https://www.healthyapps.dev/) iOS app, which POSTs its native JSON format to `/api/ingest/apple-health`.
 
-1. On your iPhone, open the Shortcuts app.
-2. Create a new Shortcut.
-3. Add a "Find Health Samples" action for each data type you want to sync: sleep analysis, heart rate, HRV, active energy, steps, body mass, body fat %, VO2 max, dietary protein, dietary water.
-4. For workouts, add a "Find Workouts" action.
-5. Format each result as JSON and combine into a single payload:
-
-```json
-{
-  "samples": [
-    { "type": "sleep_analysis_total", "value": 7.2, "unit": "h", "startDate": "2026-04-15T23:00:00Z", "uuid": "..." },
-    { "type": "heart_rate_variability", "value": 45, "unit": "ms", "startDate": "2026-04-16T08:00:00Z", "uuid": "..." }
-  ],
-  "workouts": [
-    { "type": "martial_arts", "startDate": "2026-04-15T18:00:00Z", "endDate": "2026-04-15T19:30:00Z", "durationMinutes": 90, "uuid": "..." }
-  ]
-}
-```
-
-6. Add a "Get Contents of URL" action:
+1. Install Health Auto Export on your iPhone.
+2. Create an automation targeting a REST API endpoint:
    - URL: `https://delta.garymenezes.com/api/ingest/apple-health`
    - Method: POST
    - Headers: `Authorization: Bearer <your INGEST_API_KEY>`
-   - Request Body: JSON from the previous step
+3. Select the data types to export (steps, heart rate, HRV, active energy, sleep analysis, body mass, body fat %, VO2 max, dietary protein, dietary water, etc.) and enable workouts.
+4. Set a schedule (daily or hourly).
 
-7. Set the Shortcut to run automatically via Personal Automation (e.g., "When I wake up" or "Daily at 6am").
+The endpoint accepts HAE's native payload shape:
 
-### Supported sample types
+```json
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "step_count",
+        "units": "count",
+        "data": [{ "date": "2026-04-16 00:00:00 +0000", "qty": 8234 }]
+      },
+      {
+        "name": "sleep_analysis",
+        "data": [{
+          "date": "2026-04-16 00:00:00 +0000",
+          "totalSleep": 7.2, "deep": 1.5, "rem": 1.8
+        }]
+      }
+    ],
+    "workouts": [
+      { "name": "Running", "start": "2026-04-16 07:30:00 +0000",
+        "end": "2026-04-16 08:15:00 +0000", "duration": 45.0 }
+    ]
+  }
+}
+```
 
-See `METRIC_TYPE_MAP` in `src/app/api/ingest/apple-health/route.ts` for the full list. Currently mapped:
-sleep (total/deep/REM), heart rate, resting HR, HRV, active energy, steps, body mass, body fat %, lean mass, VO2 max, dietary protein, dietary water.
+### Name routing
+
+Raw HAE metric names (`step_count`, `heart_rate_variability`, `dietary_water`, …) route to canonical Delta metric types via the `metric_type_aliases` table (seeded in migration 0006 from the former hardcoded map). Unknown names auto-create as `apple_health:<name>` orphans; merge them into a canonical type from `/data` when you want them unified — that merge inserts an alias row so future syncs land on the canonical directly.
 
 ## Deployment (AWS EC2 Ubuntu)
 
@@ -315,15 +330,26 @@ Then in a browser:
 
 ### 8. Updates (re-deploys)
 
+Use the deploy script:
+
 ```bash
 cd /opt/delta2
-git pull
+./scripts/deploy.sh
+```
+
+It does the sequence below in one go, with the service stopped around
+the DB steps so `drizzle-kit migrate` doesn't contend with the running
+better-sqlite3 connection for the WAL write lock (observed in prod:
+that lock contention causes `migrate` to hang silently):
+
+```bash
+git fetch && git reset --hard origin/main
 npm ci
-npx drizzle-kit migrate          # ← run every time. Skipped migrations will fail at runtime.
-npx tsx src/db/seed.ts           # ← run every time. Idempotent; picks up new metric types.
+sudo systemctl stop delta2
+timeout 60 npx drizzle-kit migrate
+timeout 60 npx tsx src/db/seed.ts
 npm run build
-sudo systemctl restart delta2
-sudo systemctl status delta2     # Verify active (running)
+sudo systemctl start delta2
 ```
 
 If the new build bumps `COACH_PROMPT_VERSION`, briefings generated before the
@@ -460,24 +486,36 @@ Once deployed, use the app to manually log:
 - **Focuses** — multi-week training themes, optionally linked to a goal they advance. `/input/focus`
 - **BJJ sessions** — mat time, type (class/open_mat/drilling/teaching), notes. `/input/bjj`
 
-Lift data comes from TeamBuildr CSV import (coming soon). Body weight, protein, and water come from Apple Health if you use a smart scale and food tracking app that syncs to HealthKit. DEXA scans come from the BodySpec PDF import at `/data-sources/bodyspec`.
+Lift data comes from CSV — map a TeamBuildr (or any other) export via the
+import-source wizard at `/data-sources/import/new`; the mapping is saved
+and reused for future uploads. Strava rides and runs flow in via OAuth
+sync. Body weight, protein, water, sleep, HRV, etc. come from Apple Health
+if you use a smart scale and food tracking app that syncs to HealthKit.
+DEXA scans come from BodySpec PDF upload at `/data-sources/bodyspec`.
 
 ## Project Structure
 
 ```
 src/
-├── app/                   # Next.js App Router
+├── app/                       # Next.js App Router
 │   ├── api/
-│   │   ├── ingest/        # Apple Health + Strava ingest endpoints
-│   │   ├── events/        # Manual event creation
-│   │   ├── focuses/       # Focus CRUD
-│   │   └── coach/         # Briefing generation
-│   ├── input/             # Manual input forms
-│   └── coach/             # Coach views
-├── components/            # UI components
-├── db/                    # Drizzle schema + client + seed
+│   │   ├── ingest/            # Apple Health, Strava, BodySpec ingest
+│   │   ├── import/            # Bulk ZIP/CSV import (all 4 tables)
+│   │   ├── export/            # Bulk ZIP export
+│   │   ├── import-sources/    # CSV source wizard + per-source sync/migrate
+│   │   ├── metric-types/      # Merge + alias management
+│   │   ├── events/            # Manual event CRUD
+│   │   ├── focuses/           # Focus CRUD
+│   │   └── coach/             # Briefing generation + chat
+│   ├── data/                  # Data browser (metrics tab, events tab)
+│   ├── data-sources/          # Per-source config + ingest UI
+│   ├── input/                 # Manual input forms
+│   └── coach/                 # Coach views
+├── components/                # UI components
+├── db/                        # Drizzle schema + client + seed
 └── lib/
-    ├── coach/             # Pre-aggregate + context + Claude client
-    ├── ingest-service.ts  # Shared dedup/upsert logic
-    └── auth.ts            # API key validation
+    ├── coach/                 # Pre-aggregate + context + Claude client
+    ├── ingest/                # Metric-type resolver + alias cache
+    ├── ingest-service.ts      # Shared dedup/upsert helpers
+    └── auth.ts                # API key validation
 ```
