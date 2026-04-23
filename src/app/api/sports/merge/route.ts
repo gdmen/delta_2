@@ -8,6 +8,7 @@ import {
   metricTypes,
 } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { parseMergeByIdBody } from "@/lib/merge-validation";
 
 /**
  * POST /api/sports/merge
@@ -19,30 +20,16 @@ import { eq, inArray } from "drizzle-orm";
  * layer, not the DB), no daily_summaries.
  */
 export async function POST(request: NextRequest) {
-  let body: { canonicalId?: number; mergeIds?: number[] };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const canonicalId = Number(body.canonicalId);
-  const mergeIds = Array.isArray(body.mergeIds)
-    ? body.mergeIds.map(Number).filter((n) => Number.isFinite(n))
-    : [];
-
-  if (!Number.isFinite(canonicalId) || canonicalId <= 0) {
-    return NextResponse.json({ error: "canonicalId is required" }, { status: 400 });
-  }
-  if (mergeIds.length === 0) {
-    return NextResponse.json({ error: "mergeIds must be non-empty" }, { status: 400 });
-  }
-  if (mergeIds.includes(canonicalId)) {
-    return NextResponse.json(
-      { error: "canonicalId cannot be in mergeIds" },
-      { status: 400 },
-    );
-  }
+  const parsed = parseMergeByIdBody(body);
+  if (!parsed.ok) return parsed.response;
+  const { canonicalId, mergeIds } = parsed.value;
 
   const allIds = [canonicalId, ...mergeIds];
   const rows = await db

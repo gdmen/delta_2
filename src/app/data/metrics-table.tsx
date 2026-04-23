@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { MergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
-import { useTableSelection } from "@/components/use-table-selection";
+import { SelectableDataTable } from "@/components/selectable-data-table";
 
 interface MetricTypeRow {
   id: number;
@@ -14,116 +13,53 @@ interface MetricTypeRow {
 }
 
 export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
-  const s = useTableSelection(
-    rows,
-    (r) => r.id,
-    (r) => r.name,
-  );
-
   return (
-    <div>
-      <div className="mb-3 flex items-center gap-3">
-        <input
-          type="search"
-          value={s.filter}
-          onChange={(e) => s.setFilter(e.target.value)}
-          placeholder="Filter metrics..."
-          className="w-full max-w-xs px-3 py-1.5 border border-border rounded text-[0.875rem]"
-        />
-        {s.selected.size > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={s.openMerge}
-              disabled={s.selected.size < 2}
-              className="px-3 py-1.5 bg-foreground text-background text-[0.8125rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
-            >
-              Merge {s.selected.size} selected…
-            </button>
-            <button
-              type="button"
-              onClick={s.clearSelection}
-              className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground"
-            >
-              Clear
-            </button>
-          </>
-        )}
-      </div>
-      <div className="border border-border rounded overflow-hidden">
-        <table className="w-full text-[0.8125rem]">
-          <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
-            <tr>
-              <th className="w-8 px-2 py-2"></th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Metric</th>
-              <th className="text-right font-mono font-semibold px-3 py-2 w-24">Rows</th>
-              <th className="text-right font-mono font-semibold px-3 py-2 w-40">Last</th>
-            </tr>
-          </thead>
-          <tbody>
-            {s.filtered.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-muted text-[0.8125rem]">
-                  No metrics match &quot;{s.filter}&quot;.
-                </td>
-              </tr>
-            ) : (
-              s.filtered.map((t) => {
-                const checked = s.isSelected(t);
-                return (
-                  <tr
-                    key={t.id}
-                    className={`relative border-t border-border hover:bg-surface/40 ${
-                      checked ? "bg-surface/60" : ""
-                    }`}
-                  >
-                    <td className="px-2 py-2 text-center relative z-10">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => s.toggle(t)}
-                        aria-label={`Select ${t.name}`}
-                      />
-                    </td>
-                    <td className="px-3 py-2 font-mono">
-                      <Link
-                        href={`/data/metrics/${encodeURIComponent(t.name)}`}
-                        className="absolute inset-0"
-                        aria-label={`Open ${t.name}`}
-                      />
-                      {t.name}
-                      {t.unit && <span className="text-muted"> ({t.unit})</span>}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {t.count.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
-                      {t.lastAt ? formatShort(t.lastAt) : "-"}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-      {s.filter && (
-        <div className="mt-2 text-[0.75rem] text-muted">
-          {s.filtered.length} of {rows.length} metric{rows.length === 1 ? "" : "s"}
-        </div>
-      )}
-
-      {s.mergeOpen && s.selectedRows.length >= 2 && (
+    <SelectableDataTable
+      rows={rows}
+      getKey={(r) => r.id}
+      filterTextFn={(r) => r.name}
+      filterPlaceholder="Filter metrics..."
+      itemLabel={{ one: "metric", many: "metrics" }}
+      emptyState={(q) => (q ? `No metrics match "${q}".` : "No metrics.")}
+      rowHref={(r) => `/data/metrics/${encodeURIComponent(r.name)}`}
+      rowHrefAriaLabel={(r) => `Open ${r.name}`}
+      columns={[
+        {
+          header: "Metric",
+          className: "font-mono",
+          render: (t) => (
+            <>
+              {t.name}
+              {t.unit && <span className="text-muted"> ({t.unit})</span>}
+            </>
+          ),
+        },
+        {
+          header: "Rows",
+          width: "w-24",
+          align: "right",
+          className: "font-mono tabular-nums",
+          render: (t) => t.count.toLocaleString(),
+        },
+        {
+          header: "Last",
+          width: "w-40",
+          align: "right",
+          className: "font-mono tabular-nums text-muted",
+          render: (t) => (t.lastAt ? formatShort(t.lastAt) : "-"),
+        },
+      ]}
+      renderMergeModal={({ selectedRows, onClose }) => (
         <MergeModal
-          candidates={s.selectedRows.map((r) => ({
+          candidates={selectedRows.map((r) => ({
             id: r.id,
             name: r.name,
             unit: r.unit,
             count: r.count,
           }))}
-          onClose={s.closeMergeAndClear}
+          onClose={onClose}
         />
       )}
-    </div>
+    />
   );
 }

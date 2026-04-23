@@ -10,6 +10,7 @@ import {
   focusMetricLinks,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { parseMergeByIdBody } from "@/lib/merge-validation";
 
 /**
  * POST /api/metric-types/merge
@@ -44,29 +45,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const canonicalId = Number(body.canonicalId);
-  const mergeIds = Array.isArray(body.mergeIds)
-    ? body.mergeIds.map(Number).filter((n) => Number.isFinite(n))
-    : [];
+  const parsed = parseMergeByIdBody(body);
+  if (!parsed.ok) return parsed.response;
+  const { canonicalId, mergeIds } = parsed.value;
   const unitPolicy = body.unitPolicy ?? "block";
   const scales: Record<number, number> = {};
   if (body.scales) {
     for (const [k, v] of Object.entries(body.scales)) {
       scales[Number(k)] = Number(v);
     }
-  }
-
-  if (!Number.isFinite(canonicalId) || canonicalId <= 0) {
-    return NextResponse.json({ error: "canonicalId is required" }, { status: 400 });
-  }
-  if (mergeIds.length === 0) {
-    return NextResponse.json({ error: "mergeIds must be non-empty" }, { status: 400 });
-  }
-  if (mergeIds.includes(canonicalId)) {
-    return NextResponse.json(
-      { error: "canonicalId cannot be in mergeIds" },
-      { status: 400 }
-    );
   }
 
   // Load all referenced types, validate existence, and enforce unit policy.

@@ -1,17 +1,11 @@
 import { db } from "@/db";
 import { workoutSets, events } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { DataTabs } from "../tabs";
-import { ImportExportBar } from "../import-export-bar";
 import { ExercisesTable } from "./exercises-table";
+import { DataTabShell } from "@/components/data-tab-shell";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Data browser — Exercises tab. Exercises live only as text on workout_sets
- * (no dedicated table), so this view derives one row per distinct
- * exercise_name with counts, selectable for merge.
- */
 export default async function ExercisesPage() {
   const rows = await db
     .select({
@@ -35,28 +29,13 @@ export default async function ExercisesPage() {
   }));
 
   return (
-    <div className="max-w-[1100px]">
-      <h1 className="text-2xl font-semibold mb-2">Data</h1>
-      <p className="text-[0.875rem] text-text-secondary mb-6">
-        Every row Delta has stored. Exercise names come straight from imported
-        workout sets — merge variants here so analytics see one canonical name.
-      </p>
-
-      <div className="mb-8">
-        <ImportExportBar />
-      </div>
-
-      <DataTabs active="exercises" />
-
-      <div className="flex items-baseline justify-between mb-3">
-        <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
-          Exercises
-        </span>
-        <span className="font-mono text-[0.6875rem] text-muted">
-          {data.length.toLocaleString()} name{data.length === 1 ? "" : "s"}
-        </span>
-      </div>
+    <DataTabShell
+      active="exercises"
+      description="Every row Delta has stored. Exercise names come straight from imported workout sets — merge variants here so analytics see one canonical name."
+      label="Exercises"
+      count={{ value: data.length, unit: data.length === 1 ? "name" : "names" }}
+    >
       <ExercisesTable rows={data} />
-    </div>
+    </DataTabShell>
   );
 }

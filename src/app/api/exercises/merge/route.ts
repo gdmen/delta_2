@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutSets } from "@/db/schema";
 import { inArray } from "drizzle-orm";
+import { parseMergeByNameBody } from "@/lib/merge-validation";
 
 /**
  * POST /api/exercises/merge
@@ -16,29 +17,16 @@ import { inArray } from "drizzle-orm";
  * and visible.
  */
 export async function POST(request: NextRequest) {
-  let body: { canonical?: string; mergeNames?: string[] };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const canonical = body.canonical?.trim();
-  const mergeNames = Array.isArray(body.mergeNames)
-    ? [...new Set(body.mergeNames.map((s) => String(s).trim()).filter(Boolean))]
-    : [];
-  if (!canonical) {
-    return NextResponse.json({ error: "canonical is required" }, { status: 400 });
-  }
-  if (mergeNames.length === 0) {
-    return NextResponse.json({ error: "mergeNames must be non-empty" }, { status: 400 });
-  }
-  if (mergeNames.includes(canonical)) {
-    return NextResponse.json(
-      { error: "canonical cannot be in mergeNames" },
-      { status: 400 },
-    );
-  }
+  const parsed = parseMergeByNameBody(body);
+  if (!parsed.ok) return parsed.response;
+  const { canonical, mergeNames } = parsed.value;
 
   const updated = await db
     .update(workoutSets)

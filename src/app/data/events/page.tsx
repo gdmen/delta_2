@@ -2,8 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { events, sports } from "@/db/schema";
 import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
-import { DataTabs } from "../tabs";
-import { ImportExportBar } from "../import-export-bar";
+import { DataTabShell } from "@/components/data-tab-shell";
 import { PaginationControls } from "@/components/pagination-controls";
 import { formatShort } from "@/lib/format";
 
@@ -86,18 +85,10 @@ export default async function AllEventsPage({
   };
 
   return (
-    <div className="max-w-[1100px]">
-      <h1 className="text-2xl font-semibold mb-2">Data</h1>
-      <p className="text-[0.875rem] text-text-secondary mb-6">
-        Every row Delta has stored. Click an event to view, edit, add, or delete data points.
-      </p>
-
-      <div className="mb-8">
-        <ImportExportBar />
-      </div>
-
-      <DataTabs active="events" />
-
+    <DataTabShell
+      active="events"
+      description="Every row Delta has stored. Click an event to view, edit, add, or delete data points."
+    >
       <div className="flex items-baseline justify-between mb-6 gap-3">
         <span className="font-mono text-[0.6875rem] text-muted">
           {total.toLocaleString()} total · page {currentPage} of {pageCount}
@@ -217,7 +208,7 @@ export default async function AllEventsPage({
         linkWithPage={linkWithPage}
         className="mt-4"
       />
-    </div>
+    </DataTabShell>
   );
 }
 
