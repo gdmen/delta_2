@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { workoutSets, events, sports } from "@/db/schema";
+import { workoutSets, events, sports, metricTypes } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 
 /**
@@ -127,7 +127,7 @@ export async function getBigThreeStats(): Promise<Record<Lift, LiftStats>> {
 
   const rows = await db
     .select({
-      exerciseName: workoutSets.exerciseName,
+      exerciseName: metricTypes.name,
       setNumber: workoutSets.setNumber,
       reps: workoutSets.reps,
       weight: workoutSets.weight,
@@ -136,6 +136,7 @@ export async function getBigThreeStats(): Promise<Record<Lift, LiftStats>> {
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
+    .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .where(eq(events.sportId, powerliftingId))
     .orderBy(desc(events.startedAt), desc(workoutSets.setNumber));
 

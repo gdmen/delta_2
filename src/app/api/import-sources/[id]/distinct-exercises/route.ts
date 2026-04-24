@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { importSources, workoutSets, events } from "@/db/schema";
+import { importSources, workoutSets, events, metricTypes } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 
 /**
  * GET /api/import-sources/[id]/distinct-exercises
- * Returns the distinct exercise_name values present in workout_sets that
- * came from this source (joined to events by source tag). Powers the
- * edit page's WeightUnitEditor checkbox list when there's no CSV in
- * hand to derive choices from.
+ * Returns the distinct exercise names present in workout_sets that came
+ * from this source (joined to events by source tag). Powers the edit
+ * page's WeightUnitEditor checkbox list when there's no CSV in hand to
+ * derive choices from. Reads the canonical name from metric_types via
+ * the workout_sets FK.
  */
 export async function GET(
   _request: NextRequest,
@@ -23,11 +24,12 @@ export async function GET(
   const sourceTag = srcRows[0].name.toLowerCase().replace(/\s+/g, "_");
 
   const rows = await db
-    .selectDistinct({ name: workoutSets.exerciseName })
+    .selectDistinct({ name: metricTypes.name })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
+    .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .where(eq(events.source, sourceTag))
-    .orderBy(sql`lower(${workoutSets.exerciseName})`);
+    .orderBy(sql`lower(${metricTypes.name})`);
 
   return NextResponse.json(rows.map((r) => r.name));
 }

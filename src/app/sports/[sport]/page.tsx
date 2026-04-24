@@ -60,10 +60,18 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
   );
 
   // For powerlifting: grab PR-relevant workout sets and Big-3 stats.
+  // Join metric_types to render the human-readable exercise name.
   const recentSets = sport.name === "powerlifting"
     ? await db
-        .select()
+        .select({
+          id: workoutSets.id,
+          exerciseName: metricTypes.name,
+          reps: workoutSets.reps,
+          weight: workoutSets.weight,
+          rpe: workoutSets.rpe,
+        })
         .from(workoutSets)
+        .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
         .orderBy(desc(workoutSets.id))
         .limit(30)
     : [];

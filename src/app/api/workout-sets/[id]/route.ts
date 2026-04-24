@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutSets } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
 
 interface UpdateSetBody {
   exerciseName?: string;
@@ -32,7 +33,16 @@ export async function PATCH(
     if (typeof body.exerciseName !== "string" || !body.exerciseName) {
       return NextResponse.json({ error: "exerciseName must be a non-empty string" }, { status: 400 });
     }
-    updates.exerciseName = body.exerciseName;
+    // Resolve the free-text name to a metric_types id. Same path manual
+    // creation uses — known names route through aliases, unknown names
+    // auto-create under `manual:<rawName>`.
+    const cache = await buildMetricTypeCache();
+    updates.exerciseMetricTypeId = await resolveMetricTypeId({
+      rawName: body.exerciseName,
+      map: { [body.exerciseName]: body.exerciseName },
+      sourceSystem: "manual",
+      cache,
+    });
   }
   if (body.setNumber !== undefined) {
     if (typeof body.setNumber !== "number" || !Number.isFinite(body.setNumber)) {

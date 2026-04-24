@@ -37,9 +37,22 @@ export default async function EventDetailPage({
 
   const sportsList = await db.select({ id: sports.id, name: sports.name }).from(sports).orderBy(asc(sports.name));
 
+  // Join metric_types to get the human-readable exercise name. The editor
+  // keeps exerciseName in its form state; writes go back through the
+  // resolver on PATCH.
   const sets = await db
-    .select()
+    .select({
+      id: workoutSets.id,
+      eventId: workoutSets.eventId,
+      exerciseName: metricTypes.name,
+      setNumber: workoutSets.setNumber,
+      reps: workoutSets.reps,
+      weight: workoutSets.weight,
+      rpe: workoutSets.rpe,
+      notes: workoutSets.notes,
+    })
     .from(workoutSets)
+    .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .where(eq(workoutSets.eventId, id))
     .orderBy(asc(workoutSets.setNumber));
 

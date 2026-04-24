@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutSets } from "@/db/schema";
+import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
 
 interface CreateSetBody {
   eventId: number;
@@ -33,11 +34,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Resolve the free-text exercise name to a metric_types row. Known names
+  // (canonical or previously-aliased) route to their existing id; unknown
+  // ones auto-create under `manual:<rawName>` for user review later.
+  const cache = await buildMetricTypeCache();
+  const exerciseMetricTypeId = await resolveMetricTypeId({
+    rawName: body.exerciseName,
+    map: { [body.exerciseName]: body.exerciseName },
+    sourceSystem: "manual",
+    cache,
+  });
+
   const result = await db
     .insert(workoutSets)
     .values({
       eventId: body.eventId,
-      exerciseName: body.exerciseName,
+      exerciseMetricTypeId,
       setNumber: body.setNumber,
       reps: body.reps,
       weight: body.weight,

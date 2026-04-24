@@ -71,6 +71,13 @@
       "when": 1776873040756,
       "tag": "0009_seed_sports",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1777017600000,
+      "tag": "0010_exercises_as_metric_types",
+      "breakpoints": true
     }
   ]
 }

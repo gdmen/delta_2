@@ -8,6 +8,7 @@ import {
   dailySummaries,
   goals,
   focusMetricLinks,
+  workoutSets,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { parseMergeByIdBody } from "@/lib/merge-validation";
@@ -104,6 +105,7 @@ export async function POST(request: NextRequest) {
     name: string;
     metricsMoved: number;
     summariesMoved: number;
+    setsMoved: number;
   };
 
   const report: Report[] = db.transaction((tx) => {
@@ -218,6 +220,18 @@ export async function POST(request: NextRequest) {
         .where(eq(focusMetricLinks.metricTypeId, mergeId))
         .run();
 
+      // workout_sets has no unique constraint on (event_id, exercise_metric_type_id,
+      // set_number), so this is a straight retarget with no dedupe. Weight rescale
+      // isn't applied here — workout_sets.weight is a per-set load, not a reading
+      // of the exercise metric_type's nominal value; if the user wants rescale
+      // they adjust the metric_type unit and the sets downstream, separately.
+      const setsUpd = tx
+        .update(workoutSets)
+        .set({ exerciseMetricTypeId: canonicalId })
+        .where(eq(workoutSets.exerciseMetricTypeId, mergeId))
+        .returning({ id: workoutSets.id })
+        .all();
+
       // Record the alias so future ingests route here directly.
       tx
         .insert(metricTypeAliases)
@@ -226,7 +240,9 @@ export async function POST(request: NextRequest) {
         .run();
 
       // ON DELETE CASCADE on the alias FK auto-cleans any aliases that
-      // pointed AT this merged type.
+      // pointed AT this merged type. All FK references (metrics, event_metrics,
+      // daily_summaries, goals, focus_metric_links, workout_sets) were retargeted
+      // above, so this delete has nothing holding it back.
       tx.delete(metricTypes).where(eq(metricTypes.id, mergeId)).run();
 
       out.push({
@@ -234,6 +250,7 @@ export async function POST(request: NextRequest) {
         name: merged.name,
         metricsMoved: metricsUpd.length,
         summariesMoved: summariesBefore.length,
+        setsMoved: setsUpd.length,
       });
     }
     return out;

@@ -81,7 +81,7 @@ export const eventMetrics = sqliteTable("event_metrics", {
 export const workoutSets = sqliteTable("workout_sets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   eventId: integer("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
-  exerciseName: text("exercise_name").notNull(),
+  exerciseMetricTypeId: integer("exercise_metric_type_id").notNull().references(() => metricTypes.id),
   setNumber: integer("set_number").notNull(),
   reps: integer("reps").notNull(),
   weight: real("weight").notNull(),
@@ -89,7 +89,7 @@ export const workoutSets = sqliteTable("workout_sets", {
   notes: text("notes"),
 }, (table) => [
   index("idx_workout_sets_event").on(table.eventId),
-  index("idx_workout_sets_exercise").on(table.exerciseName),
+  index("idx_workout_sets_exercise_mt").on(table.exerciseMetricTypeId),
 ]);
 
 export const focuses = sqliteTable("focuses", {

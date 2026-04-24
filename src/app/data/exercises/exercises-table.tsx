@@ -1,11 +1,13 @@
 "use client";
 
-import { ExercisesMergeModal } from "./merge-modal";
+import { MergeModal } from "@/app/data/merge-modal";
 import { formatShort } from "@/lib/format";
 import { SelectableDataTable } from "@/components/selectable-data-table";
 
 interface ExerciseRow {
+  id: number;
   name: string;
+  unit: string;
   sets: number;
   eventCount: number;
   firstAt: string | null;
@@ -16,7 +18,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
   return (
     <SelectableDataTable
       rows={rows}
-      getKey={(r) => r.name}
+      getKey={(r) => r.id}
       filterTextFn={(r) => r.name}
       filterPlaceholder="Filter exercises..."
       itemLabel={{ one: "exercise", many: "exercises" }}
@@ -61,11 +63,12 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
         },
       ]}
       renderMergeModal={({ selectedRows, onClose }) => (
-        <ExercisesMergeModal
+        <MergeModal
           candidates={selectedRows.map((r) => ({
+            id: r.id,
             name: r.name,
-            sets: r.sets,
-            eventCount: r.eventCount,
+            unit: r.unit,
+            count: r.sets,
           }))}
           onClose={onClose}
         />

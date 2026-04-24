@@ -31,7 +31,9 @@ import {
  *     /api/import route).
  *   - workout_sets: parent event resolved by event_source_id when
  *     mapped, else by (sport, event_type, started_at). Sets upsert on
- *     (event_id, exercise_name, set_number).
+ *     (event_id, exercise_metric_type_id, set_number). The raw
+ *     exercise_name is resolved through the metric_types alias table
+ *     (same path as metric names) so merges and aliases cover exercises.
  */
 
 interface TableResult {
@@ -241,8 +243,16 @@ async function writeOutRow(
     }
     if (parentSourceId) tracker.recordEvent(parentSourceId, item.startedAt);
 
+    // Identity map routes the raw name to an existing canonical when one
+    // exists, before falling through to the source-prefixed orphan path.
+    const exerciseMetricTypeId = await resolveMetricTypeId({
+      rawName: item.exerciseName,
+      map: { [item.exerciseName]: item.exerciseName },
+      sourceSystem: sourceTag,
+      cache: typeCache,
+    });
     const status = await upsertWorkoutSet(parentId, {
-      exerciseName: item.exerciseName,
+      exerciseMetricTypeId,
       setNumber: item.setNumber,
       reps: item.reps,
       weight: item.weight,

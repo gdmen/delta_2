@@ -53,7 +53,8 @@ import { isStatus } from "@/lib/enums";
  *   - metrics.csv                - dedupe on (source, source_id)
  *   - events.csv                 - dedupe on (source, source_id) or natural key
  *   - event_metrics.csv          - upsert on (event_id, metric_type_id)
- *   - workout_sets.csv           - upsert on (event_id, exercise_name, set_number)
+ *   - workout_sets.csv           - upsert on (event_id, exercise_metric_type_id, set_number);
+ *                                    raw exercise_name resolves via metric_types aliases
  *
  * All handlers are idempotent: re-importing the same file is a no-op.
  * Unknown metric names auto-register via the metric-resolver under
@@ -389,6 +390,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 
 async function importWorkoutSets(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
+  const typeCache = await buildMetricTypeCache();
   return processCsv(
     "workout_sets.csv",
     text,
@@ -431,8 +433,18 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
         parentId = eventId;
       }
 
+      // Identity map routes raw name → existing canonical via resolver step 1.
+      // Same pattern the metrics CSV importer uses so a re-import doesn't
+      // orphan a `csv_import:<name>` duplicate when a bare-name row exists.
+      const exerciseMetricTypeId = await resolveMetricTypeId({
+        rawName: exerciseName,
+        map: { [exerciseName]: exerciseName },
+        sourceSystem: "csv_import",
+        cache: typeCache,
+      });
+
       const input: WorkoutSetInput = {
-        exerciseName,
+        exerciseMetricTypeId,
         setNumber: Number(setNumberStr),
         reps: Number(repsStr),
         weight: Number(weightStr),

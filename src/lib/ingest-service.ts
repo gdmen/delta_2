@@ -27,7 +27,7 @@ export interface EventInput {
 }
 
 export interface WorkoutSetInput {
-  exerciseName: string;
+  exerciseMetricTypeId: number;
   setNumber: number;
   reps: number;
   weight: number;
@@ -126,7 +126,7 @@ export async function insertWorkoutSets(eventId: number, sets: WorkoutSetInput[]
 
   const rows = sets.map((s) => ({
     eventId,
-    exerciseName: s.exerciseName,
+    exerciseMetricTypeId: s.exerciseMetricTypeId,
     setNumber: s.setNumber,
     reps: s.reps,
     weight: s.weight,
@@ -171,7 +171,7 @@ export async function upsertEventMetric(
 }
 
 /**
- * Upsert a single workout set by (eventId, exerciseName, setNumber).
+ * Upsert a single workout set by (eventId, exerciseMetricTypeId, setNumber).
  * Used by the CSV importer so re-importing the same file doesn't duplicate
  * rows. There's no unique index on that tuple, so we look up first and
  * update-or-insert application-side.
@@ -186,7 +186,7 @@ export async function upsertWorkoutSet(
     .where(
       and(
         eq(workoutSets.eventId, eventId),
-        eq(workoutSets.exerciseName, input.exerciseName),
+        eq(workoutSets.exerciseMetricTypeId, input.exerciseMetricTypeId),
         eq(workoutSets.setNumber, input.setNumber)
       )
     )
@@ -207,7 +207,7 @@ export async function upsertWorkoutSet(
 
   await db.insert(workoutSets).values({
     eventId,
-    exerciseName: input.exerciseName,
+    exerciseMetricTypeId: input.exerciseMetricTypeId,
     setNumber: input.setNumber,
     reps: input.reps,
     weight: input.weight,

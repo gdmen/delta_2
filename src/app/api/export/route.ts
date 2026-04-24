@@ -323,13 +323,15 @@ export async function GET() {
   );
 
   // --- workout_sets.csv ----------------------------------------------------
+  // Inner-join metric_types to turn exercise_metric_type_id back into the
+  // canonical exercise_name, preserving the CSV schema for round-trip.
   const setRows = await db
     .select({
       eventStartedAt: events.startedAt,
       sport: sports.name,
       eventType: events.type,
       eventSourceId: events.sourceId,
-      exerciseName: workoutSets.exerciseName,
+      exerciseName: metricTypes.name,
       setNumber: workoutSets.setNumber,
       reps: workoutSets.reps,
       weight: workoutSets.weight,
@@ -339,7 +341,8 @@ export async function GET() {
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .orderBy(asc(events.startedAt), asc(workoutSets.exerciseName), asc(workoutSets.setNumber));
+    .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
+    .orderBy(asc(events.startedAt), asc(metricTypes.name), asc(workoutSets.setNumber));
   const workoutSetsCsv = serializeCsv(
     [
       "event_started_at",
