@@ -1,5 +1,34 @@
 # TODOS
 
+## P2: Computed metrics (`powerlifting_total = bench_1rm + squat_1rm + deadlift_1rm`)
+**What:** A new flavor of metric_type whose value is derived from a formula over other metric_types' values, instead of stored readings. e.g. `powerlifting_total` = sum of latest `bench_1rm` + `squat_1rm` + `deadlift_1rm` per day.
+**Why:** Lets the user track derived measures (powerlifting total, IPF GL points, weekly running mileage, weekly mat time) without writing them by hand.
+**Design decisions before building:**
+- Schema: add `formula TEXT` to `metric_types` (NULL for primitives), `kind TEXT CHECK (kind IN ('primitive','computed'))` or rely on `formula IS NOT NULL`. Lean toward the latter (one fewer column).
+- Formula language: simple expression DSL over `metric_name` references (e.g. `bench_1rm + squat_1rm + deadlift_1rm`)? Or AST stored as JSON? DSL is more user-friendly, JSON is easier to evaluate. Recommend tiny DSL with whitelisted operators (+/-/*/) and metric refs only.
+- Storage: persist computed values into `metrics` rows on each input source's commit, OR compute on-read from latest source values? Eager-write is consistent with how the rest of the app behaves but creates write-amplification (every bench_1rm reading triggers a powerlifting_total write).
+- Aggregation window: "latest per day"? "max so far"? Probably needs a per-formula `aggregation` field.
+- Goal targeting: can a goal point at a computed metric? Yes — required-rate logic still works.
+- Editing: prevent direct insert into `metrics` for computed types.
+**Effort:** M (human: ~1 week / CC: ~1-2h). Touches schema, ingest path, goal calc, metric detail page.
+**Depends on:** Goals-as-Omnibus shipped (so the compute path doesn't fight the LLM context assembly which already pre-aggregates raw metrics).
+**Source:** Surfaced 2026-04-28 alongside primitive-metric UI.
+
+## P2: Categorical / ordinal metrics (`bjj_belt`, mood, RPE band)
+**What:** Metric types whose readings aren't continuous numbers. Three sub-shapes:
+1. Ordinal scales with a fixed mapping: `bjj_belt` → white(0) / blue(1) / purple(2) / brown(3) / black(4). Charts as a step function over time.
+2. Categorical with no ordering: `mood` → great/good/ok/poor/awful. Charts as a stacked bar / heatmap.
+3. Bounded numeric ranges (RPE 1-10): already representable today, just needs a UI hint.
+**Why:** BJJ belt progression, training session quality, subjective measures. Currently impossible to capture without overloading a numeric column with documented mapping (which loses display labels in dashboards).
+**Design decisions before building:**
+- Schema: add `kind TEXT CHECK (kind IN ('numeric','ordinal','categorical'))` and `categories JSON` (NULL for numeric). For ordinal, categories array's index is its numeric value.
+- Storage: keep `metrics.value REAL` for ordinal (store the integer as a real). For categorical, store the index too — but that loses the label round-trip. Probably need a `string_value TEXT` column on metrics.
+- Display: charts need to map index back to label. Tooltip shows label, axis ticks show labels.
+- Input UI: dropdown not number input on the entry form, gated on `metric_type.kind`.
+**Effort:** M (human: ~3-4 days / CC: ~1h). Touches schema, entry form, charts, possibly the resolver.
+**Depends on:** Decision on string_value column for true categorical (vs ordinal-only which fits today's schema).
+**Source:** Surfaced 2026-04-28 alongside primitive-metric UI.
+
 ## P3 (maybe): Big 3 — local-time day grouping
 **What:** `src/lib/strength-metrics.ts` uses `r.startedAt.slice(0, 10)` to key sessions by day, which is the UTC date. A 9pm PT workout has an ISO startedAt of the next UTC day, so it plots one day forward in the history chart and in the session-break logic.
 **Why:** Cosmetic today (server runs in local TZ anyway for most Delta flows), but if we ever host outside Gary's TZ or care about UTC-boundary edge cases, the chart dates will read wrong.

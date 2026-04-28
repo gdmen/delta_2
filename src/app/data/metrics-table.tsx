@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { MergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
 import { SelectableDataTable } from "@/components/selectable-data-table";
@@ -14,7 +15,16 @@ interface MetricTypeRow {
 
 export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
   return (
-    <SelectableDataTable
+    <div>
+      <div className="flex justify-end mb-2">
+        <Link
+          href="/input/metric"
+          className="px-3 py-1.5 text-[0.8125rem] text-foreground hover:opacity-80 underline"
+        >
+          + New metric
+        </Link>
+      </div>
+      <SelectableDataTable
       rows={rows}
       getKey={(r) => r.id}
       filterTextFn={(r) => r.name}
@@ -61,5 +71,6 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
         />
       )}
     />
+    </div>
   );
 }
