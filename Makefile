@@ -2,7 +2,7 @@
 # All real work lives in package.json + drizzle-kit; this file just gives
 # the workflows that have come up enough to deserve a shortcut.
 
-.PHONY: dev build start lint typecheck clean distclean migrate backup
+.PHONY: dev build start lint typecheck clean distclean migrate backup verify-migration-0011
 
 dev:
 	npm run dev
@@ -46,3 +46,18 @@ migrate:
 # sqlite3's online backup API so the snapshot is consistent.
 backup:
 	sqlite3 delta2.db ".backup delta2.db.bak.$$(date +%Y%m%d-%H%M%S)"
+
+# Verify migration 0011 (goals-as-omnibus) applied cleanly: tables present,
+# no orphaned focuses, journal entries copied from focus_entries, dropped
+# tables truly gone. Run after `make migrate` for 0011.
+verify-migration-0011:
+	@echo "--- table presence ---"
+	@sqlite3 delta2.db "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('focuses','goal_journal_entries','coach_calls') ORDER BY name;"
+	@echo "--- dropped tables (should be empty) ---"
+	@sqlite3 delta2.db "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('coach_messages','focus_entries','focus_metric_links');"
+	@echo "--- focus orphan check (must be 0) ---"
+	@sqlite3 delta2.db "SELECT COUNT(*) FROM focuses WHERE goal_id IS NULL OR goal_id NOT IN (SELECT id FROM goals);"
+	@echo "--- counts ---"
+	@sqlite3 delta2.db "SELECT 'focuses' AS t, COUNT(*) FROM focuses UNION ALL SELECT 'goal_journal_entries', COUNT(*) FROM goal_journal_entries UNION ALL SELECT 'coach_calls', COUNT(*) FROM coach_calls UNION ALL SELECT 'goals', COUNT(*) FROM goals;"
+	@echo "--- focus source distribution ---"
+	@sqlite3 delta2.db "SELECT source, COUNT(*) FROM focuses GROUP BY source;"

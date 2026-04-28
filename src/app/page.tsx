@@ -1,20 +1,13 @@
 import { MetricsStrip } from "@/components/metrics-strip";
-import { CoachBriefing } from "@/components/coach-briefing";
 import { FocusCard } from "@/components/focus-card";
 import { GoalBar } from "@/components/goal-bar";
 import { db } from "@/db";
-import { focuses, sports, goals, metricTypes, coachMessages } from "@/db/schema";
-import { eq, desc, and, gte, ne } from "drizzle-orm";
+import { focuses, sports, goals, metricTypes } from "@/db/schema";
+import { eq, ne } from "drizzle-orm";
 import { getLatestMetric, getAverageLast7Days, getSessionsThisWeek } from "@/lib/metrics-query";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 
 export const dynamic = "force-dynamic";
-
-function startOfTodayISO(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 export default async function Home() {
   const [sleep, weight, protein, hrv, sessionsCount] = await Promise.all([
@@ -25,16 +18,19 @@ export default async function Home() {
     getSessionsThisWeek(),
   ]);
 
+  // Focuses now reach their sport via the goal they belong to.
   const activeFocuses = await db
     .select({
       id: focuses.id,
       name: focuses.name,
+      goalId: focuses.goalId,
       sportName: sports.name,
       sportColor: sports.color,
       startDate: focuses.startDate,
     })
     .from(focuses)
-    .innerJoin(sports, eq(focuses.sportId, sports.id))
+    .innerJoin(goals, eq(focuses.goalId, goals.id))
+    .innerJoin(sports, eq(goals.sportId, sports.id))
     .where(eq(focuses.status, "active"));
 
   const goalRows = await db
@@ -60,27 +56,6 @@ export default async function Home() {
       progress: await computeGoalProgress(g),
     }))
   );
-
-  const todayBriefing = await db
-    .select()
-    .from(coachMessages)
-    .where(and(eq(coachMessages.type, "briefing"), gte(coachMessages.createdAt, startOfTodayISO())))
-    .orderBy(desc(coachMessages.createdAt))
-    .limit(1);
-
-  let briefingSummary = "";
-  let briefingInsight = "";
-  let briefingDate = "";
-  if (todayBriefing.length > 0) {
-    briefingDate = todayBriefing[0].createdAt.slice(0, 10);
-    try {
-      const parsed = JSON.parse(todayBriefing[0].content);
-      briefingSummary = parsed.summary ?? todayBriefing[0].content;
-      briefingInsight = parsed.insight ?? "";
-    } catch {
-      briefingSummary = todayBriefing[0].content;
-    }
-  }
 
   return (
     <div>
@@ -119,32 +94,12 @@ export default async function Home() {
         ]}
       />
 
-      <div className="max-w-[820px]">
-        {todayBriefing.length > 0 ? (
-          <CoachBriefing
-            date={briefingDate}
-            summary={briefingSummary}
-            insight={briefingInsight || undefined}
-          />
-        ) : (
-          <div className="border-t-2 border-foreground pt-3 mb-8">
-            <p className="text-[0.875rem] text-muted">
-              No briefing yet today.{" "}
-              <GenerateBriefingLink />{" "}
-              or{" "}
-              <a href="/input/focus" className="text-foreground underline">create a focus</a>{" "}
-              to get started.
-            </p>
-          </div>
-        )}
-      </div>
-
       {/*
-        Today view: focuses lead. Everywhere else in the app, goals lead because
-        they are the fundamental targets. Here on the "Today" page, the framing is
-        immediate and tactical - focuses are what you're doing right now.
+        Today view: focuses lead because they are tactical (what you're working
+        on right now). Goals follow because they are strategic (the deadline-
+        bound targets focuses serve).
       */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-8 max-w-[820px]">
         <div>
           <div className="flex justify-between items-baseline mb-3 border-b border-border pb-2">
             <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">Focuses</span>
@@ -152,8 +107,7 @@ export default async function Home() {
           </div>
           {activeFocuses.length === 0 ? (
             <p className="text-[0.875rem] text-muted py-2">
-              No active focuses.{" "}
-              <a href="/input/focus" className="text-foreground underline">Start one</a> to track what you are working on.
+              No active focuses. Open a goal to add focuses to it.
             </p>
           ) : (
             activeFocuses.map((f) => {
@@ -167,7 +121,7 @@ export default async function Home() {
                   weekNumber={weeks}
                   sparklineData={[]}
                   valueLabel="-"
-                  href={`/focuses/${f.id}`}
+                  href={`/goals/${f.goalId}`}
                 />
               );
             })
@@ -214,16 +168,5 @@ export default async function Home() {
         </div>
       </div>
     </div>
-  );
-}
-
-function GenerateBriefingLink() {
-  return (
-    <a
-      href="/coach"
-      className="text-foreground underline"
-    >
-      generate one
-    </a>
   );
 }

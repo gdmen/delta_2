@@ -14,19 +14,21 @@
 **Effort:** XS for (a), S for (b).
 **When:** If Gary starts programming excluded variants regularly.
 
-## P2: Meet Countdown / War Room View
-**What:** Dedicated `/meet-prep` view aggregating all powerlifting goals with required-rate vs actual-rate, days remaining, weight class tracking, peaking phase awareness, and coach readiness summary.
-**Why:** The powerlifting meet is the primary forcing function for the project. A dedicated view makes the app feel purpose-built for meet prep rather than generic fitness tracking.
-**When:** Build when the meet is ~3 months away. The home dashboard goal bars cover the basics until then.
-**Effort:** S-M (human: ~6h / CC: ~30-45 min)
-**Depends on:** Dashboard views, goal calculation, coach integration all working.
-
 ## P2: Focus Retrospective / Cross-Focus Comparison
 **What:** When opening a new focus, include prior completed focuses with similar sport + metric links as context for the coach. When closing a focus, generate a comparison to prior focuses on the same topic.
 **Why:** Enables compounding: each focus teaches the coach about the user's patterns. "Your last bench campaign: 8 weeks, +20lb, 85% protein compliance. This time: 6 weeks, +25lb, 90% compliance."
 **When:** Build after 2+ completed focuses exist. The feature has no value with 0-1 completed focuses.
 **Effort:** S (human: ~3h / CC: ~20 min)
 **Depends on:** Focus lifecycle working, coach context assembly.
+**Note (2026-04-28):** Now in scope for the Goals-as-Omnibus plan as cherry-pick #3 (close-time verdict that references prior closed focuses on the same goal). This entry can be removed once that plan ships.
+
+## P2: Focus Priority Ordering
+**What:** Add `focuses.priority INTEGER NOT NULL DEFAULT 0` (lower = higher priority). Default ordering becomes `priority ASC, start_date DESC`. UI: drag-to-reorder via @dnd-kit/core, or up/down arrows, or inline number input.
+**Why:** Goals-as-Omnibus v1 ships ordered by `start_date DESC`. Works for BJJ (recent = what coach said) but breaks for powerlifting (a 6-week training block has 3 focuses that don't have a natural recency order). Sport-page mobile digest caps at 3 — without priority, the wrong 3 may surface.
+**When:** When you notice the wrong focus is showing up at the top of the BJJ digest, or you set a 3-focus powerlifting block and want to mark which one is the lift's primary emphasis.
+**Effort:** S (human: ~4-5h / CC: ~30 min) for drag, S (human: ~2-3h / CC: ~10 min) for arrows or number input.
+**Depends on:** Goals-as-Omnibus shipped. Priority field touches focuses tray (goal page) + digest (sport page) + the LLM suggest-focuses prompt (should NOT generate a priority — promote-to-manual gets priority NULL until user assigns).
+**Source:** Surfaced during /plan-design-review on 2026-04-28.
 
 ## P3: BJJ Belt Progress Tracker
 **What:** Dedicated BJJ view with total mat hours by category (class/open_mat/drilling/teaching), monthly training volume trend, focus history timeline, and time-at-current-belt tracking.

@@ -26,7 +26,6 @@ const NAV_SECTIONS = [
     label: "Targets",
     items: [
       { href: "/goals", label: "Goals" },
-      { href: "/focuses", label: "Focuses" },
     ],
   },
   {

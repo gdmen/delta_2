@@ -92,32 +92,6 @@ export const workoutSets = sqliteTable("workout_sets", {
   index("idx_workout_sets_exercise_mt").on(table.exerciseMetricTypeId),
 ]);
 
-export const focuses = sqliteTable("focuses", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  name: text("name").notNull(),
-  sportId: integer("sport_id").notNull().references(() => sports.id),
-  goalId: integer("goal_id").references((): AnySQLiteColumn => goals.id, { onDelete: "set null" }),
-  startDate: text("start_date").notNull(),
-  endDate: text("end_date"),
-  status: text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
-  technicalNotes: text("technical_notes"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
-});
-
-export const focusMetricLinks = sqliteTable("focus_metric_links", {
-  focusId: integer("focus_id").notNull().references(() => focuses.id, { onDelete: "cascade" }),
-  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-}, (table) => [
-  index("idx_focus_metric_links").on(table.focusId, table.metricTypeId),
-]);
-
-export const focusEntries = sqliteTable("focus_entries", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  focusId: integer("focus_id").notNull().references(() => focuses.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
-});
-
 export const goals = sqliteTable("goals", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
@@ -130,14 +104,68 @@ export const goals = sqliteTable("goals", {
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 
-export const coachMessages = sqliteTable("coach_messages", {
+/**
+ * A focus is a current emphasis on a goal. Two flavors share the same shape:
+ * `source: 'manual'` is what the user typed (e.g. "Pause reps for bench"),
+ * `source: 'llm'` is what the LLM proposed from training data, with `evidence`
+ * carrying the workout_ids / metric trends that drove the suggestion.
+ *
+ * Sport is reachable via the goal — focuses don't carry sport_id directly.
+ * Promote-an-llm-focus = update source to 'manual'. Dismiss = set dismissed_at.
+ */
+export const focuses = sqliteTable("focuses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  type: text("type", { enum: ["briefing", "weekly", "chat"] }).notNull(),
-  content: text("content").notNull(),
-  promptTemplateHash: text("prompt_template_hash"),
-  contextSnapshot: text("context_snapshot"),
+  name: text("name").notNull(),
+  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+  source: text("source", { enum: ["manual", "llm"] }).notNull().default("manual"),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date"),
+  status: text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
+  technicalNotes: text("technical_notes"),
+  evidence: text("evidence"),
+  dismissedAt: text("dismissed_at"),
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
-});
+}, (table) => [
+  index("idx_focuses_goal_status").on(table.goalId, table.status),
+]);
+
+/**
+ * Per-goal markdown journal. Append-only timestamped entries form the longitudinal
+ * narrative of a goal. `verdict_focus_id` tags entries auto-generated when a focus
+ * closes, so they can be styled differently in the journal feed.
+ * `linked_metric_type_id` is optional — pin an entry to a metric without resurrecting
+ * a join table.
+ */
+export const goalJournalEntries = sqliteTable("goal_journal_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  verdictFocusId: integer("verdict_focus_id").references((): AnySQLiteColumn => focuses.id, { onDelete: "set null" }),
+  linkedMetricTypeId: integer("linked_metric_type_id").references(() => metricTypes.id, { onDelete: "set null" }),
+}, (table) => [
+  index("idx_goal_journal_goal_created").on(table.goalId, table.createdAt),
+]);
+
+/**
+ * One row per LLM call. Metadata only (no message content — content lives in
+ * focuses.evidence or goal_journal_entries). Lets us track cost, latency, and
+ * failure rates without joining to external service logs.
+ */
+export const coachCalls = sqliteTable("coach_calls", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  ts: text("ts").default(sql`(datetime('now'))`).notNull(),
+  endpoint: text("endpoint").notNull(),
+  goalId: integer("goal_id").references(() => goals.id, { onDelete: "set null" }),
+  tokensIn: integer("tokens_in").notNull().default(0),
+  tokensOut: integer("tokens_out").notNull().default(0),
+  durationMs: integer("duration_ms").notNull().default(0),
+  model: text("model").notNull(),
+  status: text("status").notNull().default("success"),
+}, (table) => [
+  index("idx_coach_calls_ts").on(table.ts),
+  index("idx_coach_calls_goal").on(table.goalId),
+]);
 
 export const ingestConfigs = sqliteTable("ingest_configs", {
   id: integer("id").primaryKey({ autoIncrement: true }),

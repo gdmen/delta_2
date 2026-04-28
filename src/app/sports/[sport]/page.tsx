@@ -22,10 +22,22 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
   if (sportRows.length === 0) notFound();
   const sport = sportRows[0];
 
+  // Focuses reach this sport via their goal. PR #4 will turn this into a
+  // top-of-page digest; for now the existing list-render below uses these rows.
   const activeFocuses = await db
-    .select()
+    .select({
+      id: focuses.id,
+      name: focuses.name,
+      goalId: focuses.goalId,
+      startDate: focuses.startDate,
+      endDate: focuses.endDate,
+      status: focuses.status,
+      source: focuses.source,
+      technicalNotes: focuses.technicalNotes,
+    })
     .from(focuses)
-    .where(and(eq(focuses.sportId, sport.id), eq(focuses.status, "active")))
+    .innerJoin(goals, eq(focuses.goalId, goals.id))
+    .where(and(eq(goals.sportId, sport.id), eq(focuses.status, "active")))
     .orderBy(desc(focuses.startDate));
 
   const recentEvents = await db
@@ -162,14 +174,13 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
         </div>
         {activeFocuses.length === 0 ? (
           <p className="text-[0.875rem] text-muted py-2">
-            No active focuses for {displayName}.{" "}
-            <Link href="/input/focus" className="text-foreground underline">Start one →</Link>
+            No active focuses for {displayName}. Open a goal to add focuses to it.
           </p>
         ) : (
           activeFocuses.map((f) => (
             <Link
               key={f.id}
-              href={`/focuses/${f.id}`}
+              href={`/goals/${f.goalId}`}
               className="block py-2 border-b border-surface last:border-b-0 hover:bg-surface/40 -mx-2 px-2 rounded"
             >
               <div className="text-[0.875rem] font-medium">{f.name}</div>

@@ -7,7 +7,7 @@ import {
   eventMetrics,
   dailySummaries,
   goals,
-  focusMetricLinks,
+  goalJournalEntries,
   workoutSets,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -196,28 +196,13 @@ export async function POST(request: NextRequest) {
 
       tx.update(goals).set({ metricTypeId: canonicalId }).where(eq(goals.metricTypeId, mergeId)).run();
 
-      // focus_metric_links has no unique constraint; dedupe by (focus_id, metric_type_id).
-      const canonicalFocusIds = tx
-        .select({ fid: focusMetricLinks.focusId })
-        .from(focusMetricLinks)
-        .where(eq(focusMetricLinks.metricTypeId, canonicalId))
-        .all()
-        .map((r) => r.fid);
-      if (canonicalFocusIds.length > 0) {
-        tx
-          .delete(focusMetricLinks)
-          .where(
-            and(
-              eq(focusMetricLinks.metricTypeId, mergeId),
-              inArray(focusMetricLinks.focusId, canonicalFocusIds)
-            )
-          )
-          .run();
-      }
+      // goal_journal_entries can pin to a metric_type; retarget any pin at the
+      // merged row to the canonical. ON DELETE SET NULL on the FK already
+      // protects against dangling refs if a metric_type vanishes another way.
       tx
-        .update(focusMetricLinks)
-        .set({ metricTypeId: canonicalId })
-        .where(eq(focusMetricLinks.metricTypeId, mergeId))
+        .update(goalJournalEntries)
+        .set({ linkedMetricTypeId: canonicalId })
+        .where(eq(goalJournalEntries.linkedMetricTypeId, mergeId))
         .run();
 
       // workout_sets has no unique constraint on (event_id, exercise_metric_type_id,

@@ -13,8 +13,7 @@ import {
   sourceSettings,
   goals,
   focuses,
-  focusMetricLinks,
-  focusEntries,
+  goalJournalEntries,
 } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -35,9 +34,8 @@ import { serializeCsv } from "@/lib/csv";
  *
  * User-configured targets:
  *   - goals.csv                  - goals with target + deadline
- *   - focuses.csv                - active / completed focus blocks
- *   - focus_metric_links.csv     - which metrics each focus tracks
- *   - focus_entries.csv          - log entries per focus
+ *   - focuses.csv                - manual + LLM-suggested focuses, owned by goals
+ *   - goal_journal_entries.csv   - per-goal markdown journal (timestamped)
  *
  * Measured data:
  *   - metrics.csv                - timestamped numeric streams
@@ -47,7 +45,7 @@ import { serializeCsv } from "@/lib/csv";
  *
  * Deliberately NOT exported:
  *   - ingest_configs             - OAuth tokens; re-connect after restore
- *   - coach_messages             - LLM chat history; not foundational
+ *   - coach_calls                - LLM call metadata; rebuilds on use
  *   - daily_summaries            - aggregation cache; regenerates
  *   - reconcile_log              - audit trail; regenerates
  *
@@ -138,94 +136,103 @@ export async function GET() {
   );
 
   // --- focuses.csv ---------------------------------------------------------
-  // Natural key: (sport, name, start_date). Linked goal (optional) carries
-  // its own (sport, metric, deadline) tuple the importer resolves. Single
-  // LEFT JOIN through goals → alias(sports) + metric_types so the goal's
-  // natural key comes back inline without a follow-up query.
-  const goalSports = alias(sports, "goal_sports");
+  // Focuses now belong to goals; sport reaches the focus via the goal. Natural
+  // key for round-trip: (goal_sport, goal_metric, goal_deadline, name, start_date).
+  // The importer resolves the goal first, then attaches the focus.
   const focusRows = await db
     .select({
       name: focuses.name,
-      sport: sports.name,
+      source: focuses.source,
       startDate: focuses.startDate,
       endDate: focuses.endDate,
       status: focuses.status,
       technicalNotes: focuses.technicalNotes,
-      goalSport: goalSports.name,
+      evidence: focuses.evidence,
+      dismissedAt: focuses.dismissedAt,
+      goalSport: sports.name,
       goalMetric: metricTypes.name,
       goalDeadline: goals.deadline,
     })
     .from(focuses)
-    .innerJoin(sports, eq(focuses.sportId, sports.id))
-    .leftJoin(goals, eq(focuses.goalId, goals.id))
-    .leftJoin(goalSports, eq(goals.sportId, goalSports.id))
-    .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
+    .innerJoin(goals, eq(focuses.goalId, goals.id))
+    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .orderBy(asc(focuses.startDate));
 
   const focusesCsv = serializeCsv(
     [
       "name",
-      "sport",
+      "source",
       "start_date",
       "end_date",
       "status",
       "technical_notes",
+      "evidence",
+      "dismissed_at",
       "goal_sport",
       "goal_metric",
       "goal_deadline",
     ],
     focusRows.map((r) => [
       r.name,
-      r.sport,
+      r.source,
       r.startDate,
       r.endDate ?? "",
       r.status,
       r.technicalNotes ?? "",
-      r.goalSport ?? "",
-      r.goalMetric ?? "",
-      r.goalDeadline ?? "",
+      r.evidence ?? "",
+      r.dismissedAt ?? "",
+      r.goalSport,
+      r.goalMetric,
+      r.goalDeadline,
     ]),
   );
 
-  // --- focus_metric_links.csv ----------------------------------------------
-  const linkRows = await db
+  // --- goal_journal_entries.csv --------------------------------------------
+  // Per-goal markdown journal. Round-trip natural key for the parent goal is
+  // (goal_sport, goal_metric, goal_deadline). verdict_focus_id is exported as
+  // the focus's (name, start_date) tuple so it survives ID changes.
+  const journalRows = await db
     .select({
-      focusName: focuses.name,
-      focusSport: sports.name,
-      focusStartDate: focuses.startDate,
-      metric: metricTypes.name,
+      content: goalJournalEntries.content,
+      createdAt: goalJournalEntries.createdAt,
+      goalSport: sports.name,
+      goalMetric: metricTypes.name,
+      goalDeadline: goals.deadline,
+      verdictFocusName: focuses.name,
+      verdictFocusStartDate: focuses.startDate,
+      linkedMetric: alias(metricTypes, "linked_mt").name,
     })
-    .from(focusMetricLinks)
-    .innerJoin(focuses, eq(focusMetricLinks.focusId, focuses.id))
-    .innerJoin(sports, eq(focuses.sportId, sports.id))
-    .innerJoin(metricTypes, eq(focusMetricLinks.metricTypeId, metricTypes.id))
-    .orderBy(asc(focuses.startDate), asc(metricTypes.name));
-  const focusMetricLinksCsv = serializeCsv(
-    ["focus_name", "focus_sport", "focus_start_date", "metric"],
-    linkRows.map((r) => [r.focusName, r.focusSport, r.focusStartDate, r.metric]),
-  );
-
-  // --- focus_entries.csv ---------------------------------------------------
-  const entryRows = await db
-    .select({
-      focusName: focuses.name,
-      focusSport: sports.name,
-      focusStartDate: focuses.startDate,
-      content: focusEntries.content,
-      createdAt: focusEntries.createdAt,
-    })
-    .from(focusEntries)
-    .innerJoin(focuses, eq(focusEntries.focusId, focuses.id))
-    .innerJoin(sports, eq(focuses.sportId, sports.id))
-    .orderBy(asc(focusEntries.createdAt));
-  const focusEntriesCsv = serializeCsv(
-    ["focus_name", "focus_sport", "focus_start_date", "content", "created_at"],
-    entryRows.map((r) => [
-      r.focusName,
-      r.focusSport,
-      r.focusStartDate,
+    .from(goalJournalEntries)
+    .innerJoin(goals, eq(goalJournalEntries.goalId, goals.id))
+    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
+    .leftJoin(focuses, eq(goalJournalEntries.verdictFocusId, focuses.id))
+    .leftJoin(
+      alias(metricTypes, "linked_mt"),
+      eq(goalJournalEntries.linkedMetricTypeId, alias(metricTypes, "linked_mt").id),
+    )
+    .orderBy(asc(goalJournalEntries.createdAt));
+  const goalJournalEntriesCsv = serializeCsv(
+    [
+      "goal_sport",
+      "goal_metric",
+      "goal_deadline",
+      "content",
+      "created_at",
+      "verdict_focus_name",
+      "verdict_focus_start_date",
+      "linked_metric",
+    ],
+    journalRows.map((r) => [
+      r.goalSport,
+      r.goalMetric,
+      r.goalDeadline,
       r.content,
       r.createdAt,
+      r.verdictFocusName ?? "",
+      r.verdictFocusStartDate ?? "",
+      r.linkedMetric ?? "",
     ]),
   );
 
@@ -379,8 +386,7 @@ export async function GET() {
     "source_settings.csv": strToU8(sourceSettingsCsv),
     "goals.csv": strToU8(goalsCsv),
     "focuses.csv": strToU8(focusesCsv),
-    "focus_metric_links.csv": strToU8(focusMetricLinksCsv),
-    "focus_entries.csv": strToU8(focusEntriesCsv),
+    "goal_journal_entries.csv": strToU8(goalJournalEntriesCsv),
     "metrics.csv": strToU8(metricsCsv),
     "events.csv": strToU8(eventsCsv),
     "event_metrics.csv": strToU8(eventMetricsCsv),

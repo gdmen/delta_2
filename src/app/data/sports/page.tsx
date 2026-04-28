@@ -21,8 +21,9 @@ export default async function SportsPage() {
     })
     .from(sports)
     .leftJoin(events, eq(events.sportId, sports.id))
-    .leftJoin(focuses, eq(focuses.sportId, sports.id))
     .leftJoin(goals, eq(goals.sportId, sports.id))
+    // Focuses now reach their sport via the goal, not a direct sport_id.
+    .leftJoin(focuses, eq(focuses.goalId, goals.id))
     .groupBy(sports.id)
     .orderBy(sql`COUNT(DISTINCT ${events.id}) DESC`);
 

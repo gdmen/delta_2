@@ -3,7 +3,6 @@ import { db } from "@/db";
 import {
   sports,
   events,
-  focuses,
   goals,
   metricTypes,
 } from "@/db/schema";
@@ -62,7 +61,8 @@ export async function POST(request: NextRequest) {
         .returning({ id: events.id })
         .all();
 
-      tx.update(focuses).set({ sportId: canonicalId }).where(eq(focuses.sportId, mergeId)).run();
+      // focuses no longer carry sport_id directly — they reach sport via their
+      // goal, so updating goals below carries focuses along.
       tx.update(goals).set({ sportId: canonicalId }).where(eq(goals.sportId, mergeId)).run();
       tx
         .update(metricTypes)

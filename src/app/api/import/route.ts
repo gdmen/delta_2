@@ -10,8 +10,7 @@ import {
   sourceSettings,
   goals,
   focuses,
-  focusMetricLinks,
-  focusEntries,
+  goalJournalEntries,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
@@ -45,9 +44,9 @@ import { isStatus } from "@/lib/enums";
  *
  * User targets (reference sports + metric_types):
  *   - goals.csv                  - dedupe by (sport, metric, deadline)
- *   - focuses.csv                - dedupe by (sport, name, start_date)
- *   - focus_metric_links.csv     - resolve focus by natural key, INSERT OR IGNORE
- *   - focus_entries.csv          - dedupe by (focus, content, created_at)
+ *   - focuses.csv                - dedupe by (goal, name, start_date); goal resolved
+ *                                  by (goal_sport, goal_metric, goal_deadline)
+ *   - goal_journal_entries.csv   - dedupe by (goal, content, created_at)
  *
  * Measured data (existing behaviour):
  *   - metrics.csv                - dedupe on (source, source_id)
@@ -114,8 +113,7 @@ export async function POST(request: NextRequest) {
     "source_settings.csv",
     "goals.csv",
     "focuses.csv",
-    "focus_metric_links.csv",
-    "focus_entries.csv",
+    "goal_journal_entries.csv",
     "metrics.csv",
     "events.csv",
     "event_metrics.csv",
@@ -172,14 +170,11 @@ export async function POST(request: NextRequest) {
     out.focuses = await importFocuses(csvs["focuses.csv"]);
   }
 
-  // --- focus_metric_links.csv ----------------------------------------------
-  if (csvs["focus_metric_links.csv"]) {
-    out.focus_metric_links = await importFocusMetricLinks(csvs["focus_metric_links.csv"]);
-  }
-
-  // --- focus_entries.csv ---------------------------------------------------
-  if (csvs["focus_entries.csv"]) {
-    out.focus_entries = await importFocusEntries(csvs["focus_entries.csv"]);
+  // --- goal_journal_entries.csv -------------------------------------------
+  if (csvs["goal_journal_entries.csv"]) {
+    out.goal_journal_entries = await importGoalJournalEntries(
+      csvs["goal_journal_entries.csv"],
+    );
   }
 
   // --- metrics.csv ---------------------------------------------------------
@@ -696,56 +691,66 @@ async function importFocuses(text: string): Promise<TableResult> {
   return processCsv(
     "focuses.csv",
     text,
-    ["name", "sport", "start_date"],
+    ["name", "start_date", "goal_sport", "goal_metric", "goal_deadline"],
     async (row, idx) => {
       const name = row[idx.get("name")!];
-      const sportName = row[idx.get("sport")!];
       const startDate = row[idx.get("start_date")!];
+      const goalSport = row[idx.get("goal_sport")!];
+      const goalMetric = row[idx.get("goal_metric")!];
+      const goalDeadline = row[idx.get("goal_deadline")!];
+      const source =
+        (idx.has("source") ? row[idx.get("source")!] : "manual") || "manual";
       const endDate = idx.has("end_date") ? row[idx.get("end_date")!] : "";
       const status =
         (idx.has("status") ? row[idx.get("status")!] : "active") || "active";
       const technicalNotes = idx.has("technical_notes")
         ? row[idx.get("technical_notes")!]
         : "";
-      const goalSport = idx.has("goal_sport") ? row[idx.get("goal_sport")!] : "";
-      const goalMetric = idx.has("goal_metric") ? row[idx.get("goal_metric")!] : "";
-      const goalDeadline = idx.has("goal_deadline")
-        ? row[idx.get("goal_deadline")!]
+      const evidence = idx.has("evidence") ? row[idx.get("evidence")!] : "";
+      const dismissedAt = idx.has("dismissed_at")
+        ? row[idx.get("dismissed_at")!]
         : "";
 
-      if (!name || !sportName || !startDate) throw new Error("missing required field");
+      if (!name || !startDate || !goalSport || !goalMetric || !goalDeadline) {
+        throw new Error("missing required field");
+      }
       if (!isStatus(status)) throw new Error(`invalid status "${status}"`);
-      const sportId = sportCache.get(sportName);
-      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
-
-      // Resolve optional linked goal by its (sport, metric, deadline) tuple.
-      let goalId: number | null = null;
-      if (goalSport && goalMetric && goalDeadline) {
-        const goalSportId = sportCache.get(goalSport);
-        const goalMetricTypeId = typeCache.byName.get(goalMetric);
-        if (goalSportId && goalMetricTypeId) {
-          const g = await db
-            .select({ id: goals.id })
-            .from(goals)
-            .where(
-              and(
-                eq(goals.sportId, goalSportId),
-                eq(goals.metricTypeId, goalMetricTypeId),
-                eq(goals.deadline, goalDeadline),
-              ),
-            )
-            .limit(1);
-          goalId = g[0]?.id ?? null;
-        }
+      if (source !== "manual" && source !== "llm") {
+        throw new Error(`invalid source "${source}"`);
       }
 
-      // Natural-key dedupe: (sportId, name, startDate).
+      const goalSportId = sportCache.get(goalSport);
+      if (!goalSportId) throw new Error(`unknown sport "${goalSport}"`);
+      const goalMetricTypeId = typeCache.byName.get(goalMetric);
+      if (goalMetricTypeId === undefined) {
+        throw new Error(`unknown metric "${goalMetric}"`);
+      }
+
+      const g = await db
+        .select({ id: goals.id })
+        .from(goals)
+        .where(
+          and(
+            eq(goals.sportId, goalSportId),
+            eq(goals.metricTypeId, goalMetricTypeId),
+            eq(goals.deadline, goalDeadline),
+          ),
+        )
+        .limit(1);
+      if (g.length === 0) {
+        throw new Error(
+          `goal not found for (${goalSport}, ${goalMetric}, ${goalDeadline})`,
+        );
+      }
+      const goalId = g[0].id;
+
+      // Natural-key dedupe: (goalId, name, startDate).
       const existing = await db
         .select({ id: focuses.id })
         .from(focuses)
         .where(
           and(
-            eq(focuses.sportId, sportId),
+            eq(focuses.goalId, goalId),
             eq(focuses.name, name),
             eq(focuses.startDate, startDate),
           ),
@@ -754,123 +759,119 @@ async function importFocuses(text: string): Promise<TableResult> {
       if (existing.length > 0) return "skipped";
       await db.insert(focuses).values({
         name,
-        sportId,
         goalId,
+        source: source as "manual" | "llm",
         startDate,
         endDate: endDate || null,
         status,
         technicalNotes: technicalNotes || null,
+        evidence: evidence || null,
+        dismissedAt: dismissedAt || null,
       });
       return "accepted";
     },
   );
 }
 
-async function importFocusMetricLinks(text: string): Promise<TableResult> {
+async function importGoalJournalEntries(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
   const typeCache = await buildMetricTypeCache();
   return processCsv(
-    "focus_metric_links.csv",
+    "goal_journal_entries.csv",
     text,
-    ["focus_name", "focus_sport", "focus_start_date", "metric"],
+    ["goal_sport", "goal_metric", "goal_deadline", "content"],
     async (row, idx) => {
-      const focusName = row[idx.get("focus_name")!];
-      const focusSport = row[idx.get("focus_sport")!];
-      const focusStartDate = row[idx.get("focus_start_date")!];
-      const metricName = row[idx.get("metric")!];
-      if (!focusName || !focusSport || !focusStartDate || !metricName) {
-        throw new Error("missing required field");
-      }
-      const sportId = sportCache.get(focusSport);
-      if (!sportId) throw new Error(`unknown sport "${focusSport}"`);
-      const metricTypeId = typeCache.byName.get(metricName);
-      if (metricTypeId === undefined) throw new Error(`unknown metric "${metricName}"`);
-      const focus = await db
-        .select({ id: focuses.id })
-        .from(focuses)
-        .where(
-          and(
-            eq(focuses.sportId, sportId),
-            eq(focuses.name, focusName),
-            eq(focuses.startDate, focusStartDate),
-          ),
-        )
-        .limit(1);
-      if (focus.length === 0) {
-        throw new Error(
-          `focus "${focusName}" (${focusSport}, ${focusStartDate}) not found`,
-        );
-      }
-      const focusId = focus[0].id;
-      const existing = await db
-        .select({ focusId: focusMetricLinks.focusId })
-        .from(focusMetricLinks)
-        .where(
-          and(
-            eq(focusMetricLinks.focusId, focusId),
-            eq(focusMetricLinks.metricTypeId, metricTypeId),
-          ),
-        )
-        .limit(1);
-      if (existing.length > 0) return "skipped";
-      await db.insert(focusMetricLinks).values({ focusId, metricTypeId });
-      return "accepted";
-    },
-  );
-}
-
-async function importFocusEntries(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  return processCsv(
-    "focus_entries.csv",
-    text,
-    ["focus_name", "focus_sport", "focus_start_date", "content"],
-    async (row, idx) => {
-      const focusName = row[idx.get("focus_name")!];
-      const focusSport = row[idx.get("focus_sport")!];
-      const focusStartDate = row[idx.get("focus_start_date")!];
+      const goalSport = row[idx.get("goal_sport")!];
+      const goalMetric = row[idx.get("goal_metric")!];
+      const goalDeadline = row[idx.get("goal_deadline")!];
       const content = row[idx.get("content")!];
       const createdAt = idx.has("created_at") ? row[idx.get("created_at")!] : "";
-      if (!focusName || !focusSport || !focusStartDate || !content) {
+      const verdictFocusName = idx.has("verdict_focus_name")
+        ? row[idx.get("verdict_focus_name")!]
+        : "";
+      const verdictFocusStartDate = idx.has("verdict_focus_start_date")
+        ? row[idx.get("verdict_focus_start_date")!]
+        : "";
+      const linkedMetric = idx.has("linked_metric")
+        ? row[idx.get("linked_metric")!]
+        : "";
+
+      if (!goalSport || !goalMetric || !goalDeadline || !content) {
         throw new Error("missing required field");
       }
-      const sportId = sportCache.get(focusSport);
-      if (!sportId) throw new Error(`unknown sport "${focusSport}"`);
-      const focus = await db
-        .select({ id: focuses.id })
-        .from(focuses)
+      const goalSportId = sportCache.get(goalSport);
+      if (!goalSportId) throw new Error(`unknown sport "${goalSport}"`);
+      const goalMetricTypeId = typeCache.byName.get(goalMetric);
+      if (goalMetricTypeId === undefined) {
+        throw new Error(`unknown metric "${goalMetric}"`);
+      }
+
+      const g = await db
+        .select({ id: goals.id })
+        .from(goals)
         .where(
           and(
-            eq(focuses.sportId, sportId),
-            eq(focuses.name, focusName),
-            eq(focuses.startDate, focusStartDate),
+            eq(goals.sportId, goalSportId),
+            eq(goals.metricTypeId, goalMetricTypeId),
+            eq(goals.deadline, goalDeadline),
           ),
         )
         .limit(1);
-      if (focus.length === 0) {
+      if (g.length === 0) {
         throw new Error(
-          `focus "${focusName}" (${focusSport}, ${focusStartDate}) not found`,
+          `goal not found for (${goalSport}, ${goalMetric}, ${goalDeadline})`,
         );
       }
-      const focusId = focus[0].id;
-      // Dedupe by (focus_id, content, created_at) if created_at was exported;
-      // otherwise just by (focus_id, content) to avoid duplicating on re-import.
+      const goalId = g[0].id;
+
+      // Optional verdict_focus link: resolve by (goal_id, name, start_date).
+      let verdictFocusId: number | null = null;
+      if (verdictFocusName && verdictFocusStartDate) {
+        const f = await db
+          .select({ id: focuses.id })
+          .from(focuses)
+          .where(
+            and(
+              eq(focuses.goalId, goalId),
+              eq(focuses.name, verdictFocusName),
+              eq(focuses.startDate, verdictFocusStartDate),
+            ),
+          )
+          .limit(1);
+        verdictFocusId = f[0]?.id ?? null;
+      }
+
+      // Optional linked_metric: resolve by name.
+      let linkedMetricTypeId: number | null = null;
+      if (linkedMetric) {
+        linkedMetricTypeId = typeCache.byName.get(linkedMetric) ?? null;
+      }
+
+      // Dedupe by (goal_id, content, created_at) if created_at was exported;
+      // otherwise (goal_id, content) — covers the common re-import case.
       const dedupeConditions = createdAt
         ? [
-            eq(focusEntries.focusId, focusId),
-            eq(focusEntries.content, content),
-            eq(focusEntries.createdAt, createdAt),
+            eq(goalJournalEntries.goalId, goalId),
+            eq(goalJournalEntries.content, content),
+            eq(goalJournalEntries.createdAt, createdAt),
           ]
-        : [eq(focusEntries.focusId, focusId), eq(focusEntries.content, content)];
+        : [
+            eq(goalJournalEntries.goalId, goalId),
+            eq(goalJournalEntries.content, content),
+          ];
       const existing = await db
-        .select({ id: focusEntries.id })
-        .from(focusEntries)
+        .select({ id: goalJournalEntries.id })
+        .from(goalJournalEntries)
         .where(and(...dedupeConditions))
         .limit(1);
       if (existing.length > 0) return "skipped";
-      await db
-        .insert(focusEntries)
-        .values({ focusId, content, ...(createdAt ? { createdAt } : {}) });
+      await db.insert(goalJournalEntries).values({
+        goalId,
+        content,
+        verdictFocusId,
+        linkedMetricTypeId,
+        ...(createdAt ? { createdAt } : {}),
+      });
       return "accepted";
     },
   );
