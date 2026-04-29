@@ -49,6 +49,7 @@ export async function PATCH(
     technicalNotes?: unknown;
     endDate?: unknown;
     dismissedAt?: unknown;
+    source?: unknown;
   };
 
   const updates: {
@@ -57,6 +58,7 @@ export async function PATCH(
     technicalNotes?: string | null;
     endDate?: string | null;
     dismissedAt?: string | null;
+    source?: "manual" | "llm";
   } = {};
 
   if (b.status !== undefined) {
@@ -109,6 +111,13 @@ export async function PATCH(
     } else {
       return NextResponse.json({ error: "dismissedAt must be string or null" }, { status: 400 });
     }
+  }
+
+  if (b.source !== undefined) {
+    if (b.source !== "manual" && b.source !== "llm") {
+      return NextResponse.json({ error: "source must be 'manual' or 'llm'" }, { status: 400 });
+    }
+    updates.source = b.source;
   }
 
   if (Object.keys(updates).length === 0) {

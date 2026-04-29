@@ -68,13 +68,33 @@ function FocusRow({ goalId, focus }: { goalId: number; focus: Focus }) {
   const isActive = focus.status === "active";
   const isLlm = focus.source === "llm";
 
-  async function setStatus(newStatus: "completed" | "abandoned" | "active") {
+  async function closeFocus() {
+    // Use the dedicated close endpoint so an LLM verdict gets generated and
+    // appended to the goal journal as a tagged entry. The endpoint always
+    // closes the focus first, so even if the LLM call fails the focus state
+    // ends up correct.
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/goals/${goalId}/focuses/${focus.id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "completed" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      setBusy(false);
+    }
+  }
+
+  async function reopenFocus() {
     setBusy(true);
     try {
       const res = await fetch(`/api/goals/${goalId}/focuses/${focus.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: "active" }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       router.refresh();
@@ -107,17 +127,17 @@ function FocusRow({ goalId, focus }: { goalId: number; focus: Focus }) {
         {isActive ? (
           <button
             type="button"
-            onClick={() => setStatus("completed")}
+            onClick={closeFocus}
             disabled={busy}
             className="text-[0.6875rem] font-mono text-muted hover:text-foreground disabled:opacity-50 px-2 py-1"
-            title="Close focus"
+            title="Close focus + generate journal verdict"
           >
-            close
+            {busy ? "closing…" : "close"}
           </button>
         ) : (
           <button
             type="button"
-            onClick={() => setStatus("active")}
+            onClick={reopenFocus}
             disabled={busy}
             className="text-[0.6875rem] font-mono text-muted hover:text-foreground disabled:opacity-50 px-2 py-1"
             title="Reopen focus"

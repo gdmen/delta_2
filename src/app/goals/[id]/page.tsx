@@ -11,6 +11,9 @@ import { AbandonGoalButton } from "./delete-button";
 import { JournalEntryForm } from "./journal-entry-form";
 import { JournalList } from "./journal-list";
 import { FocusesTray } from "./focuses-tray";
+import { LlmTray } from "./llm-tray";
+import { buildSignalsBlock, renderSignalsBlock } from "@/lib/coach/suggest-focuses";
+import { getLastSuccessfulCallAt } from "@/lib/coach/track-call";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +104,26 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
     "insufficient-data": { label: "NO DATA", color: "text-muted border-border" },
   }[status];
 
-  const activeFocusCount = goalFocuses.filter((f) => f.status === "active").length;
+  const activeFocusCount = goalFocuses.filter(
+    (f) => f.status === "active" && f.source === "manual",
+  ).length;
+
+  // Split focuses by source. LLM proposals that are still active and not
+  // dismissed render in the LLM tray; everything else (manual + closed
+  // anything + dismissed) flows into the manual focuses tray.
+  const llmSuggestions = goalFocuses
+    .filter(
+      (f) => f.source === "llm" && f.status === "active" && f.endDate === null,
+    )
+    .map((f) => ({ id: f.id, name: f.name, evidence: f.evidence }));
+  const trayFocuses = goalFocuses.filter((f) => !llmSuggestions.find((s) => s.id === f.id));
+
+  // Pre-aggregate signals for the LLM-tray loading state. Computed server-
+  // side so the user sees concrete numbers during the 3-8s LLM wait, not a
+  // generic spinner.
+  const signals = await buildSignalsBlock();
+  const signalsBlock = renderSignalsBlock(signals);
+  const lastSuggestedAt = await getLastSuccessfulCallAt(goal.id, "suggest-focuses");
 
   return (
     <div className="max-w-[720px]">
@@ -166,7 +188,13 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
             {activeFocusCount} active
           </span>
         </div>
-        <FocusesTray goalId={goal.id} focuses={goalFocuses} />
+        <LlmTray
+          goalId={goal.id}
+          initialSuggestions={llmSuggestions}
+          signalsBlock={signalsBlock}
+          lastSuggestedAt={lastSuggestedAt ? lastSuggestedAt.toISOString() : null}
+        />
+        <FocusesTray goalId={goal.id} focuses={trayFocuses} />
       </section>
 
       {/* JOURNAL */}
@@ -197,16 +225,6 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
         />
         <p className="mt-2 text-[0.6875rem] text-muted font-mono">
           Dashed orange line = target. Last 4 weeks of data drive the actual rate.
-        </p>
-      </section>
-
-      {/* COACH (placeholder for PR #3) */}
-      <section className="mb-8 pt-6 border-t border-border">
-        <div className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3">
-          Coach
-        </div>
-        <p className="text-[0.8125rem] text-muted">
-          LLM-suggested focuses + period summaries arrive in the next PR.
         </p>
       </section>
 
