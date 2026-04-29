@@ -22,22 +22,29 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
   if (sportRows.length === 0) notFound();
   const sport = sportRows[0];
 
-  // Focuses reach this sport via their goal. PR #4 will turn this into a
-  // top-of-page digest; for now the existing list-render below uses these rows.
+  // Focuses reach this sport via their goal. The pre-class JTBD wants this
+  // surfaced FIRST — when you walk into a BJJ class and open the page, the
+  // top of the screen should show what you're working on today. Active +
+  // not dismissed only; ordered start_date DESC (most recent at top, since
+  // BJJ focuses tend to come from "what coach said most recently"). Priority
+  // ordering is a P2 follow-up (TODOS.md).
   const activeFocuses = await db
     .select({
       id: focuses.id,
       name: focuses.name,
       goalId: focuses.goalId,
       startDate: focuses.startDate,
-      endDate: focuses.endDate,
-      status: focuses.status,
       source: focuses.source,
       technicalNotes: focuses.technicalNotes,
     })
     .from(focuses)
     .innerJoin(goals, eq(focuses.goalId, goals.id))
-    .where(and(eq(goals.sportId, sport.id), eq(focuses.status, "active")))
+    .where(
+      and(
+        eq(goals.sportId, sport.id),
+        eq(focuses.status, "active"),
+      ),
+    )
     .orderBy(desc(focuses.startDate));
 
   const recentEvents = await db
@@ -109,6 +116,17 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
         <h1 className="text-2xl font-semibold">{displayName}</h1>
       </div>
 
+      {/* TODAY'S FOCUS — the pre-class scan surface. Capped at 3 on mobile
+          (so the JTBD "open phone walking into class, see what to work on"
+          fits one screen) and 8 on desktop where vertical real estate isn't
+          scarce. Each row links straight to its goal page where the full
+          tray + journal + LLM tray live. */}
+      <FocusDigest
+        focuses={activeFocuses}
+        sportColor={sport.color}
+        displayName={displayName}
+      />
+
       {/* Summary stats - goals first, per "goals are fundamental, focuses advance them". */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border mb-8">
         <StatCell label="Goals" value={String(sportGoals.length)} />
@@ -163,32 +181,6 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
               />
             );
           })
-        )}
-      </section>
-
-      {/* Active focuses */}
-      <section className="mb-8">
-        <div className="flex justify-between items-baseline mb-3 border-b border-border pb-2">
-          <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">Focuses</span>
-          <span className="font-mono text-[0.6875rem] text-muted">{activeFocuses.length}</span>
-        </div>
-        {activeFocuses.length === 0 ? (
-          <p className="text-[0.875rem] text-muted py-2">
-            No active focuses for {displayName}. Open a goal to add focuses to it.
-          </p>
-        ) : (
-          activeFocuses.map((f) => (
-            <Link
-              key={f.id}
-              href={`/goals/${f.goalId}`}
-              className="block py-2 border-b border-surface last:border-b-0 hover:bg-surface/40 -mx-2 px-2 rounded"
-            >
-              <div className="text-[0.875rem] font-medium">{f.name}</div>
-              <div className="font-mono text-[0.6875rem] text-muted">
-                Started {f.startDate}
-              </div>
-            </Link>
-          ))
         )}
       </section>
 
@@ -252,5 +244,133 @@ function StatCell({ label, value }: { label: string; value: string }) {
       <div className="text-[0.6875rem] text-muted uppercase tracking-wider font-medium">{label}</div>
       <div className="font-mono text-[1.25rem] font-medium mt-1">{value}</div>
     </div>
+  );
+}
+
+interface DigestFocus {
+  id: number;
+  name: string;
+  goalId: number;
+  startDate: string;
+  source: "manual" | "llm";
+  technicalNotes: string | null;
+}
+
+/**
+ * Sport-page focuses digest. The pre-class scan surface — when the user
+ * walks into the gym, they open this page and the FIRST thing they see
+ * is what they're working on today.
+ *
+ * Mobile cap: 3 visible (zero-scroll fit on a 375px-wide phone). Desktop
+ * cap: 8 visible. Anything beyond renders inside a hidden block on the
+ * smaller viewport. The "+N more" indicator is text only — there's no
+ * sport-scoped focuses page anymore; if the user wants the rest they
+ * click into a specific goal, where the full focus tray + journal lives.
+ */
+function FocusDigest({
+  focuses,
+  sportColor,
+  displayName,
+}: {
+  focuses: DigestFocus[];
+  sportColor: string;
+  displayName: string;
+}) {
+  if (focuses.length === 0) {
+    return (
+      <section className="mb-8 pb-6 border-b border-border">
+        <div className="text-[0.6875rem] font-mono uppercase tracking-wider text-muted mb-2">
+          Today&apos;s focus
+        </div>
+        <p className="text-[0.875rem] text-muted">
+          No active focuses for {displayName}.{" "}
+          <Link href="/input/goal" className="text-foreground underline">
+            Set a goal
+          </Link>{" "}
+          to start.
+        </p>
+      </section>
+    );
+  }
+
+  const mobileVisible = focuses.slice(0, 3);
+  const desktopExtra = focuses.slice(3, 8); // visible on md+ only
+  const hiddenOnMobile = focuses.length - mobileVisible.length;
+  const hiddenOnDesktop = focuses.length - 8;
+
+  return (
+    <section className="mb-8 pb-6 border-b border-border">
+      <div className="flex items-baseline justify-between mb-3">
+        <span className="text-[0.6875rem] font-mono uppercase tracking-wider text-muted">
+          Today&apos;s focus
+        </span>
+        <span className="font-mono text-[0.6875rem] text-muted">
+          {focuses.length} active
+        </span>
+      </div>
+
+      <ul className="space-y-1.5">
+        {mobileVisible.map((f) => (
+          <DigestRow key={f.id} focus={f} sportColor={sportColor} />
+        ))}
+        {desktopExtra.length > 0 && (
+          <div className="hidden md:contents">
+            {desktopExtra.map((f) => (
+              <DigestRow key={f.id} focus={f} sportColor={sportColor} />
+            ))}
+          </div>
+        )}
+      </ul>
+
+      {hiddenOnMobile > 0 && (
+        <p className="md:hidden mt-2 font-mono text-[0.6875rem] text-muted">
+          + {hiddenOnMobile} more (open a goal to see them)
+        </p>
+      )}
+      {hiddenOnDesktop > 0 && (
+        <p className="hidden md:block mt-2 font-mono text-[0.6875rem] text-muted">
+          + {hiddenOnDesktop} more (open a goal to see them)
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DigestRow({
+  focus,
+  sportColor,
+}: {
+  focus: DigestFocus;
+  sportColor: string;
+}) {
+  const isLlm = focus.source === "llm";
+  return (
+    <li>
+      <Link
+        href={`/goals/${focus.goalId}`}
+        className="flex items-start gap-3 py-1.5 -mx-2 px-2 rounded hover:bg-surface/40"
+      >
+        <span
+          className="w-[6px] h-[6px] rounded-full flex-shrink-0 mt-2"
+          style={{ backgroundColor: sportColor }}
+          aria-hidden
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[0.875rem]">{focus.name}</span>
+            {isLlm && (
+              <span className="text-[0.625rem] font-mono uppercase text-muted px-1 py-px border border-border rounded">
+                AI
+              </span>
+            )}
+          </div>
+          {focus.technicalNotes && (
+            <p className="text-[0.75rem] text-text-secondary mt-0.5 line-clamp-2">
+              {focus.technicalNotes}
+            </p>
+          )}
+        </div>
+      </Link>
+    </li>
   );
 }
