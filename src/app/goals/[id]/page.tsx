@@ -70,6 +70,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       status: focuses.status,
       technicalNotes: focuses.technicalNotes,
       evidence: focuses.evidence,
+      dismissedAt: focuses.dismissedAt,
     })
     .from(focuses)
     .where(eq(focuses.goalId, goal.id))
@@ -113,10 +114,18 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
   // anything + dismissed) flows into the manual focuses tray.
   const llmSuggestions = goalFocuses
     .filter(
-      (f) => f.source === "llm" && f.status === "active" && f.endDate === null,
+      (f) =>
+        f.source === "llm" &&
+        f.status === "active" &&
+        f.endDate === null &&
+        !f.dismissedAt,
     )
     .map((f) => ({ id: f.id, name: f.name, evidence: f.evidence }));
-  const trayFocuses = goalFocuses.filter((f) => !llmSuggestions.find((s) => s.id === f.id));
+  // Dismissed LLM suggestions also drop out of the manual tray — they're
+  // soft-deleted (kept around so the prompt can avoid re-proposing them).
+  const trayFocuses = goalFocuses.filter(
+    (f) => !llmSuggestions.find((s) => s.id === f.id) && !f.dismissedAt,
+  );
 
   // Pre-aggregate signals for the LLM-tray loading state. Computed server-
   // side so the user sees concrete numbers during the 3-8s LLM wait, not a
