@@ -156,8 +156,8 @@ export function Sidebar() {
         <Link href="/input/goal" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
           + New Goal
         </Link>
-        <Link href="/input/focus" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
-          + New Focus
+        <Link href="/input/metric" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
+          + New Metric
         </Link>
         <Link href="/input/bjj" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
           + Log BJJ Session

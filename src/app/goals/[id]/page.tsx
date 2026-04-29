@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { goals, metricTypes, sports, metrics, focuses } from "@/db/schema";
-import { eq, asc, desc } from "drizzle-orm";
+import { goals, metricTypes, sports, metrics, focuses, goalJournalEntries } from "@/db/schema";
+import { eq, asc, desc, sql } from "drizzle-orm";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
 import { EditableGoalTarget } from "./editable-target";
 import { EditableGoalDeadline } from "./editable-deadline";
 import { AbandonGoalButton } from "./delete-button";
+import { JournalEntryForm } from "./journal-entry-form";
+import { JournalList } from "./journal-list";
+import { FocusesTray } from "./focuses-tray";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +43,6 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
 
   const progress = await computeGoalProgress(goal);
 
-  // Pull samples from goal creation date onward for the progress chart.
   const samples = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
     .from(metrics)
@@ -52,18 +54,43 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
     value: s.value,
   }));
 
-  // Focuses that are advancing this goal.
-  const linkedFocuses = await db
+  // Focuses on this goal — newest first per the locked v1 ordering. Priority
+  // ordering is a P2 follow-up (TODOS.md).
+  const goalFocuses = await db
     .select({
       id: focuses.id,
       name: focuses.name,
+      goalId: focuses.goalId,
+      source: focuses.source,
       startDate: focuses.startDate,
       endDate: focuses.endDate,
       status: focuses.status,
+      technicalNotes: focuses.technicalNotes,
+      evidence: focuses.evidence,
     })
     .from(focuses)
     .where(eq(focuses.goalId, goal.id))
-    .orderBy(desc(focuses.createdAt));
+    .orderBy(desc(focuses.startDate));
+
+  // Journal entries: reverse-chronological. LEFT JOIN focuses to surface the
+  // verdict focus name when applicable, so the journal item can label itself
+  // as "verdict: <focus name>" without a follow-up query.
+  const verdictFocus = sql`verdict_focus.name`.mapWith(String).as("verdictFocusName");
+  const journalEntries = await db
+    .select({
+      id: goalJournalEntries.id,
+      content: goalJournalEntries.content,
+      createdAt: goalJournalEntries.createdAt,
+      verdictFocusId: goalJournalEntries.verdictFocusId,
+      verdictFocusName: verdictFocus,
+    })
+    .from(goalJournalEntries)
+    .leftJoin(
+      sql`${focuses} AS verdict_focus`,
+      sql`verdict_focus.id = ${goalJournalEntries.verdictFocusId}`,
+    )
+    .where(eq(goalJournalEntries.goalId, goal.id))
+    .orderBy(desc(goalJournalEntries.createdAt));
 
   const status = progress.status;
   const statusConfig = {
@@ -74,8 +101,11 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
     "insufficient-data": { label: "NO DATA", color: "text-muted border-border" },
   }[status];
 
+  const activeFocusCount = goalFocuses.filter((f) => f.status === "active").length;
+
   return (
-    <div className="max-w-[820px]">
+    <div className="max-w-[720px]">
+      {/* HEADER */}
       <Link href="/goals" className="text-[0.8125rem] text-muted hover:text-foreground">
         ← All Goals
       </Link>
@@ -102,8 +132,8 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
         </span>
       </div>
 
-      {/* Progress summary */}
-      <section className="mb-8 pb-6 border-b border-border">
+      {/* PROGRESS */}
+      <section className="mb-8">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
           <Stat label="Current" value={progress.currentValue !== null ? `${progress.currentValue.toFixed(1)}${goal.metricUnit}` : "-"} />
           <Stat label="Progress" value={`${progress.progress.toFixed(0)}%`} />
@@ -126,8 +156,35 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
         </div>
       </section>
 
-      {/* Trend chart */}
-      <section className="mb-8 pb-6 border-b border-border">
+      {/* FOCUSES */}
+      <section className="mb-8 pt-6 border-t border-border">
+        <div className="flex justify-between items-baseline mb-3">
+          <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
+            Current focuses
+          </span>
+          <span className="font-mono text-[0.6875rem] text-muted">
+            {activeFocusCount} active
+          </span>
+        </div>
+        <FocusesTray goalId={goal.id} focuses={goalFocuses} />
+      </section>
+
+      {/* JOURNAL */}
+      <section className="mb-8 pt-6 border-t border-border">
+        <div className="flex justify-between items-baseline mb-3">
+          <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
+            Journal
+          </span>
+          <span className="font-mono text-[0.6875rem] text-muted">
+            {journalEntries.length} {journalEntries.length === 1 ? "entry" : "entries"}
+          </span>
+        </div>
+        <JournalEntryForm goalId={goal.id} />
+        <JournalList entries={journalEntries} sportColor={goal.sportColor} />
+      </section>
+
+      {/* TREND */}
+      <section className="mb-8 pt-6 border-t border-border">
         <div className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3">
           Trend since goal set
         </div>
@@ -143,54 +200,21 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
         </p>
       </section>
 
-      {/* Focuses advancing this goal */}
-      <section className="mb-8 pb-6 border-b border-border">
-        <div className="flex justify-between items-baseline mb-3 border-b border-border pb-2">
-          <span className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
-            Focuses advancing this goal
-          </span>
-          <span className="font-mono text-[0.6875rem] text-muted">{linkedFocuses.length}</span>
+      {/* COACH (placeholder for PR #3) */}
+      <section className="mb-8 pt-6 border-t border-border">
+        <div className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3">
+          Coach
         </div>
-        {linkedFocuses.length === 0 ? (
-          <p className="text-[0.875rem] text-muted py-2">
-            No focuses linked yet.{" "}
-            <Link href="/input/focus" className="text-foreground underline">Start one →</Link>{" "}
-            to work toward this goal.
-          </p>
-        ) : (
-          linkedFocuses.map((f) => {
-            const isActive = f.status === "active";
-            return (
-              <Link
-                key={f.id}
-                href={`/focuses/${f.id}`}
-                className={`flex justify-between items-center gap-3 py-2 border-b border-surface last:border-b-0 hover:bg-surface/40 -mx-2 px-2 rounded ${isActive ? "" : "opacity-70 hover:opacity-100"}`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span
-                    className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-                    style={{ backgroundColor: goal.sportColor }}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-[0.875rem] font-medium">{f.name}</div>
-                    <div className="font-mono text-[0.6875rem] text-muted">
-                      {f.startDate}
-                      {f.endDate ? ` → ${f.endDate}` : ""} · {f.status}
-                    </div>
-                  </div>
-                </div>
-                <span className="text-muted text-[0.875rem] flex-shrink-0">→</span>
-              </Link>
-            );
-          })
-        )}
+        <p className="text-[0.8125rem] text-muted">
+          LLM-suggested focuses + period summaries arrive in the next PR.
+        </p>
       </section>
 
-      <div className="mt-8">
+      <div className="mt-8 pt-6 border-t border-border">
         <AbandonGoalButton
           goalId={goal.id}
           currentStatus={goal.status}
-          activeLinkedFocusCount={linkedFocuses.filter((f) => f.status === "active").length}
+          activeLinkedFocusCount={activeFocusCount}
         />
       </div>
     </div>
