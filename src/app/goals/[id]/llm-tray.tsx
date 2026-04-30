@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { parseSqliteUtc } from "@/lib/sqlite-time";
 
 interface LlmFocus {
   id: number;
@@ -46,16 +47,22 @@ export function LlmTray({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // `mounted` gates anything that depends on a live `Date.now()` from
+  // bleeding into the SSR'd HTML. The relative time label ("3d ago") would
+  // otherwise differ by ~1s between server render and client hydration.
+  const [mounted, setMounted] = useState(false);
   const staleFireRef = useRef(false);
 
   // Fire stale-on-load once. Even if the page rerenders, the ref stops a
-  // second fire within the same mount.
+  // second fire within the same mount. Also flips `mounted` so the
+  // relative time label can render with a live Date.now().
   useEffect(() => {
+    setMounted(true);
     if (staleFireRef.current) return;
     staleFireRef.current = true;
     const stale =
       !lastSuggestedAt ||
-      Date.now() - new Date(lastSuggestedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
+      Date.now() - parseSqliteUtc(lastSuggestedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
     if (!stale) return;
     void refresh({ ifStale: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,7 +133,14 @@ export function LlmTray({
     });
   }
 
-  const lastAtLabel = lastSuggestedAt ? formatRelative(lastSuggestedAt) : "never";
+  // Relative time uses Date.now(), which differs between server SSR and
+  // client hydration. Pre-mount, render a stable placeholder; post-mount,
+  // render the live label.
+  const lastAtLabel = mounted
+    ? lastSuggestedAt
+      ? formatRelative(lastSuggestedAt)
+      : "never"
+    : "…";
 
   return (
     <div className="mb-4 pb-4 border-b border-surface">
@@ -248,7 +262,7 @@ function parseEvidence(raw: string | null): ParsedEvidence | null {
 }
 
 function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
+  const then = parseSqliteUtc(iso).getTime();
   if (isNaN(then)) return iso;
   const diffMs = Date.now() - then;
   const sec = Math.floor(diffMs / 1000);

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { coachCalls } from "@/db/schema";
 import { desc, eq, and, gte } from "drizzle-orm";
+import { parseSqliteUtc } from "@/lib/sqlite-time";
 
 export type CoachEndpoint = "suggest-focuses" | "summarize-period" | "close-focus-verdict";
 
@@ -56,8 +57,9 @@ export async function getLastSuccessfulCallAt(
     .orderBy(desc(coachCalls.ts))
     .limit(1);
   if (rows.length === 0) return null;
-  return new Date(rows[0].ts);
+  return parseSqliteUtc(rows[0].ts);
 }
+
 
 /**
  * Lightweight health check: how many calls in the last 24h, broken down by

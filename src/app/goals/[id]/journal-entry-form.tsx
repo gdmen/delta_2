@@ -23,12 +23,20 @@ export function JournalEntryForm({ goalId }: { goalId: number }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
+  // `mounted` gates everything that depends on client-only state
+  // (localStorage drafts) from feeding into the first render. Without
+  // this, restoring a draft in useEffect causes React 19 + Turbopack to
+  // flag a hydration mismatch on `disabled={... !content.trim()}` because
+  // the server renders with an empty content assumption and the client
+  // commits with the draft already populated.
+  const [mounted, setMounted] = useState(false);
 
   const draftKey = `goal-journal-draft-${goalId}`;
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Restore draft on mount.
   useEffect(() => {
+    setMounted(true);
     try {
       const saved = window.localStorage.getItem(draftKey);
       if (saved && saved.trim()) {
@@ -139,7 +147,11 @@ export function JournalEntryForm({ goalId }: { goalId: number }) {
         </button>
         <button
           type="submit"
-          disabled={submitting || !content.trim()}
+          // Pre-mount the disabled state ignores `content` to match the
+          // server's first-render assumption (content=""). Post-mount it
+          // tracks the real (possibly draft-restored) content. handleSubmit
+          // also guards empty content as a belt-and-suspenders.
+          disabled={submitting || (mounted && !content.trim())}
           className="px-3 py-1.5 bg-foreground text-background text-[0.8125rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
         >
           {submitting ? "Saving…" : "Add entry"}
