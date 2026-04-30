@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface TableResult {
   accepted: number;
@@ -17,8 +18,7 @@ type TableName =
   | "source_settings"
   | "goals"
   | "focuses"
-  | "focus_metric_links"
-  | "focus_entries"
+  | "goal_journal_entries"
   | "metrics"
   | "events"
   | "event_metrics"
@@ -27,10 +27,25 @@ type ImportResponse = Partial<Record<TableName, TableResult>> & {
   error?: string;
 };
 
+interface WipeResponse {
+  ok?: boolean;
+  deletedCounts?: Record<string, number>;
+  note?: string;
+  error?: string;
+}
+
+// Inlined by Next.js's compiler for client components, so this gate
+// works without prop drilling. The matching server endpoint also
+// refuses in production — defence in depth.
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 export function ImportExportBar() {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<"idle" | "uploading">("idle");
   const [result, setResult] = useState<ImportResponse | null>(null);
+  const [wiping, setWiping] = useState(false);
+  const [wipeResult, setWipeResult] = useState<WipeResponse | null>(null);
 
   async function handleFile(file: File) {
     setState("uploading");
@@ -46,6 +61,32 @@ export function ImportExportBar() {
     }
     setState("idle");
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleWipe() {
+    const confirmed = window.confirm(
+      "Wipe ALL local data?\n\nDeletes every row from sports, metric_types, " +
+        "metrics, events, workout_sets, goals, focuses, journal entries, " +
+        "and the LLM call log. Ingest API keys (Strava / Apple Health) are " +
+        "preserved.\n\nThis cannot be undone. Proceed?",
+    );
+    if (!confirmed) return;
+    setWiping(true);
+    setWipeResult(null);
+    try {
+      const res = await fetch("/api/dev/wipe-data", { method: "POST" });
+      const json = (await res.json()) as WipeResponse;
+      if (!res.ok) {
+        setWipeResult({ error: json.error ?? `HTTP ${res.status}` });
+      } else {
+        setWipeResult(json);
+        // Refresh the page so all the now-empty tables re-query.
+        router.refresh();
+      }
+    } catch (err) {
+      setWipeResult({ error: err instanceof Error ? err.message : String(err) });
+    }
+    setWiping(false);
   }
 
   return (
@@ -75,9 +116,22 @@ export function ImportExportBar() {
             if (f) void handleFile(f);
           }}
         />
+        {IS_DEV && (
+          <button
+            type="button"
+            onClick={handleWipe}
+            disabled={wiping}
+            className="ml-auto px-4 py-2 border border-accent-red/40 text-accent-red rounded text-[0.8125rem] font-medium hover:bg-accent-red/10 disabled:opacity-50"
+            title="Development only — refuses in production"
+          >
+            {wiping ? "Wiping…" : "DEV: Wipe local data"}
+          </button>
+        )}
       </div>
 
       {result && <ImportResult result={result} />}
+
+      {wipeResult && <WipeResult result={wipeResult} />}
 
       <p className="text-[0.75rem] text-muted">
         Export bundles everything needed to recreate the app from scratch:
@@ -88,8 +142,7 @@ export function ImportExportBar() {
         <code className="font-mono">source_settings</code>), targets
         (<code className="font-mono">goals</code>,{" "}
         <code className="font-mono">focuses</code>,{" "}
-        <code className="font-mono">focus_metric_links</code>,{" "}
-        <code className="font-mono">focus_entries</code>), and measured data
+        <code className="font-mono">goal_journal_entries</code>), and measured data
         (<code className="font-mono">metrics</code>,{" "}
         <code className="font-mono">events</code>,{" "}
         <code className="font-mono">event_metrics</code>,{" "}
@@ -119,8 +172,7 @@ function ImportResult({ result }: { result: ImportResponse }) {
     ["source_settings", result.source_settings],
     ["goals", result.goals],
     ["focuses", result.focuses],
-    ["focus_metric_links", result.focus_metric_links],
-    ["focus_entries", result.focus_entries],
+    ["goal_journal_entries", result.goal_journal_entries],
     ["metrics", result.metrics],
     ["events", result.events],
     ["event_metrics", result.event_metrics],
@@ -156,6 +208,35 @@ function ImportResult({ result }: { result: ImportResponse }) {
           {e}
         </div>
       ))}
+    </div>
+  );
+}
+
+function WipeResult({ result }: { result: WipeResponse }) {
+  if (result.error) {
+    return (
+      <div className="p-3 bg-accent-red/10 border border-accent-red/20 rounded text-[0.8125rem] text-accent-red">
+        Wipe failed: {result.error}
+      </div>
+    );
+  }
+  const counts = result.deletedCounts ?? {};
+  const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  return (
+    <div className="p-3 bg-accent-orange/10 border border-accent-orange/20 rounded text-[0.8125rem] font-mono">
+      <div className="font-semibold mb-1">
+        Wiped {total.toLocaleString()} rows across {Object.keys(counts).length}{" "}
+        tables.
+      </div>
+      <div className="text-text-secondary">
+        {Object.entries(counts)
+          .filter(([, n]) => n > 0)
+          .map(([t, n]) => `${t} ${n}`)
+          .join(" · ") || "(everything was already empty)"}
+      </div>
+      {result.note && (
+        <div className="text-[0.6875rem] text-muted mt-1">{result.note}</div>
+      )}
     </div>
   );
 }
