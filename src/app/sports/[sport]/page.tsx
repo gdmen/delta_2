@@ -24,10 +24,11 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
 
   // Focuses reach this sport via their goal. The pre-class JTBD wants this
   // surfaced FIRST — when you walk into a BJJ class and open the page, the
-  // top of the screen should show what you're working on today. Active +
-  // not dismissed only; ordered start_date DESC (most recent at top, since
-  // BJJ focuses tend to come from "what coach said most recently"). Priority
-  // ordering is a P2 follow-up (TODOS.md).
+  // top of the screen should show what you're working on today. Manual
+  // (committed) only — un-promoted LLM proposals live on the goal page's
+  // LLM tray, not in the digest. Ordered start_date DESC (most recent at
+  // top, since BJJ focuses tend to come from "what coach said most
+  // recently"). Priority ordering is a P2 follow-up (TODOS.md).
   const activeFocuses = await db
     .select({
       id: focuses.id,
@@ -43,6 +44,7 @@ export default async function SportDetailPage({ params }: { params: Promise<{ sp
       and(
         eq(goals.sportId, sport.id),
         eq(focuses.status, "active"),
+        eq(focuses.source, "manual"),
       ),
     )
     .orderBy(desc(focuses.startDate));

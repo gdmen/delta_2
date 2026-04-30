@@ -3,7 +3,7 @@ import { FocusCard } from "@/components/focus-card";
 import { GoalBar } from "@/components/goal-bar";
 import { db } from "@/db";
 import { focuses, sports, goals, metricTypes } from "@/db/schema";
-import { eq, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { getLatestMetric, getAverageLast7Days, getSessionsThisWeek } from "@/lib/metrics-query";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 
@@ -18,7 +18,9 @@ export default async function Home() {
     getSessionsThisWeek(),
   ]);
 
-  // Focuses now reach their sport via the goal they belong to.
+  // Focuses now reach their sport via the goal they belong to. LLM-suggested
+  // focuses (source='llm') stay out of the daily view until the user promotes
+  // them — proposals shouldn't masquerade as commitments.
   const activeFocuses = await db
     .select({
       id: focuses.id,
@@ -31,7 +33,7 @@ export default async function Home() {
     .from(focuses)
     .innerJoin(goals, eq(focuses.goalId, goals.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
-    .where(eq(focuses.status, "active"));
+    .where(and(eq(focuses.status, "active"), eq(focuses.source, "manual")));
 
   const goalRows = await db
     .select({

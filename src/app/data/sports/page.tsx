@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { sports, events, focuses, goals } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { SportsTable } from "./sports-table";
 import { DataTabShell } from "@/components/data-tab-shell";
 
@@ -23,7 +23,12 @@ export default async function SportsPage() {
     .leftJoin(events, eq(events.sportId, sports.id))
     .leftJoin(goals, eq(goals.sportId, sports.id))
     // Focuses now reach their sport via the goal, not a direct sport_id.
-    .leftJoin(focuses, eq(focuses.goalId, goals.id))
+    // Count only manual focuses — un-promoted LLM proposals shouldn't
+    // inflate the "you have N focuses" thumb-rule.
+    .leftJoin(
+      focuses,
+      and(eq(focuses.goalId, goals.id), eq(focuses.source, "manual")),
+    )
     .groupBy(sports.id)
     .orderBy(sql`COUNT(DISTINCT ${events.id}) DESC`);
 
