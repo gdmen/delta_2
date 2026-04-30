@@ -11,6 +11,8 @@ export function MetricBlock({
   fallbackUnit,
   target,
   window,
+  xMin,
+  xMax,
 }: {
   title: string;
   series: Series;
@@ -18,6 +20,9 @@ export function MetricBlock({
   target?: number;
   /** Human label for the delta window, e.g. "30d". Defaults to "all time". */
   window?: string;
+  /** Shared X-axis range, in epoch ms — for aligning multiple blocks. */
+  xMin?: number;
+  xMax?: number;
 }) {
   const unit = series.unit || fallbackUnit;
   const latest = series.samples[series.samples.length - 1]?.value;
@@ -58,7 +63,14 @@ export function MetricBlock({
           )}
         </div>
       </div>
-      <MetricTrend samples={series.samples} unit={unit} target={target} height={180} />
+      <MetricTrend
+        samples={series.samples}
+        unit={unit}
+        target={target}
+        height={180}
+        xMin={xMin}
+        xMax={xMax}
+      />
     </div>
   );
 }

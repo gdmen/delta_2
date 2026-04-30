@@ -13,14 +13,21 @@ export function MetricTrend({
   target,
   color = "#171717",
   height = 220,
+  xMin,
+  xMax,
 }: {
   samples: Sample[];
   unit: string;
   target?: number;
   color?: string;
   height?: number;
+  /** Lock the X-axis to this range (epoch ms). Lets a parent align several
+   * charts to the same time window so they're visually comparable. */
+  xMin?: number;
+  xMax?: number;
 }) {
-  if (samples.length === 0) {
+  const empty = samples.length === 0;
+  if (empty && xMin === undefined) {
     return (
       <div
         className="border border-border rounded flex items-center justify-center text-[0.875rem] text-muted"
@@ -31,17 +38,15 @@ export function MetricTrend({
     );
   }
 
-  // Use numeric timestamps so the X axis is time-scaled, not categorical.
-  // (If we keep the date as a string, Recharts spaces each sample evenly
-  // regardless of the real time gap between them - so a sample from 2020 and
-  // one from 2024 end up side by side.)
   const data = samples.map((s) => ({
     ts: new Date(s.date).getTime(),
     value: s.value,
   }));
 
-  const minTs = data[0].ts;
-  const maxTs = data[data.length - 1].ts;
+  const dataMin = data.length > 0 ? data[0].ts : (xMin ?? 0);
+  const dataMax = data.length > 0 ? data[data.length - 1].ts : (xMax ?? 0);
+  const minTs = xMin ?? dataMin;
+  const maxTs = xMax ?? dataMax;
   const spanDays = (maxTs - minTs) / (1000 * 60 * 60 * 24);
 
   // Pick an axis label format based on the time range.
@@ -73,7 +78,7 @@ export function MetricTrend({
           <XAxis
             dataKey="ts"
             type="number"
-            domain={["dataMin", "dataMax"]}
+            domain={[minTs, maxTs]}
             scale="time"
             tick={{ fontSize: 11, fill: "#a3a3a3", fontFamily: "JetBrains Mono" }}
             axisLine={{ stroke: "#e5e5e5" }}

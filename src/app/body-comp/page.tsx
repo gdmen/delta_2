@@ -15,6 +15,9 @@ export default async function BodyCompPage() {
     getAllHistory("visceral_fat_mass"),
   ]);
 
+  const allSeries = [weight, bodyFat, leanMass, fatMass, boneDensity, visceralFat];
+  const sharedRange = unionRange(allSeries);
+
   return (
     <div className="max-w-[1200px]">
       <h1 className="text-2xl font-semibold mb-8">Body Composition</h1>
@@ -27,14 +30,29 @@ export default async function BodyCompPage() {
           <span className="font-mono text-[0.6875rem] text-muted">full history</span>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <MetricBlock title="Weight" series={weight} fallbackUnit="lb" />
-          <MetricBlock title="Body Fat %" series={bodyFat} fallbackUnit="%" />
-          <MetricBlock title="Lean Mass" series={leanMass} fallbackUnit="lb" />
-          <MetricBlock title="Fat Mass" series={fatMass} fallbackUnit="lb" />
-          <MetricBlock title="Bone Mineral Density" series={boneDensity} fallbackUnit="g/cm²" />
-          <MetricBlock title="Visceral Fat" series={visceralFat} fallbackUnit="lb" />
+          <MetricBlock title="Weight" series={weight} fallbackUnit="lb" xMin={sharedRange?.min} xMax={sharedRange?.max} />
+          <MetricBlock title="Body Fat %" series={bodyFat} fallbackUnit="%" xMin={sharedRange?.min} xMax={sharedRange?.max} />
+          <MetricBlock title="Lean Mass" series={leanMass} fallbackUnit="lb" xMin={sharedRange?.min} xMax={sharedRange?.max} />
+          <MetricBlock title="Fat Mass" series={fatMass} fallbackUnit="lb" xMin={sharedRange?.min} xMax={sharedRange?.max} />
+          <MetricBlock title="Bone Mineral Density" series={boneDensity} fallbackUnit="g/cm²" xMin={sharedRange?.min} xMax={sharedRange?.max} />
+          <MetricBlock title="Visceral Fat" series={visceralFat} fallbackUnit="lb" xMin={sharedRange?.min} xMax={sharedRange?.max} />
         </div>
       </section>
     </div>
   );
+}
+
+function unionRange(seriesList: { samples: { date: string }[] }[]): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const s of seriesList) {
+    for (const sample of s.samples) {
+      const ts = new Date(sample.date).getTime();
+      if (Number.isFinite(ts)) {
+        if (ts < min) min = ts;
+        if (ts > max) max = ts;
+      }
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
 }
