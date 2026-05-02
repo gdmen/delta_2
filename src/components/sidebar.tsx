@@ -4,49 +4,35 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { SPORT_COLORS } from "@/lib/sport-colors";
+import type { DashboardRow } from "@/lib/dashboards/load";
 
-const NAV_SECTIONS = [
-  {
-    label: "Dashboard",
-    items: [
-      { href: "/", label: "Today" },
-      { href: "/recovery", label: "Recovery" },
-      { href: "/body-comp", label: "Body Comp" },
-    ],
-  },
-  {
-    label: "Sports",
-    items: Object.entries(SPORT_COLORS).map(([name, color]) => ({
-      href: `/sports/${name}`,
-      label: name === "bjj" ? "BJJ" : name.charAt(0).toUpperCase() + name.slice(1),
-      color,
-    })),
-  },
-  {
-    label: "Targets",
-    items: [
-      { href: "/goals", label: "Goals" },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [
-      { href: "/data-sources", label: "Sources" },
-      { href: "/data", label: "Data" },
-    ],
-  },
-];
+const SPORT_NAV = Object.entries(SPORT_COLORS).map(([name, color]) => ({
+  href: `/sports/${name}`,
+  label: name === "bjj" ? "BJJ" : name.charAt(0).toUpperCase() + name.slice(1),
+  color,
+}));
 
-export function Sidebar() {
+/** "Today" links to / instead of /dashboards/today; everywhere else goes to the canonical slug route. */
+function dashboardHref(slug: string): string {
+  return slug === "today" ? "/" : `/dashboards/${slug}`;
+}
+
+interface SidebarProps {
+  dashboards: DashboardRow[];
+}
+
+export function Sidebar({ dashboards }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Close drawer on route change.
-  useEffect(() => {
+  // Reset the mobile drawer's open state on route change. React 19's
+  // "adjust state during render" pattern (vs. setState inside an effect)
+  // — see https://react.dev/learn/you-might-not-need-an-effect.
+  const [trackedPath, setTrackedPath] = useState(pathname);
+  if (pathname !== trackedPath) {
+    setTrackedPath(pathname);
     setMobileOpen(false);
-  }, [pathname]);
+  }
 
-  // Lock body scroll when drawer open.
   useEffect(() => {
     if (mobileOpen) {
       document.body.style.overflow = "hidden";
@@ -60,7 +46,6 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile header */}
       <header className="md:hidden fixed top-0 left-0 right-0 h-12 bg-background border-b border-border flex items-center justify-between px-4 z-40">
         <Link
           href="/"
@@ -82,7 +67,6 @@ export function Sidebar() {
         </button>
       </header>
 
-      {/* Backdrop */}
       {mobileOpen && (
         <div
           className="md:hidden fixed inset-0 bg-black/30 z-40"
@@ -91,7 +75,6 @@ export function Sidebar() {
         />
       )}
 
-      {/* Sidebar: drawer on mobile, fixed on desktop */}
       <nav
         className={`
           fixed top-0 left-0 h-screen overflow-y-auto py-5 z-50
@@ -101,6 +84,7 @@ export function Sidebar() {
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
           md:translate-x-0
         `}
+        aria-label="Primary"
       >
         <div className="flex items-center justify-between px-5 pb-5">
           <Link
@@ -122,47 +106,111 @@ export function Sidebar() {
           </button>
         </div>
 
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.label}>
-            <div className="px-5 pt-4 pb-1 text-[0.8125rem] font-semibold text-muted uppercase tracking-wider">
-              {section.label}
-            </div>
-            {section.items.map((item) => {
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`block px-5 py-[5px] text-[0.8125rem] hover:text-foreground ${
-                    isActive ? "text-foreground font-medium" : "text-text-secondary"
-                  }`}
-                >
-                  {"color" in item && (
-                    <span
-                      className="inline-block w-[6px] h-[6px] rounded-full mr-[6px] align-middle"
-                      style={{ backgroundColor: item.color }}
-                    />
-                  )}
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+        <DashboardsSection dashboards={dashboards} pathname={pathname} />
 
-        <div className="px-5 pt-4 pb-1 text-[0.8125rem] font-semibold text-muted uppercase tracking-wider">
-          Quick Add
-        </div>
-        <Link href="/input/goal" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
-          + New Goal
-        </Link>
-        <Link href="/input/metric" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
-          + New Metric
-        </Link>
-        <Link href="/input/bjj" className="block px-5 py-[5px] text-[0.8125rem] text-text-secondary hover:text-foreground">
-          + Log BJJ Session
-        </Link>
+        <Section label="Sports">
+          {SPORT_NAV.map((item) => (
+            <NavItem
+              key={item.href}
+              href={item.href}
+              label={item.label}
+              color={item.color}
+              active={pathname === item.href}
+            />
+          ))}
+        </Section>
+
+        <Section label="Targets">
+          <NavItem href="/goals" label="Goals" active={pathname === "/goals"} />
+        </Section>
+
+        <Section label="Settings">
+          <NavItem href="/data-sources" label="Sources" active={pathname === "/data-sources"} />
+          <NavItem href="/data" label="Data" active={pathname === "/data"} />
+        </Section>
+
+        <Section label="Quick Add">
+          <NavItem href="/input/goal" label="+ New Goal" active={false} />
+          <NavItem href="/input/metric" label="+ New Metric" active={false} />
+          <NavItem href="/input/bjj" label="+ Log BJJ Session" active={false} />
+        </Section>
       </nav>
     </>
+  );
+}
+
+function DashboardsSection({
+  dashboards,
+  pathname,
+}: {
+  dashboards: DashboardRow[];
+  pathname: string;
+}) {
+  // PR2 doesn't render sport-color dots in this section yet — loadAllDashboards
+  // returns the dashboards table only, so we'd need a join with `sports` to
+  // resolve the color. Defer until PR3 ships the editor that creates
+  // sport-associated dashboards (and surfaces the need).
+  return (
+    <Section label="Dashboards">
+      {dashboards.map((d) => {
+        const href = dashboardHref(d.slug);
+        // Match the dashboard route AND its settings sub-route. Today is
+        // special-cased because its href is `/`, which would startsWith every
+        // path — we explicitly compare against the canonical /dashboards/today
+        // path (used by the settings page) for the sub-route check.
+        const subRouteBase = d.slug === "today" ? "/dashboards/today" : href;
+        const active =
+          pathname === href ||
+          pathname === subRouteBase ||
+          pathname.startsWith(`${subRouteBase}/`);
+        return <NavItem key={d.id} href={href} label={d.name} active={active} />;
+      })}
+      <Link
+        href="/dashboards/new"
+        className="block px-5 py-[5px] text-[0.8125rem] text-muted hover:text-foreground border-t border-border/40 mt-1 pt-2"
+      >
+        + New dashboard
+      </Link>
+    </Section>
+  );
+}
+
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="px-5 pt-4 pb-1 text-[0.8125rem] font-semibold text-muted uppercase tracking-wider">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function NavItem({
+  href,
+  label,
+  color,
+  active,
+}: {
+  href: string;
+  label: string;
+  color?: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`block px-5 py-[5px] text-[0.8125rem] hover:text-foreground ${
+        active ? "text-foreground font-medium" : "text-text-secondary"
+      }`}
+    >
+      {color && (
+        <span
+          className="inline-block w-[6px] h-[6px] rounded-full mr-[6px] align-middle"
+          style={{ backgroundColor: color }}
+        />
+      )}
+      {label}
+    </Link>
   );
 }

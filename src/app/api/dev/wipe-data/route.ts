@@ -16,6 +16,8 @@ import {
   reconcileLog,
   importSources,
   sourceSettings,
+  dashboards,
+  dashboardWidgets,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -69,6 +71,10 @@ export async function POST() {
     { name: "reconcile_log", obj: reconcileLog },
     { name: "source_settings", obj: sourceSettings },
     { name: "import_sources", obj: importSources },
+    // Dashboards: widgets first so the FK from dashboard_widgets ->
+    // dashboards doesn't fight us if FKs ever flip back on mid-wipe.
+    { name: "dashboard_widgets", obj: dashboardWidgets },
+    { name: "dashboards", obj: dashboards },
   ];
 
   const counts: Record<string, number> = {};

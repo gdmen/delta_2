@@ -125,3 +125,19 @@ Requires schema migration (add user_id FK everywhere), auth middleware on every 
 **Effort:** S (human: ~2h / CC: ~15min). New test file `src/components/dashboards/WidgetSlot.test.tsx`.
 **When:** Bundle with PR2's mutation routes — the test infrastructure for full integration tests will be needed there anyway.
 **Source:** Surfaced 2026-05-01 in the PR1 outside-agent review.
+
+## P2: Add CSRF protection (or same-origin check) to mutation routes
+**What:** All mutation routes — `/api/dashboards/...` (PR2), `/api/dev/wipe-data` (existing), `/api/import` (existing) — accept POST/PATCH/DELETE without any same-origin or CSRF token check. The site-wide `SITE_PASSWORD` HTTP Basic Auth gate keeps unauthenticated callers out, but a CSRF on a network where someone has the password is still real (e.g. an attacker-controlled site at a different origin, where the user's browser has cached basic-auth creds, can issue cross-origin POSTs).
+**Why:** Cosmetic for a single-user installation today; real for multi-user (planned within 6 months) and any time Delta is exposed to a public network. Defense in depth — basic auth + CSRF check is what every prod app does.
+**Fix sketch:** Add a tiny `requireSameOrigin(req)` helper that checks `Origin` and/or `Sec-Fetch-Site` headers. Call from every mutation route. Browsers always send `Sec-Fetch-Site: same-origin` for first-party fetches; cross-site requests get `same-site` or `cross-site`. Reject anything that isn't `same-origin` (or `same-site` if the user explicitly opts in for embed scenarios). ~10 lines.
+**Effort:** S (human: ~1-2h / CC: ~15min). One helper + one-line addition to ~6 routes (PR2's 5 + the existing wipe-data + import-data routes).
+**When:** Before multi-user lands, OR before Delta is exposed publicly at a real domain.
+**Source:** Surfaced 2026-05-02 in the PR2 outside-agent review.
+
+## P3: Make `dashboard_widgets` import idempotent under re-import
+**What:** The current `importDashboardWidgets` handler in `/api/import` always inserts (no natural unique key on widgets). Re-importing the same export without a wipe duplicates every widget row. The documented round-trip is wipe + import, but a guard against accidental re-imports would be polite.
+**Why:** Footgun. User exports → tries to re-import "to be safe" → ends up with double-rendered widgets and a confusing dashboard.
+**Fix sketch:** Add a UNIQUE INDEX on `dashboard_widgets(dashboard_id, position)` (matches the natural ordering key), then `INSERT OR IGNORE` in the import handler. Existing seed migration's widgets already have unique positions per dashboard, so the index won't conflict with current data.
+**Effort:** XS (human: ~30min / CC: ~5min). New migration adding the unique index, then 2-line change in the import handler.
+**When:** Before any user other than Gary uses the import flow on a populated DB.
+**Source:** Surfaced 2026-05-02 in the PR2 outside-agent review.

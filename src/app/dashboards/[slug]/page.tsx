@@ -1,15 +1,8 @@
 import { notFound } from "next/navigation";
 import { DashboardRenderer } from "@/components/dashboards/DashboardRenderer";
+import { SLUG_PATTERN } from "@/lib/dashboards/slug";
 
 export const dynamic = "force-dynamic";
-
-/**
- * Defensive read-side enforcement of the same slug shape PR4's mutation
- * routes will require on write. Keeps `..`, whitespace, capital letters,
- * and other path oddities from reaching the DB lookup. Any non-conforming
- * slug 404s before any query runs.
- */
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export default async function DashboardPage({
   params,
@@ -19,7 +12,9 @@ export default async function DashboardPage({
   searchParams: Promise<{ debug?: string }>;
 }) {
   const { slug } = await params;
-  if (!SLUG_RE.test(slug)) notFound();
+  // Defensive read-side check using the same pattern the mutation routes
+  // enforce on write — keeps path oddities from reaching the DB.
+  if (!SLUG_PATTERN.test(slug)) notFound();
   const { debug } = await searchParams;
   const debugOn = debug === "1" || process.env.NODE_ENV !== "production";
   return <DashboardRenderer slug={slug} debug={debugOn} />;

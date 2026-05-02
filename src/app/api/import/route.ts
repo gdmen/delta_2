@@ -11,6 +11,8 @@ import {
   goals,
   focuses,
   goalJournalEntries,
+  dashboards,
+  dashboardWidgets,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
@@ -114,6 +116,8 @@ export async function POST(request: NextRequest) {
     "goals.csv",
     "focuses.csv",
     "goal_journal_entries.csv",
+    "dashboards.csv",
+    "dashboard_widgets.csv",
     "metrics.csv",
     "events.csv",
     "event_metrics.csv",
@@ -175,6 +179,20 @@ export async function POST(request: NextRequest) {
     out.goal_journal_entries = await importGoalJournalEntries(
       csvs["goal_journal_entries.csv"],
     );
+  }
+
+  // --- dashboards.csv ------------------------------------------------------
+  // Dashboards run before dashboard_widgets so the parent rows exist.
+  if (csvs["dashboards.csv"]) {
+    out.dashboards = await importDashboards(csvs["dashboards.csv"]);
+  }
+
+  // --- dashboard_widgets.csv -----------------------------------------------
+  // Widgets resolve their parent dashboard by slug. Re-importing without a
+  // prior wipe will append duplicate widgets — the documented round-trip is
+  // wipe + import, not import-on-top-of.
+  if (csvs["dashboard_widgets.csv"]) {
+    out.dashboard_widgets = await importDashboardWidgets(csvs["dashboard_widgets.csv"]);
   }
 
   // --- metrics.csv ---------------------------------------------------------
@@ -871,6 +889,111 @@ async function importGoalJournalEntries(text: string): Promise<TableResult> {
         verdictFocusId,
         linkedMetricTypeId,
         ...(createdAt ? { createdAt } : {}),
+      });
+      return "accepted";
+    },
+  );
+}
+
+/**
+ * dashboards.csv: keyed by slug (UNIQUE on the table). INSERT OR IGNORE so
+ * re-importing the same export is a no-op. is_system + seeded_id are preserved
+ * from the export, which keeps the seed migration's idempotency intact.
+ */
+async function importDashboards(text: string): Promise<TableResult> {
+  const sportCache = await loadSportCache();
+  return processCsv(
+    "dashboards.csv",
+    text,
+    ["slug", "name"],
+    async (row, idx) => {
+      const slug = row[idx.get("slug")!];
+      const name = row[idx.get("name")!];
+      const icon = idx.has("icon") ? row[idx.get("icon")!] : "";
+      const sportName = idx.has("sport_name") ? row[idx.get("sport_name")!] : "";
+      const positionRaw = idx.has("position") ? row[idx.get("position")!] : "0";
+      const isSystemRaw = idx.has("is_system") ? row[idx.get("is_system")!] : "0";
+      const seededId = idx.has("seeded_id") ? row[idx.get("seeded_id")!] : "";
+      if (!slug || !name) throw new Error("missing slug or name");
+
+      const sportId = sportName ? sportCache.get(sportName) ?? null : null;
+      if (sportName && !sportId) throw new Error(`unknown sport "${sportName}"`);
+
+      const position = Number(positionRaw);
+      if (!Number.isFinite(position)) throw new Error(`invalid position "${positionRaw}"`);
+      const isSystem = isSystemRaw === "1" || isSystemRaw.toLowerCase() === "true";
+
+      const inserted = await db
+        .insert(dashboards)
+        .values({
+          slug,
+          name,
+          icon: icon || null,
+          sportId,
+          position,
+          isSystem,
+          seededId: seededId || null,
+        })
+        .onConflictDoNothing()
+        .returning({ id: dashboards.id });
+      return inserted.length > 0 ? "accepted" : "skipped";
+    },
+  );
+}
+
+/**
+ * dashboard_widgets.csv: parent dashboard resolved by slug. No natural unique
+ * key on widgets (config blobs differ row-to-row), so this handler always
+ * inserts. The documented round-trip is wipe + import, not import-on-top-of —
+ * doing the latter without a wipe will produce duplicate widget rows.
+ */
+async function importDashboardWidgets(text: string): Promise<TableResult> {
+  // Build a slug -> id cache so we don't roundtrip per row.
+  const dashRows = await db.select({ id: dashboards.id, slug: dashboards.slug }).from(dashboards);
+  const dashCache = new Map(dashRows.map((r) => [r.slug, r.id]));
+
+  return processCsv(
+    "dashboard_widgets.csv",
+    text,
+    ["dashboard_slug", "widget_type", "config", "grid_x", "grid_y", "grid_w", "grid_h"],
+    async (row, idx) => {
+      const slug = row[idx.get("dashboard_slug")!];
+      const widgetType = row[idx.get("widget_type")!];
+      const config = row[idx.get("config")!] || "{}";
+      const body = idx.has("body") ? row[idx.get("body")!] : "";
+      const gridX = Number(row[idx.get("grid_x")!]);
+      const gridY = Number(row[idx.get("grid_y")!]);
+      const gridW = Number(row[idx.get("grid_w")!]);
+      const gridH = Number(row[idx.get("grid_h")!]);
+      const position = idx.has("position") ? Number(row[idx.get("position")!]) : 0;
+
+      if (!slug || !widgetType) throw new Error("missing dashboard_slug or widget_type");
+      if (![gridX, gridY, gridW, gridH, position].every(Number.isFinite)) {
+        throw new Error("grid coordinates must be numbers");
+      }
+      const dashboardId = dashCache.get(slug);
+      if (dashboardId === undefined) throw new Error(`unknown dashboard "${slug}"`);
+
+      // Validate config JSON parses + matches at least the shape of *some*
+      // widget schema (we don't require the registry to know this widget_type
+      // — the migration import shouldn't fail on a forward-compat widget the
+      // current code doesn't recognize yet, the slot will fall back gracefully).
+      try {
+        JSON.parse(config);
+      } catch {
+        throw new Error(`config is not valid JSON`);
+      }
+
+      await db.insert(dashboardWidgets).values({
+        dashboardId,
+        widgetType,
+        config,
+        body: body || null,
+        gridX,
+        gridY,
+        gridW,
+        gridH,
+        position,
       });
       return "accepted";
     },

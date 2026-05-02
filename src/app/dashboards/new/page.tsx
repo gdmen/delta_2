@@ -1,0 +1,24 @@
+import { db } from "@/db";
+import { sports } from "@/db/schema";
+import { asc } from "drizzle-orm";
+import { NewDashboardForm } from "./NewDashboardForm";
+
+export const dynamic = "force-dynamic";
+
+export default async function NewDashboardPage() {
+  const sportRows = await db
+    .select({ id: sports.id, name: sports.name, color: sports.color })
+    .from(sports)
+    .orderBy(asc(sports.name));
+
+  return (
+    <div className="max-w-[36rem]">
+      <h1 className="text-2xl font-semibold mb-2">New dashboard</h1>
+      <p className="text-[0.875rem] text-muted mb-6">
+        A dashboard is a named layout of widgets. Pick a name and optionally a
+        sport color. You&apos;ll add widgets after it&apos;s created.
+      </p>
+      <NewDashboardForm sports={sportRows} />
+    </div>
+  );
+}

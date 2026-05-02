@@ -14,6 +14,8 @@ import {
   goals,
   focuses,
   goalJournalEntries,
+  dashboards,
+  dashboardWidgets,
 } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -36,6 +38,10 @@ import { serializeCsv } from "@/lib/csv";
  *   - goals.csv                  - goals with target + deadline
  *   - focuses.csv                - manual + LLM-suggested focuses, owned by goals
  *   - goal_journal_entries.csv   - per-goal markdown journal (timestamped)
+ *
+ * UI configuration:
+ *   - dashboards.csv             - dashboard rows (slug, name, system flag, ...)
+ *   - dashboard_widgets.csv      - per-widget config + grid placement, by slug
  *
  * Measured data:
  *   - metrics.csv                - timestamped numeric streams
@@ -377,6 +383,71 @@ export async function GET() {
     ]),
   );
 
+  // --- dashboards.csv ------------------------------------------------------
+  // Sport association round-trips by sport name (NULL when unset). is_system
+  // and seeded_id are preserved so a re-import keeps the system dashboards
+  // marked as such (and the seed migration's idempotency intact).
+  const dashboardSports = alias(sports, "dashboard_sports");
+  const dashboardRows = await db
+    .select({
+      slug: dashboards.slug,
+      name: dashboards.name,
+      icon: dashboards.icon,
+      sportName: dashboardSports.name,
+      position: dashboards.position,
+      isSystem: dashboards.isSystem,
+      seededId: dashboards.seededId,
+    })
+    .from(dashboards)
+    .leftJoin(dashboardSports, eq(dashboards.sportId, dashboardSports.id))
+    .orderBy(asc(dashboards.position));
+  const dashboardsCsv = serializeCsv(
+    ["slug", "name", "icon", "sport_name", "position", "is_system", "seeded_id"],
+    dashboardRows.map((r) => [
+      r.slug,
+      r.name,
+      r.icon ?? "",
+      r.sportName ?? "",
+      r.position,
+      r.isSystem ? 1 : 0,
+      r.seededId ?? "",
+    ]),
+  );
+
+  // --- dashboard_widgets.csv -----------------------------------------------
+  // Widgets are keyed by dashboard slug (round-trippable) plus the natural
+  // ordering position. The config JSON travels verbatim — it's already a
+  // self-contained per-widget payload.
+  const widgetRows = await db
+    .select({
+      dashboardSlug: dashboards.slug,
+      widgetType: dashboardWidgets.widgetType,
+      config: dashboardWidgets.config,
+      body: dashboardWidgets.body,
+      gridX: dashboardWidgets.gridX,
+      gridY: dashboardWidgets.gridY,
+      gridW: dashboardWidgets.gridW,
+      gridH: dashboardWidgets.gridH,
+      position: dashboardWidgets.position,
+    })
+    .from(dashboardWidgets)
+    .innerJoin(dashboards, eq(dashboardWidgets.dashboardId, dashboards.id))
+    .orderBy(asc(dashboards.position), asc(dashboardWidgets.position));
+  const dashboardWidgetsCsv = serializeCsv(
+    ["dashboard_slug", "widget_type", "config", "body", "grid_x", "grid_y", "grid_w", "grid_h", "position"],
+    widgetRows.map((r) => [
+      r.dashboardSlug,
+      r.widgetType,
+      r.config,
+      r.body ?? "",
+      r.gridX,
+      r.gridY,
+      r.gridW,
+      r.gridH,
+      r.position,
+    ]),
+  );
+
   // --- bundle ---------------------------------------------------------------
   const zipped = zipSync({
     "sports.csv": strToU8(sportsCsv),
@@ -387,6 +458,8 @@ export async function GET() {
     "goals.csv": strToU8(goalsCsv),
     "focuses.csv": strToU8(focusesCsv),
     "goal_journal_entries.csv": strToU8(goalJournalEntriesCsv),
+    "dashboards.csv": strToU8(dashboardsCsv),
+    "dashboard_widgets.csv": strToU8(dashboardWidgetsCsv),
     "metrics.csv": strToU8(metricsCsv),
     "events.csv": strToU8(eventsCsv),
     "event_metrics.csv": strToU8(eventMetricsCsv),
