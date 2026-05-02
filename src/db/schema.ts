@@ -231,3 +231,62 @@ export const dailySummaries = sqliteTable("daily_summaries", {
 }, (table) => [
   uniqueIndex("idx_daily_summaries_date_metric").on(table.date, table.metricTypeId),
 ]);
+
+/**
+ * A dashboard is a named collection of widgets. System dashboards (Today,
+ * Recovery, Body Comp) ship as defaults via seed migration; users can rename
+ * and edit but not delete them. User-created dashboards have is_system=0 and
+ * are fully managed.
+ *
+ * `seeded_id` lets the seed migration stay idempotent across renames: future
+ * deploys check for the seeded marker, not the slug, so renaming "Today" to
+ * "Home" doesn't trigger a re-insert. NULL for user-created rows.
+ *
+ * `sport_id` is optional and drives the sport-color dot in the sidebar.
+ * `position` orders dashboards in the sidebar.
+ */
+export const dashboards = sqliteTable("dashboards", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  icon: text("icon"),
+  sportId: integer("sport_id").references(() => sports.id, { onDelete: "set null" }),
+  position: integer("position").notNull().default(0),
+  isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+  seededId: text("seeded_id").unique(),
+  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+}, (table) => [
+  index("idx_dashboards_position").on(table.position),
+]);
+
+/**
+ * Each row is one widget on one dashboard. `widget_type` is a string key into
+ * the widget registry (src/lib/widgets/registry.ts). `config` is JSON parsed
+ * by the widget's Zod schema at render time. `body` is reserved for widgets
+ * (text_card) whose content exceeds the 4KB JSON cap and benefits from a
+ * dedicated TEXT column.
+ *
+ * grid_x / grid_y / grid_w / grid_h are abstract grid units (not pixels):
+ * x and y index into a 12-column CSS Grid, w/h are spans. Layout is purely
+ * CSS-driven; the renderer doesn't convert to pixels.
+ *
+ * `position` is the mobile single-column stacking order; on desktop the
+ * grid_x/y dictate layout.
+ */
+export const dashboardWidgets = sqliteTable("dashboard_widgets", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  dashboardId: integer("dashboard_id")
+    .notNull()
+    .references(() => dashboards.id, { onDelete: "cascade" }),
+  widgetType: text("widget_type").notNull(),
+  config: text("config").notNull().default("{}"),
+  body: text("body"),
+  gridX: integer("grid_x").notNull().default(0),
+  gridY: integer("grid_y").notNull().default(0),
+  gridW: integer("grid_w").notNull().default(12),
+  gridH: integer("grid_h").notNull().default(2),
+  position: integer("position").notNull().default(0),
+}, (table) => [
+  index("idx_dashboard_widgets_dashboard_position").on(table.dashboardId, table.position),
+]);

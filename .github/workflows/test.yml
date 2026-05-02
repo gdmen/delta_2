@@ -1,0 +1,56 @@
+# Lint + typecheck + vitest on every PR and on push to main.
+#
+# PR3 will append the Playwright E2E step once the editor exists. For PR1+PR2,
+# this workflow is unit-tests-only.
+#
+# Notes:
+#   - We run `npx drizzle-kit migrate` to verify the schema applies cleanly
+#     against a fresh DB on every CI run. Catches migration syntax errors
+#     and lets the build step exercise an existing schema.
+#   - WAL checkpoint + cleanup keep the SQLite WAL/SHM files from leaking
+#     between steps and causing intermittent "database is locked" failures.
+#   - SITE_PASSWORD is set to empty string so the auth gate is disabled in
+#     CI; src/proxy.test.ts asserts this is the correct semantics.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SITE_PASSWORD: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      - run: npm test
+
+      - name: Apply DB migrations to a fresh delta2.db
+        run: npx drizzle-kit migrate
+
+      - name: Checkpoint WAL so build/start don't see locked DB
+        run: |
+          sqlite3 delta2.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+          rm -f delta2.db-wal delta2.db-shm
+
+      - run: npm run build
+
+      - name: Cleanup CI-only artifacts
+        if: always()
+        run: rm -f delta2.db delta2.db-wal delta2.db-shm

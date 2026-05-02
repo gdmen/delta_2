@@ -90,3 +90,38 @@ Requires schema migration (add user_id FK everywhere), auth middleware on every 
 - Key management: generate ingest keys as `bytes(32).hex()` per user, stored hashed in DB. Rotatable from settings UI.
 - Data isolation strategy: add `user_id` FK to all tables (metrics, events, workout_sets, focuses, focus_entries, focus_metric_links, goals, coach_messages, ingest_configs, daily_summaries). Drizzle middleware enforces on every query.
 - Migration path for Gary's data: all existing rows get user_id=1 (Gary). New users start with empty tables.
+
+## P3: Convert remaining hard-coded `[Npx]` Tailwind values to relative units
+**What:** Several existing components still use literal pixel values for small visual elements:
+- `src/components/sidebar.tsx`, `src/components/goal-bar.tsx`, `src/components/focus-card.tsx`, `src/components/big-three.tsx`, `src/app/goals/page.tsx`, `src/app/input/goal/page.tsx`, `src/app/sports/[sport]/page.tsx`: `w-[6px] h-[6px] rounded-full` for sport-color dots, plus `mr-[6px]` in sidebar.
+- `src/components/goal-bar.tsx`, `src/app/goals/page.tsx`: `h-[3px] bg-surface rounded-[1.5px]` for progress-bar fills.
+- `src/app/data-sources/bodyspec/upload-client.tsx`: `h-[4px]` for upload progress bar.
+**Why:** Configurable Dashboards (PR1) committed to "no pixels for layout, typography, or widget heights — pixels only for things that have to be pixels (1px borders, hairlines, focus rings)." These ~3-6px elements predate the rule and don't scale with text zoom — at 200% accessibility zoom the dots stay 6px while text grows.
+**Fix sketch:** `[6px]` → `1.5` (Tailwind class = 0.375rem, scales with rem). `[3px]` → `0.5` rounded down or `border-[length:0.1875rem]`. `[1.5px]` border-radius → `rounded-sm`. Test at 100% / 150% / 200% browser zoom.
+**Effort:** S (human: ~1h / CC: ~10min). Pure search-and-replace; rem-at-default-base equals current pixel values, so visual regression risk is minimal at 100% zoom.
+**When:** Bundle with the next pass that touches these components, OR before multi-user ships (when accessibility scrutiny actually matters).
+**Source:** Surfaced 2026-05-01 during /plan-design-review on configurable-dashboards plan; new dashboard code is pixel-clean but existing components were left alone.
+
+## P3: Custom not-found.tsx so unknown routes return HTTP 404
+**What:** Add `src/app/not-found.tsx` (or per-segment files) so calls to `notFound()` from server components actually surface as HTTP 404 status, not 200. Today `/dashboards/does-not-exist` renders Next's built-in 404 UI but returns HTTP 200.
+**Why:** App Router's `notFound()` only sets the response status to 404 when there's a matching `not-found.tsx` in the route tree; without one, the runtime renders the default UI but returns 200. Cosmetic for a single-user installation, but real for monitoring, analytics, and search engines if Delta is ever exposed publicly.
+**Fix sketch:** Create `src/app/not-found.tsx` matching Delta's existing visual language (Inter, neutral grays, "Page not found" + link back to `/`). Optionally a more specific `src/app/dashboards/[slug]/not-found.tsx` with a "Browse dashboards" CTA.
+**Effort:** XS (~10 min).
+**When:** Bundle with PR4 of configurable-dashboards (which deletes `/recovery`, `/body-comp`, `/sports/[sport]` — bookmarked URLs will start 404'ing, so a real 404 page becomes more valuable).
+**Source:** Surfaced 2026-05-01 during PR1 of configurable-dashboards. `DashboardRenderer` correctly calls `notFound()` for unknown slugs but the response status is 200.
+
+## P2: Batch `goal_list` widget into a single SQL query
+**What:** `src/lib/widgets/goal-list/data.ts` calls `computeGoalProgress(g)` per goal via `Promise.all`, and `computeGoalProgress` itself runs 4 sub-queries on the `metrics` table (latest, earliest-after-creation, earliest-overall, last-4-weeks). With N goals on a dashboard this is `4N + 1` queries every render.
+**Why:** Today (~5 goals) it's ~20 queries in <50ms. Acceptable. But the dashboard system was explicitly designed around dedupe + parallelism; this widget undermines both. With multi-user (planned within 6 months) and 10-15 goals per user, you'll hit 40-60 queries per dashboard load.
+**Fix sketch:** Rewrite `computeGoalProgress` to accept all goals at once. Use a single CTE / window-function query that returns latest, earliest-after-creation, earliest-overall, and the last-4-weeks samples grouped by `metric_type_id`. Resolve regression slope and progress in JS from the batched results. Reduces N+1 to a fixed 1-2 queries regardless of goal count.
+**Effort:** M (human: ~3-4h / CC: ~30min). Touches `src/lib/goal-calc.ts` (the batched compute) and `src/lib/widgets/goal-list/data.ts` (call site). The existing `computeGoalProgress` signature is also called from `src/app/page.tsx`'s old code path and `src/app/sports/[sport]/page.tsx`; both go through `goal_list` widget after PR4, so the per-goal signature can become a thin wrapper.
+**When:** Before multi-user lands. Sooner if Gary creates more dashboards with goal_list widgets.
+**Source:** Surfaced 2026-05-01 in the PR1 outside-agent review. Reviewer flagged P2 with confidence 10.
+
+## P3: Test WidgetSlot's error fallback rendering paths
+**What:** Add tests asserting that `<WidgetSlot>` renders the typed error fallback with the right `gridColumn: span N` styling under each failure mode: unknown `widget_type`, schema-parse failure, `validate()` returning `{ ok: false }`, `validate()` throwing, and (for the new Client boundary) Component render-time throws.
+**Why:** PR1 has full-coverage tests for the data-deps layer and widget schemas, but the slot's error path — which is the user-visible failure mode — has no test. A regression that breaks fallback rendering would only surface via manual smoke tests.
+**Fix sketch:** Use `@testing-library/react` (already a devDep) + `renderToString` for the server-component path. Mock the registry with a widget that throws on render. Assert the fallback HTML contains "Widget unavailable" / "Widget failed to render" and the wrapper carries the expected grid styles.
+**Effort:** S (human: ~2h / CC: ~15min). New test file `src/components/dashboards/WidgetSlot.test.tsx`.
+**When:** Bundle with PR2's mutation routes — the test infrastructure for full integration tests will be needed there anyway.
+**Source:** Surfaced 2026-05-01 in the PR1 outside-agent review.

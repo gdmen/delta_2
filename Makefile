@@ -2,7 +2,7 @@
 # All real work lives in package.json + drizzle-kit; this file just gives
 # the workflows that have come up enough to deserve a shortcut.
 
-.PHONY: dev build start lint typecheck clean distclean migrate backup verify-migration-0011
+.PHONY: dev build start lint typecheck test test-watch clean distclean migrate backup verify-migration-0011
 
 dev:
 	npm run dev
@@ -18,6 +18,12 @@ lint:
 
 typecheck:
 	npx tsc --noEmit
+
+test:
+	npm test
+
+test-watch:
+	npm run test:watch
 
 # Wipe every regeneratable build/cache artifact this project produces.
 # Mirrors the build/cache entries in .gitignore — anything checked in or
