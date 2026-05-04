@@ -14,6 +14,18 @@ export const metricTypes = sqliteTable("metric_types", {
   sportId: integer("sport_id").references(() => sports.id),
   unit: text("unit").notNull(),
   frequencyHint: text("frequency_hint", { enum: ["daily", "weekly", "occasional"] }).notNull().default("daily"),
+  /**
+   * Target value for compliance dashboards. Single source of truth — widgets
+   * read from here rather than carrying their own target. NULL = no target
+   * line on charts, no color coding on headlines.
+   */
+  target: real("target"),
+  /**
+   * Direction of the target. true (default) = floor (sleep, protein); false =
+   * ceiling (body fat %, weight). Drives the green/orange/red color buckets
+   * on metric_block headlines.
+   */
+  higherIsBetter: integer("higher_is_better", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
 });
 

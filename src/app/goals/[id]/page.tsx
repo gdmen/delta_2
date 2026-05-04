@@ -230,7 +230,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
           unit={goal.metricUnit}
           target={goal.targetValue}
           color={goal.sportColor}
-          height={240}
+          height="15rem"
         />
         <p className="mt-2 text-[0.6875rem] text-muted font-mono">
           Dashed orange line = target. Last 4 weeks of data drive the actual rate.

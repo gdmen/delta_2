@@ -5,6 +5,7 @@ import { metrics, metricTypes, metricTypeAliases } from "@/db/schema";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
+import { MetricTargetEditor } from "./target-editor";
 import { PaginationControls } from "@/components/pagination-controls";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +86,12 @@ export default async function MetricHistoryPage({
         All measurements for this metric, across every source. Edits to
         source-imported rows may be overwritten on the next sync.
       </p>
+      <MetricTargetEditor
+        metricTypeId={type.id}
+        unit={type.unit}
+        initialTarget={type.target}
+        initialHigherIsBetter={type.higherIsBetter}
+      />
       <AliasesSection
         metricTypeId={type.id}
         initialAliases={aliases.map((a) => a.alias)}

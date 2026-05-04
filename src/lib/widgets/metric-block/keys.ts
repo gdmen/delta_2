@@ -15,4 +15,6 @@ export function dataKey(config: MetricBlockConfig): string {
 export interface Series {
   samples: Array<{ date: string; value: number }>;
   unit: string;
+  target: number | null;
+  higherIsBetter: boolean;
 }

@@ -136,11 +136,18 @@ Requires schema migration (add user_id FK everywhere), auth middleware on every 
 
 ## P3: Make `dashboard_widgets` import idempotent under re-import
 **What:** The current `importDashboardWidgets` handler in `/api/import` always inserts (no natural unique key on widgets). Re-importing the same export without a wipe duplicates every widget row. The documented round-trip is wipe + import, but a guard against accidental re-imports would be polite.
-**Why:** Footgun. User exports → tries to re-import "to be safe" → ends up with double-rendered widgets and a confusing dashboard.
-**Fix sketch:** Add a UNIQUE INDEX on `dashboard_widgets(dashboard_id, position)` (matches the natural ordering key), then `INSERT OR IGNORE` in the import handler. Existing seed migration's widgets already have unique positions per dashboard, so the index won't conflict with current data.
-**Effort:** XS (human: ~30min / CC: ~5min). New migration adding the unique index, then 2-line change in the import handler.
-**When:** Before any user other than Gary uses the import flow on a populated DB.
-**Source:** Surfaced 2026-05-02 in the PR2 outside-agent review.
+**Why:** Footgun. User exports → tries to re-import "to be safe" → ends up with double-rendered widgets and a confusing dashboard. Hit live on 2026-05-04: pulled prod CSV into a fresh local DB whose seeded migrations had already populated Recovery's `metrics_grid`; the import added a second copy and the dashboard rendered both.
+**Reasoning:** The duplicate happens for two distinct reasons that share the same fix:
+1. **Re-import on top of itself.** Same CSV imported twice → 2× rows. Insert-only handler with no upsert key.
+2. **Import on top of seeded data.** Seed migrations populate widgets at fresh-DB time; the CSV then imports its own widgets for the same dashboards. Even on a first import, you get duplicates if any seeded dashboard appears in the CSV (Today, Recovery, Body Comp all do).
+The handler comment (`src/app/api/import/route.ts:945-948`) already acknowledges this and says "the documented round-trip is wipe + import" — i.e. it's intentional, not a bug. But "wipe first" isn't surfaced in the UI; nothing tells the user that import-without-wipe will dupe.
+**Fix sketch:** Two paths, pick one:
+- **REPLACE semantics:** before inserting, DELETE all `dashboard_widgets` rows for any `dashboard_slug` mentioned in the CSV. Idempotent under re-import AND on top of seeded data. Best if the eventual "restore from backup" flow ends up doing a full wipe anyway — same shape, just scoped to the dashboards the CSV touches.
+- **Unique index + INSERT OR IGNORE:** add UNIQUE on `(dashboard_id, position)` and let the duplicates be silently skipped. Lighter touch but loses any edits from the CSV that don't match the existing row's position.
+**Punt rationale (2026-05-04):** Future "restore from backup" / full-DB-replace flow will wipe first by design, which makes this moot. Not worth a one-off fix when the proper restore semantics are coming. Workaround in the meantime: `make distclean && make migrate && import` (clean DB before import).
+**Effort:** XS (human: ~30min / CC: ~5min) for either path.
+**When:** Before any user other than Gary uses the import flow on a populated DB, OR roll into the restore-from-backup work.
+**Source:** Surfaced 2026-05-02 in the PR2 outside-agent review; re-confirmed live 2026-05-04 (Recovery dashboard doubled after prod-CSV import).
 
 ## P3: Settings drawer + widget palette can stack
 **What:** `DashboardEditor` tracks `paletteOpen` and `settingsForId` as independent state. Nothing prevents both being open at once. Both `<Drawer>`s attach window keydown handlers, so one Escape closes both. Both also set `body.style.overflow = "hidden"` on mount and reset to `""` on unmount — if both are open and one closes, the other's body-scroll lock might be lost.

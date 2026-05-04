@@ -47,14 +47,21 @@ export function MetricsGridComponent({
       )}
       <div className={`grid ${gridCols} gap-8`}>
         {config.metrics.map((c, i) => {
-          const s = seriesByCell[i] ?? { samples: [], unit: c.fallbackUnit };
+          const s: Series =
+            seriesByCell[i] ?? {
+              samples: [],
+              unit: "",
+              target: null,
+              higherIsBetter: true,
+            };
           return (
             <MetricBlock
               key={`${c.metric}:${i}`}
               title={c.title ?? c.metric}
+              metricName={c.metric}
               series={s}
-              fallbackUnit={c.fallbackUnit}
-              target={c.target}
+              window={c.windowDays ? `${c.windowDays}d` : undefined}
+              headline={c.headline}
               xMin={sharedRange?.min}
               xMax={sharedRange?.max}
             />

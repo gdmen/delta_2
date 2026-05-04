@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { MetricTrend } from "@/components/metric-trend";
 import type { Series } from "@/lib/metric-history";
 
@@ -7,49 +8,109 @@ import type { Series } from "@/lib/metric-history";
  */
 export function MetricBlock({
   title,
+  metricName,
   series,
-  fallbackUnit,
-  target,
   window,
+  headline = "latest",
   xMin,
   xMax,
 }: {
   title: string;
+  /** Underlying metric_type name. When set, the title becomes a link to
+   * `/data/metrics/<name>` — the in-context entry point for editing the
+   * target + direction (single source of truth). Optional so non-widget
+   * callers (e.g., the goal detail page) can render without one. */
+  metricName?: string;
+  /** Series carries unit + target + higherIsBetter (sourced from
+   * metric_types). Widgets pass it through unchanged. */
   series: Series;
-  fallbackUnit: string;
-  target?: number;
   /** Human label for the delta window, e.g. "30d". Defaults to "all time". */
   window?: string;
+  /** "latest" = last sample value + first→last delta (default). "avg" = mean
+   * of all samples in `series`. Pick "avg" for windowed compliance dashboards
+   * (sleep avg this week). */
+  headline?: "latest" | "avg";
   /** Shared X-axis range, in epoch ms — for aligning multiple blocks. */
   xMin?: number;
   xMax?: number;
 }) {
-  const unit = series.unit || fallbackUnit;
+  const unit = series.unit;
+  const target = series.target ?? undefined;
+  const higherIsBetter = series.higherIsBetter;
+  const decimals = unit === "g/cm²" ? 3 : 1;
   const latest = series.samples[series.samples.length - 1]?.value;
   const first = series.samples[0]?.value;
   const delta = latest !== undefined && first !== undefined ? latest - first : null;
   const deltaLabel = window ?? "all time";
 
+  const avg =
+    series.samples.length > 0
+      ? series.samples.reduce((s, p) => s + p.value, 0) / series.samples.length
+      : undefined;
+
+  const headlineValue = headline === "avg" ? avg : latest;
+  const hasData = headlineValue !== undefined;
+
+  // Compliance ratio drives the headline color.
+  // higherIsBetter: ratio = value / target, ≥1 green, ≥0.8 orange, <0.8 red.
+  // higherIsBetter=false: ratio = target / value, same buckets (target = ceiling).
+  // No target set → no color, just neutral foreground.
+  const ratio =
+    target !== undefined && target > 0 && hasData
+      ? higherIsBetter
+        ? headlineValue / target
+        : headlineValue > 0
+          ? target / headlineValue
+          : Infinity
+      : null;
+  const headlineColor =
+    ratio === null
+      ? ""
+      : ratio >= 1
+        ? "text-accent-green"
+        : ratio >= 0.8
+          ? "text-accent-orange"
+          : "text-accent-red";
+
   return (
     <div>
       <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">{title}</h3>
+        <h3 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
+          {metricName ? (
+            <Link
+              href={`/data/metrics/${encodeURIComponent(metricName)}`}
+              className="hover:text-foreground"
+              title="Edit metric (target, direction, history)"
+            >
+              {title}
+            </Link>
+          ) : (
+            title
+          )}
+        </h3>
         <div className="flex items-baseline gap-3">
-          {latest !== undefined ? (
+          {hasData ? (
             <>
-              <span className="font-mono text-[1.25rem] font-medium">
-                {latest.toFixed(unit === "g/cm²" ? 3 : 1)}
+              <span className={`font-mono text-[1.25rem] font-medium ${headlineColor}`}>
+                {headlineValue.toFixed(decimals)}
                 {unit}
               </span>
-              {delta !== null && series.samples.length > 1 && (
-                <span
-                  className={`font-mono text-[0.75rem] ${
-                    delta > 0 ? "text-accent-green" : delta < 0 ? "text-accent-orange" : "text-muted"
-                  }`}
-                >
-                  {delta > 0 ? "+" : ""}
-                  {delta.toFixed(unit === "g/cm²" ? 3 : 1)} / {deltaLabel}
+              {headline === "avg" ? (
+                <span className="font-mono text-[0.75rem] text-muted">
+                  {window ?? "all time"} avg
                 </span>
+              ) : (
+                delta !== null &&
+                series.samples.length > 1 && (
+                  <span
+                    className={`font-mono text-[0.75rem] ${
+                      delta > 0 ? "text-accent-green" : delta < 0 ? "text-accent-orange" : "text-muted"
+                    }`}
+                  >
+                    {delta > 0 ? "+" : ""}
+                    {delta.toFixed(decimals)} / {deltaLabel}
+                  </span>
+                )
               )}
               {target !== undefined && (
                 <span className="font-mono text-[0.75rem] text-muted">
@@ -67,7 +128,7 @@ export function MetricBlock({
         samples={series.samples}
         unit={unit}
         target={target}
-        height={180}
+        height="11rem"
         xMin={xMin}
         xMax={xMax}
       />

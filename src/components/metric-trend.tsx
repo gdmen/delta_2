@@ -12,7 +12,7 @@ export function MetricTrend({
   unit,
   target,
   color = "#171717",
-  height = 220,
+  height = "12rem",
   xMin,
   xMax,
 }: {
@@ -20,7 +20,9 @@ export function MetricTrend({
   unit: string;
   target?: number;
   color?: string;
-  height?: number;
+  /** CSS height — pass rem so charts scale with text zoom. Recharts'
+   * ResponsiveContainer accepts strings as raw CSS values. */
+  height?: string;
   /** Lock the X-axis to this range (epoch ms). Lets a parent align several
    * charts to the same time window so they're visually comparable. */
   xMin?: number;
@@ -70,9 +72,13 @@ export function MetricTrend({
   // just axis labels. Empty array = fall back to auto.
   const ticks = generateCalendarTicks(minTs, maxTs, spanDays);
 
+  // The wrapper carries the rem height so the chart scales with text zoom;
+  // ResponsiveContainer fills that wrapper (recharts' calculateChartDimensions
+  // does Number(height) on non-percent strings, which would NaN out a "rem" value
+  // and silently render nothing — hence the 100% indirection).
   return (
-    <div style={{ width: "100%" }}>
-      <ResponsiveContainer height={height}>
+    <div style={{ width: "100%", height }}>
+      <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
           <CartesianGrid stroke="#f5f5f5" vertical={false} />
           <XAxis

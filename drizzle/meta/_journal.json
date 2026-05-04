@@ -106,6 +106,41 @@
       "when": 1777787622000,
       "tag": "0014_pr4_dashboard_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1777787622001,
+      "tag": "0015_tighten_seeded_grid_heights",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1777787622002,
+      "tag": "0016_recovery_metrics_grid_7d",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1777787622003,
+      "tag": "0017_recovery_avg_headlines",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1777931763645,
+      "tag": "0018_metric_type_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1777931763646,
+      "tag": "0019_strip_dead_widget_config_keys",
+      "breakpoints": true
     }
   ]
 }

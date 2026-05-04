@@ -8,7 +8,7 @@ export const metricsGridWidget = defineWidget<MetricsGridConfig>({
   name: "Metric grid",
   description: "Multiple metric charts sharing one time axis.",
   category: "metric",
-  defaultSize: { w: 12, h: 6 },
+  defaultSize: { w: 12, h: 4 },
   minSize: { w: 6, h: 3 },
   schema: metricsGridSchema,
   defaultConfig: { title: "", columns: 2, metrics: [] },

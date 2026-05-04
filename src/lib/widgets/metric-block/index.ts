@@ -9,10 +9,10 @@ export const metricBlockWidget = defineWidget<MetricBlockConfig>({
   name: "Metric chart",
   description: "One metric over time with optional target line.",
   category: "metric",
-  defaultSize: { w: 6, h: 3 },
+  defaultSize: { w: 6, h: 2 },
   minSize: { w: 3, h: 2 },
   schema: metricBlockSchema,
-  defaultConfig: { metric: "", fallbackUnit: "" },
+  defaultConfig: { metric: "", headline: "latest" },
   uiMeta: {
     metric: {
       label: "Metric",
@@ -24,20 +24,19 @@ export const metricBlockWidget = defineWidget<MetricBlockConfig>({
       component: "text",
       helpText: "Header shown above the chart. Defaults to the metric name.",
     },
-    fallbackUnit: {
-      label: "Unit (fallback)",
-      component: "text",
-      helpText: "Shown when no readings exist yet (e.g. 'lb', 'g/cm²').",
-    },
-    target: {
-      label: "Target value",
-      component: "number",
-      helpText: "Draws a horizontal target line. Leave blank for none.",
-    },
     windowDays: {
       label: "Window (days)",
       component: "number",
       helpText: "Limit history to the last N days. Leave blank for all-time.",
+    },
+    headline: {
+      label: "Headline",
+      component: "select",
+      options: [
+        { value: "latest", label: "Latest reading" },
+        { value: "avg", label: "Window average" },
+      ],
+      helpText: "Pair window average with a non-empty Window for compliance dashboards.",
     },
   },
   Component: MetricBlockComponent,

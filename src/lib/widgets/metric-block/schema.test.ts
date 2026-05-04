@@ -10,22 +10,36 @@ describe("metricBlockSchema", () => {
   it("accepts a minimal config", () => {
     const parsed = metricBlockSchema.parse({ metric: "bench_1rm" });
     expect(parsed.metric).toBe("bench_1rm");
-    expect(parsed.fallbackUnit).toBe("");
-    expect(parsed.target).toBeUndefined();
     expect(parsed.windowDays).toBeUndefined();
+    expect(parsed.headline).toBe("latest");
   });
 
   it("accepts a fully populated config", () => {
     const parsed = metricBlockSchema.parse({
       metric: "bench_1rm",
       title: "Bench Press 1RM",
-      fallbackUnit: "lb",
-      target: 315,
       windowDays: 90,
+      headline: "avg",
     });
     expect(parsed.title).toBe("Bench Press 1RM");
-    expect(parsed.target).toBe(315);
     expect(parsed.windowDays).toBe(90);
+    expect(parsed.headline).toBe("avg");
+  });
+
+  it("strips legacy target / higherIsBetter / fallbackUnit keys from old configs", () => {
+    // PR4-era seeds carried per-widget target / higherIsBetter / fallbackUnit;
+    // all three moved to metric_types in 2026-05-04. Zod default-strips
+    // unknown keys, which makes the migration painless: old configs parse,
+    // dropped keys fall away, and metric_types becomes the sole truth.
+    const parsed = metricBlockSchema.parse({
+      metric: "sleep_hours",
+      target: 8,
+      higherIsBetter: true,
+      fallbackUnit: "h",
+    });
+    expect("target" in parsed).toBe(false);
+    expect("higherIsBetter" in parsed).toBe(false);
+    expect("fallbackUnit" in parsed).toBe(false);
   });
 
   it("rejects negative or zero windowDays", () => {

@@ -18,15 +18,17 @@ export function MetricBlockComponent({
     );
   }
   const raw = data.get(dataKey(config));
-  const series: Series = isDataDepError(raw) || raw === undefined
-    ? { samples: [], unit: config.fallbackUnit }
-    : (raw as Series);
+  const series: Series =
+    isDataDepError(raw) || raw === undefined
+      ? { samples: [], unit: "", target: null, higherIsBetter: true }
+      : (raw as Series);
   return (
     <MetricBlock
       title={config.title ?? config.metric}
+      metricName={config.metric}
       series={series}
-      fallbackUnit={config.fallbackUnit}
-      target={config.target}
+      window={config.windowDays ? `${config.windowDays}d` : undefined}
+      headline={config.headline}
     />
   );
 }

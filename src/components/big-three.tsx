@@ -173,7 +173,7 @@ function LiftCard({
             }))}
             unit={unit}
             color={color}
-            height={100}
+            height="6rem"
           />
         </div>
       )}

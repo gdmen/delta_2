@@ -1,12 +1,13 @@
 import { z } from "zod";
 
+// Target + higherIsBetter + unit live on metric_types now (see metric-block schema).
 const cellSchema = z.object({
   metric: z.string().default(""),
   title: z.string().optional(),
-  fallbackUnit: z.string().default(""),
-  target: z.number().optional(),
   /** Time window in days. Omit for full history. */
   windowDays: z.number().int().positive().optional(),
+  /** Headline: latest sample (default) or window mean. See metric-block schema. */
+  headline: z.enum(["latest", "avg"]).default("latest"),
 });
 
 /**
