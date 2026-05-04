@@ -3,14 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { SPORT_COLORS } from "@/lib/sport-colors";
 import type { DashboardRow } from "@/lib/dashboards/row-types";
-
-const SPORT_NAV = Object.entries(SPORT_COLORS).map(([name, color]) => ({
-  href: `/sports/${name}`,
-  label: name === "bjj" ? "BJJ" : name.charAt(0).toUpperCase() + name.slice(1),
-  color,
-}));
 
 /** "Today" links to / instead of /dashboards/today; everywhere else goes to the canonical slug route. */
 function dashboardHref(slug: string): string {
@@ -107,18 +100,6 @@ export function Sidebar({ dashboards }: SidebarProps) {
         </div>
 
         <DashboardsSection dashboards={dashboards} pathname={pathname} />
-
-        <Section label="Sports">
-          {SPORT_NAV.map((item) => (
-            <NavItem
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              color={item.color}
-              active={pathname === item.href}
-            />
-          ))}
-        </Section>
 
         <Section label="Targets">
           <NavItem href="/goals" label="Goals" active={pathname === "/goals"} />

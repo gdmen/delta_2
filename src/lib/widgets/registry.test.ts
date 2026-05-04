@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 import { WIDGETS, lookupWidget, WIDGET_TYPES } from "./registry";
 
 describe("widget registry", () => {
-  it("ships exactly the PR1 widget set", () => {
+  it("ships the full PR4 widget set", () => {
     expect(WIDGET_TYPES.sort()).toEqual([
+      "big_three",
+      "coach_card",
+      "divider",
       "focus_list",
+      "goal_bar",
       "goal_list",
       "metric_block",
       "metric_strip",
+      "metrics_grid",
+      "sessions_list",
+      "text_card",
     ]);
   });
 

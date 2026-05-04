@@ -25,8 +25,6 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
       emptyState={(q) =>
         q ? `No sports match "${q}".` : "No sports yet."
       }
-      rowHref={(r) => `/sports/${encodeURIComponent(r.name)}`}
-      rowHrefAriaLabel={(r) => `Open ${r.name}`}
       columns={[
         {
           header: "Sport",

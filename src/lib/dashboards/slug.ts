@@ -27,9 +27,9 @@ export const RESERVED_SLUGS = new Set([
   "input",
   "recovery",
   "body-comp",
-  // `sports` is a top-level route (`/sports/<sport>`); a dashboard slugged
-  // `sports` would shadow that segment after PR4 deletes the sport pages
-  // anyway, but reserving now is cheaper than after a user has created one.
+  // `sports` was a top-level route; PR4 deleted the per-sport pages but
+  // we keep it reserved so future re-introduction (or sport-scoped
+  // dashboards) doesn't collide with an existing user-created slug.
   "sports",
   "favicon.ico",
   // /dashboards/new is the create-dashboard page (a static segment that
