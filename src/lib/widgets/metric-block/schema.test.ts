@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { metricBlockSchema } from "./schema";
 
 describe("metricBlockSchema", () => {
-  it("requires a non-empty metric", () => {
-    expect(() => metricBlockSchema.parse({})).toThrow();
-    expect(() => metricBlockSchema.parse({ metric: "" })).toThrow();
+  it("defaults metric to empty string for fresh palette adds", () => {
+    expect(metricBlockSchema.parse({}).metric).toBe("");
+    expect(metricBlockSchema.parse({ metric: "" }).metric).toBe("");
   });
 
   it("accepts a minimal config", () => {

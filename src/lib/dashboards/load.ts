@@ -24,5 +24,8 @@ export const loadAllDashboards = cache(async () => {
   return db.select().from(dashboards).orderBy(asc(dashboards.position), asc(dashboards.id));
 });
 
-export type DashboardRow = NonNullable<Awaited<ReturnType<typeof loadDashboard>>>;
-export type WidgetRow = Awaited<ReturnType<typeof loadWidgets>>[number];
+// Re-export types from row-types.ts so server-side callers don't need to
+// know about the split. Client-side callers import from row-types directly
+// to avoid Turbopack pulling `db` (better-sqlite3 → fs) into the client
+// bundle.
+export type { DashboardRow, WidgetRow } from "./row-types";

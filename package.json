@@ -15,6 +15,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@hookform/resolvers": "^5.2.2",
     "better-sqlite3": "^12.9.0",
     "drizzle-orm": "^0.45.2",
     "fflate": "^0.8.2",
@@ -22,6 +23,7 @@
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-hook-form": "^7.75.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.8.1",
     "zod": "^4.3.6"
@@ -38,7 +40,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
-    "jsdom": "^29.1.1",
+    "jsdom": "^25.0.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.4"

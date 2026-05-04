@@ -1,7 +1,7 @@
 import { FocusCard } from "@/components/focus-card";
 import { isDataDepError, type WidgetData } from "../types";
 import type { FocusListConfig } from "./schema";
-import { dataKey, type FocusRow } from "./data";
+import { dataKey, type FocusRow } from "./keys";
 
 export function FocusListComponent({
   config,

@@ -1,6 +1,6 @@
 import { MetricsStrip } from "@/components/metrics-strip";
 import { isDataDepError, type WidgetData } from "../types";
-import { cellKey } from "./data";
+import { cellKey } from "./keys";
 import type { MetricStripConfig, MetricStripCell } from "./schema";
 
 interface LatestRow {
@@ -23,6 +23,13 @@ export function MetricStripComponent({
   config: MetricStripConfig;
   data: WidgetData;
 }) {
+  if (config.metrics.length === 0) {
+    return (
+      <div className="border border-border border-dashed rounded p-4 text-center text-[0.875rem] text-muted">
+        No cells yet. Open the gear to add some.
+      </div>
+    );
+  }
   const cells = config.metrics.map((cell) => {
     const raw = data.get(cellKey(cell));
     return formatCell(cell, isDataDepError(raw) ? null : raw);

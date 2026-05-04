@@ -1,7 +1,8 @@
 import { defineWidget } from "../types";
 import { goalListSchema, type GoalListConfig } from "./schema";
-import { goalListDataDeps } from "./data";
 import { GoalListComponent } from "./Component";
+
+// dataDeps lives in src/lib/widgets/server-registry.ts.
 
 export const goalListWidget = defineWidget<GoalListConfig>({
   type: "goal_list",
@@ -11,6 +12,13 @@ export const goalListWidget = defineWidget<GoalListConfig>({
   defaultSize: { w: 6, h: 3 },
   minSize: { w: 4, h: 2 },
   schema: goalListSchema,
-  dataDeps: goalListDataDeps,
+  defaultConfig: { sportFilter: null },
+  uiMeta: {
+    sportFilter: {
+      label: "Filter by sport",
+      component: "sport-picker",
+      helpText: "Show only goals for one sport. Leave blank for all goals.",
+    },
+  },
   Component: GoalListComponent,
 });

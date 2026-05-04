@@ -1,20 +1,10 @@
 import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
 import { and, eq, ne } from "drizzle-orm";
-import { computeGoalProgress, type GoalProgress } from "@/lib/goal-calc";
+import { computeGoalProgress } from "@/lib/goal-calc";
 import type { DataDep } from "../types";
 import type { GoalListConfig } from "./schema";
-
-export interface GoalRow {
-  id: number;
-  metricName: string;
-  metricUnit: string;
-  targetValue: number;
-  deadline: string;
-  sportName: string;
-  sportColor: string;
-  progress: GoalProgress;
-}
+import { dataKey, type GoalRow } from "./keys";
 
 export function goalListDataDeps(config: GoalListConfig): DataDep[] {
   return [
@@ -25,9 +15,6 @@ export function goalListDataDeps(config: GoalListConfig): DataDep[] {
   ];
 }
 
-export function dataKey(config: GoalListConfig): string {
-  return `goal_list:${config.sportFilter ?? "all"}`;
-}
 
 async function fetchGoals(config: GoalListConfig): Promise<GoalRow[]> {
   const where = config.sportFilter

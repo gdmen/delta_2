@@ -141,3 +141,34 @@ Requires schema migration (add user_id FK everywhere), auth middleware on every 
 **Effort:** XS (human: ~30min / CC: ~5min). New migration adding the unique index, then 2-line change in the import handler.
 **When:** Before any user other than Gary uses the import flow on a populated DB.
 **Source:** Surfaced 2026-05-02 in the PR2 outside-agent review.
+
+## P3: Settings drawer + widget palette can stack
+**What:** `DashboardEditor` tracks `paletteOpen` and `settingsForId` as independent state. Nothing prevents both being open at once. Both `<Drawer>`s attach window keydown handlers, so one Escape closes both. Both also set `body.style.overflow = "hidden"` on mount and reset to `""` on unmount — if both are open and one closes, the other's body-scroll lock might be lost.
+**Why:** In practice no UI flow opens both simultaneously today. But the architecture allows it; if PR4 adds a "settings → add another widget" link, the bug becomes user-visible.
+**Fix sketch:** Either force the editor to close one drawer when the other opens (mutually exclusive state via a `drawer: 'palette' | 'settings' | null` discriminant), or maintain a stack-of-drawers manager that handles Escape + scroll-lock for the topmost only.
+**Effort:** XS (~15min CC).
+**When:** Before any flow legitimately needs nested drawers.
+**Source:** Surfaced 2026-05-03 in the PR3 outside-agent review.
+
+## P3: + Add widget cap doesn't account for in-flight POSTs
+**What:** `DashboardEditor.onAddWidget` checks `widgets.length >= MAX_WIDGETS` against the local state. Local state only updates after the server response. A user clicking + Add 31 times rapidly fires 31 POSTs before the first response lands; the first 30 succeed, the 31st gets a server-side 400 if the server enforces the cap.
+**Why:** Server-side cap (which we should add to `/api/dashboards/[id]/widgets/route.ts`) will catch it, but the client UX shows the error inline only on the first failure. Multiple toasts pile up.
+**Fix sketch:** Disable the Add button while ANY add is in flight, OR track an "in-flight adds" counter and include it in the cap check. Also: enforce the 30-widget cap server-side as belt-and-suspenders.
+**Effort:** XS (~15min CC).
+**When:** Bundle with multi-user (when accidental rapid-clicks become more common).
+**Source:** Surfaced 2026-05-03 in the PR3 outside-agent review.
+
+## P3: Drag handle Tab focus doesn't reveal gear/trash
+**What:** `EditableWidget` reveals the drag handle via `focus-visible:opacity-100` on the button itself. Gear + trash buttons are clustered in a separate div using `focus-within:opacity-100`. Tabbing to the drag handle reveals only the drag handle, not the action cluster — keyboard users can drag but can't reach settings/delete via Tab on a single widget without first hovering with mouse.
+**Why:** Minor a11y inconsistency. Keyboard users can still reach the buttons by Tab-ing through them globally, just not from "select widget → its actions" mental model.
+**Fix sketch:** Wrap the entire EditableWidget cell in a `group/widget` modifier that triggers visibility via `focus-within:opacity-100` on both clusters when ANY descendant is focused.
+**Effort:** XS (~10min CC).
+**Source:** Surfaced 2026-05-03 in the PR3 outside-agent review.
+
+## P3: server-registry uses `as any` casts that erase widget P-parameterization
+**What:** `src/lib/widgets/server-registry.ts` registers per-widget `dataDeps` functions in a `Record<string, DataDepsFn>` where `DataDepsFn = (config: any) => DataDep[]`. The `as DataDepsFn` cast at registration sites throws away the per-widget config type. If a widget's `dataDeps` signature drifts (extra param, returns Promise instead), TypeScript won't catch it because the cast erases the constraint.
+**Why:** Today's widgets are all simple sync `(config) => DataDep[]`. As widgets grow more elaborate (computed metrics fetching multiple things in parallel), a signature drift could cause a runtime crash that a tighter type would have caught at compile time.
+**Fix sketch:** Make the registration site take a `WidgetDef<P>` plus its dataDeps, and key the type by widget def. E.g. `registerWidget(metricBlockWidget, metricBlockDataDeps)` — the function signature ties the two together generically.
+**Effort:** S (~30min CC).
+**When:** Bundle with the next dataDeps signature change.
+**Source:** Surfaced 2026-05-03 in the PR3 outside-agent review.

@@ -39,8 +39,20 @@ export async function POST(req: Request, { params }: Ctx) {
     );
   }
 
+  // The palette POSTs without a config (the user hasn't picked one yet).
+  // Fall back to the widget's defaultConfig so a fresh widget saves
+  // cleanly; the user fills in real values via the settings drawer that
+  // opens immediately after add.
+  const isEmptyConfig =
+    input.config === undefined ||
+    input.config === null ||
+    (typeof input.config === "object" &&
+      !Array.isArray(input.config) &&
+      Object.keys(input.config as Record<string, unknown>).length === 0);
+  const configToValidate = isEmptyConfig ? def.defaultConfig : input.config;
+
   // Validate the widget's config against its own Zod schema.
-  const configCheck = def.schema.safeParse(input.config);
+  const configCheck = def.schema.safeParse(configToValidate);
   if (!configCheck.success) {
     return NextResponse.json(
       { error: `Widget config: ${configCheck.error.issues[0]?.message ?? "invalid."}` },

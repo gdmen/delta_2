@@ -4,17 +4,8 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DataDep } from "../types";
 import type { FocusListConfig } from "./schema";
+import { dataKey, type FocusRow } from "./keys";
 
-export interface FocusRow {
-  id: number;
-  name: string;
-  goalId: number;
-  sportName: string;
-  sportColor: string;
-  startDate: string;
-  /** Server-computed at fetch time so the Component stays pure. */
-  weekNumber: number;
-}
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
@@ -25,10 +16,6 @@ export function focusListDataDeps(config: FocusListConfig): DataDep[] {
       fetch: () => fetchFocuses(config),
     },
   ];
-}
-
-export function dataKey(config: FocusListConfig): string {
-  return `focus_list:${config.sportFilter ?? "all"}:${config.sourceFilter}`;
 }
 
 async function fetchFocuses(config: FocusListConfig): Promise<FocusRow[]> {

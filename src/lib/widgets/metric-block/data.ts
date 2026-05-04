@@ -1,8 +1,12 @@
-import { getAllHistory, getLastDays, type Series } from "@/lib/metric-history";
+import { getAllHistory, getLastDays } from "@/lib/metric-history";
 import type { DataDep } from "../types";
 import type { MetricBlockConfig } from "./schema";
+import { dataKey } from "./keys";
 
 export function metricBlockDataDeps(config: MetricBlockConfig): DataDep[] {
+  // Empty metric = freshly-added widget, user hasn't picked yet. Skip
+  // the dep so we don't run a no-op `WHERE name = ""` query.
+  if (!config.metric) return [];
   return [
     {
       key: dataKey(config),
@@ -14,8 +18,3 @@ export function metricBlockDataDeps(config: MetricBlockConfig): DataDep[] {
   ];
 }
 
-export function dataKey(config: MetricBlockConfig): string {
-  return `metric_block:${config.metric}:${config.windowDays ?? "all"}`;
-}
-
-export type { Series };

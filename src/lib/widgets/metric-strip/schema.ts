@@ -1,8 +1,14 @@
 import { z } from "zod";
 
+/**
+ * Cell-level fields allow empty strings so a freshly-added strip is
+ * schema-valid before the user fills cells in via the JSON editor.
+ * Empty cells render as "no data" (label/metric blank) — they survive
+ * a save round-trip and can be tweaked later.
+ */
 const metricCellSchema = z.object({
-  label: z.string().min(1),
-  metric: z.string().min(1),
+  label: z.string().default(""),
+  metric: z.string().default(""),
   mode: z.enum(["latest", "avg7", "raw"]),
   format: z.enum(["raw", "int", "hours"]),
   /** If set, appended to the formatted value (e.g. "120" + "g" → "120g"). */
@@ -11,8 +17,13 @@ const metricCellSchema = z.object({
   delta: z.string().optional(),
 });
 
+/**
+ * Strip allows 0-8 cells so a fresh strip from the palette saves cleanly.
+ * The Component falls back to a "no cells" placeholder; users fill in
+ * via the customSettings JSON editor.
+ */
 export const metricStripSchema = z.object({
-  metrics: z.array(metricCellSchema).min(1).max(8),
+  metrics: z.array(metricCellSchema).max(8).default([]),
 });
 
 export type MetricStripConfig = z.infer<typeof metricStripSchema>;

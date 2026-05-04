@@ -1,6 +1,7 @@
 import { getLatestMetric, getAverageLast7Days, getSessionsThisWeek } from "@/lib/metrics-query";
 import type { DataDep } from "../types";
 import type { MetricStripConfig, MetricStripCell } from "./schema";
+import { cellKey } from "./keys";
 
 /**
  * Each cell becomes one DataDep keyed by `strip:<metric>:<mode>`. Two
@@ -13,15 +14,16 @@ import type { MetricStripConfig, MetricStripCell } from "./schema";
  *   raw:    number   (only sessions_this_week today)
  */
 export function metricStripDataDeps(config: MetricStripConfig): DataDep[] {
-  return config.metrics.map((cell) => ({
-    key: cellKey(cell),
-    fetch: () => fetchCell(cell),
-  }));
+  // Skip cells with no metric (palette-added cells before the user
+  // configures them) so we don't run no-op WHERE name = "" queries.
+  return config.metrics
+    .filter((cell) => cell.metric.length > 0)
+    .map((cell) => ({
+      key: cellKey(cell),
+      fetch: () => fetchCell(cell),
+    }));
 }
 
-export function cellKey(cell: MetricStripCell): string {
-  return `strip:${cell.metric}:${cell.mode}`;
-}
 
 async function fetchCell(cell: MetricStripCell): Promise<unknown> {
   if (cell.mode === "latest") return getLatestMetric(cell.metric);

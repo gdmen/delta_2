@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { db } from "@/db";
+import { metricTypes, sports } from "@/db/schema";
+import { asc } from "drizzle-orm";
 import { loadDashboard, loadWidgets, type WidgetRow } from "@/lib/dashboards/load";
 import { lookupWidget } from "@/lib/widgets/registry";
+import { lookupDataDeps } from "@/lib/widgets/server-registry";
 import { collectDataDeps, runDataDeps } from "@/lib/widgets/data-deps";
 import type { DataDep } from "@/lib/widgets/types";
 import { DashboardGrid } from "./DashboardGrid";
 import { WidgetSlot } from "./WidgetSlot";
 import { DashboardEmptyState } from "./DashboardEmptyState";
+import { EditorMount } from "./EditorMount";
 
 interface ParsedWidget {
   widget: WidgetRow;
@@ -16,21 +21,23 @@ interface ParsedWidget {
 }
 
 /**
- * View-mode dashboard renderer. Loads the dashboard + its widgets, parses
- * each widget's config exactly once, dedupes data deps, runs them in
- * parallel, and renders the grid.
+ * View-mode + edit-mode dashboard renderer. Loads the dashboard + its
+ * widgets, parses each widget's config exactly once, dedupes data deps,
+ * runs them in parallel, and renders the grid.
  *
- * `slug` is the URL segment ('today', 'recovery', 'body-comp', or any
- * user-created slug). 404 if not found.
- *
- * `debug` is true in dev or when ?debug=1 is set; controls whether widget
- * error fallbacks expose Debug info <details> panels.
+ * In edit mode (`edit=true`), the same server-rendered widget bodies get
+ * passed into a Client `<DashboardEditor>` which adds drag handles,
+ * settings drawers, and the widget palette. The mutation API drives the
+ * server changes; the renderer is replaced with `router.refresh()` after
+ * each mutation to re-fetch fresh data.
  */
 export async function DashboardRenderer({
   slug,
+  edit = false,
   debug = process.env.NODE_ENV !== "production",
 }: {
   slug: string;
+  edit?: boolean;
   debug?: boolean;
 }) {
   const dashboard = await loadDashboard(slug);
@@ -41,45 +48,85 @@ export async function DashboardRenderer({
 
   const data = await runDataDeps(collectDataDeps(parsedWidgets.map((p) => p.deps)));
 
+  const viewHref = dashboard.slug === "today" ? "/" : `/dashboards/${dashboard.slug}`;
+  const editHref = `${viewHref}?edit=1`;
   const settingsHref = `/dashboards/${dashboard.slug}/settings`;
+
+  // Each widget renders to a server-side ReactNode keyed by id. In edit
+  // mode the EditableWidget wraps these as children; in view mode they
+  // render directly inside WidgetSlot.
+  const renderedById: Record<number, React.ReactNode> = {};
+  for (const { widget, parsed, parseError } of parsedWidgets) {
+    renderedById[widget.id] = (
+      <WidgetSlot widget={widget} parsed={parsed} parseError={parseError} data={data} debug={debug} />
+    );
+  }
+
+  if (edit) {
+    // Picker context for widget settings forms. Loaded once per edit-page
+    // render; keeps the SettingsDrawer drawer open instantly without a
+    // separate fetch.
+    const [metricRows, sportRows] = await Promise.all([
+      db
+        .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
+        .from(metricTypes)
+        .orderBy(asc(metricTypes.name)),
+      db
+        .select({ id: sports.id, name: sports.name, color: sports.color })
+        .from(sports)
+        .orderBy(asc(sports.name)),
+    ]);
+    return (
+      <EditorMount
+        dashboardId={dashboard.id}
+        initialWidgets={widgets}
+        renderedWidgets={renderedById}
+        pickerContext={{ metricTypes: metricRows, sports: sportRows }}
+        doneHref={viewHref}
+      />
+    );
+  }
 
   return (
     <div>
       {dashboard.name !== "Today" ? (
         <div className="flex items-baseline justify-between mb-6">
           <h1 className="text-2xl font-semibold">{dashboard.name}</h1>
-          <Link
-            href={settingsHref}
-            className="text-[0.8125rem] text-muted hover:text-foreground"
-          >
-            Settings
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href={editHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+              Edit
+            </Link>
+            <Link href={settingsHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+              Settings
+            </Link>
+          </div>
         </div>
       ) : (
-        // Today keeps the headerless look from the original /. Settings link
-        // floats top-right of the strip via a small absolute-positioned link.
-        <div className="flex justify-end mb-2">
-          <Link
-            href={settingsHref}
-            className="text-[0.75rem] text-muted hover:text-foreground"
-          >
+        // Today keeps the headerless look. Edit + Settings float top-right.
+        <div className="flex justify-end gap-3 mb-2">
+          <Link href={editHref} className="text-[0.75rem] text-muted hover:text-foreground">
+            Edit
+          </Link>
+          <Link href={settingsHref} className="text-[0.75rem] text-muted hover:text-foreground">
             Settings
           </Link>
         </div>
       )}
       {widgets.length === 0 ? (
-        <DashboardEmptyState settingsHref={settingsHref} />
+        <DashboardEmptyState settingsHref={settingsHref} editHref={editHref} />
       ) : (
         <DashboardGrid>
-          {parsedWidgets.map(({ widget, parsed, parseError }) => (
-            <WidgetSlot
+          {parsedWidgets.map(({ widget }) => (
+            <div
               key={widget.id}
-              widget={widget}
-              parsed={parsed}
-              parseError={parseError}
-              data={data}
-              debug={debug}
-            />
+              style={{
+                gridColumn: `span ${widget.gridW}`,
+                gridRow: `span ${widget.gridH}`,
+                containerType: "inline-size",
+              }}
+            >
+              {renderedById[widget.id]}
+            </div>
           ))}
         </DashboardGrid>
       )}
@@ -94,11 +141,12 @@ function parseWidget(widget: WidgetRow): ParsedWidget {
   }
   try {
     const parsed = def.schema.parse(JSON.parse(widget.config));
+    const dataDeps = lookupDataDeps(widget.widgetType);
     return {
       widget,
       parsed,
       parseError: null,
-      deps: def.dataDeps?.(parsed) ?? [],
+      deps: dataDeps?.(parsed) ?? [],
     };
   } catch (err) {
     return {

@@ -1,6 +1,10 @@
 import { db } from "@/db";
 import { metrics } from "@/db/schema";
 import { and, eq, gte, desc, asc } from "drizzle-orm";
+import type { GoalProgress } from "./goal-format";
+
+// Re-export so server callers don't need to know about the split.
+export { formatRate, type GoalProgress } from "./goal-format";
 
 export interface GoalSummary {
   id: number;
@@ -14,16 +18,8 @@ export interface GoalSummary {
   createdAt: string;
 }
 
-export interface GoalProgress {
-  currentValue: number | null;
-  startValue: number | null; // earliest sample at or after goal was created
-  progress: number;          // 0-100, signed so it caps at 100 when complete
-  direction: "up" | "down";  // up means target > start; down means target < start
-  requiredRatePerWeek: number | null; // value-delta per week needed from today to deadline
-  actualRatePerWeek: number | null;   // value-delta per week observed (last 4 weeks, linear regression)
-  daysRemaining: number;
-  status: "complete" | "on-track" | "behind" | "critical" | "insufficient-data";
-}
+// GoalProgress lives in ./goal-format (re-exported above) so client
+// components can import its type without pulling db into their bundle.
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MS_PER_WEEK = 7 * MS_PER_DAY;
@@ -168,11 +164,5 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
   };
 }
 
-export function formatRate(rate: number | null, unit: string): string {
-  if (rate === null || !Number.isFinite(rate)) return "-";
-  const sign = rate > 0 ? "+" : "";
-  const abs = Math.abs(rate);
-  // Use 2 decimals if small, 1 if medium, 0 if large.
-  const decimals = abs < 1 ? 2 : abs < 10 ? 1 : 0;
-  return `${sign}${rate.toFixed(decimals)} ${unit}/wk`;
-}
+// formatRate lives in ./goal-format (re-exported above) so client
+// components can import it without pulling db into their bundle.

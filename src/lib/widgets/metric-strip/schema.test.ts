@@ -15,8 +15,12 @@ describe("metricStripSchema", () => {
     expect(() => metricStripSchema.parse(config)).not.toThrow();
   });
 
-  it("rejects empty metrics array", () => {
-    expect(() => metricStripSchema.parse({ metrics: [] })).toThrow();
+  it("accepts an empty metrics array (fresh palette add, user fills cells later)", () => {
+    expect(() => metricStripSchema.parse({ metrics: [] })).not.toThrow();
+  });
+
+  it("defaults metrics to [] when omitted entirely", () => {
+    expect(metricStripSchema.parse({}).metrics).toEqual([]);
   });
 
   it("rejects more than 8 metrics", () => {
@@ -45,16 +49,11 @@ describe("metricStripSchema", () => {
     ).toThrow();
   });
 
-  it("requires non-empty label and metric", () => {
+  it("accepts cells with empty label/metric (palette-added cell renders as 'no data')", () => {
     expect(() =>
       metricStripSchema.parse({
-        metrics: [{ label: "", metric: "m", mode: "latest", format: "raw" }],
+        metrics: [{ label: "", metric: "", mode: "latest", format: "raw" }],
       }),
-    ).toThrow();
-    expect(() =>
-      metricStripSchema.parse({
-        metrics: [{ label: "x", metric: "", mode: "latest", format: "raw" }],
-      }),
-    ).toThrow();
+    ).not.toThrow();
   });
 });

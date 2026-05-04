@@ -55,6 +55,36 @@ export type DrizzleDb = typeof db;
  * `'use client'` Recharts internals and accept the SSR boundary the way
  * existing MetricBlock already does.
  */
+/**
+ * Optional settings UI override. Auto-generated ZodForm handles flat-object
+ * schemas; widgets with array or nested-object configs (e.g. metric_strip's
+ * `{ metrics: array(...) }`) provide their own settings component.
+ *
+ * The override receives the current config and an `onChange` callback that
+ * fires the parent SettingsDrawer's draft update — the drawer still owns
+ * the autosave + live-preview wiring.
+ */
+export type CustomSettings<P> = ComponentType<{
+  config: P;
+  onChange: (next: P) => void;
+  /**
+   * Optional gate: custom settings call this with `false` when the user's
+   * input is currently invalid (e.g. malformed JSON in metric_strip's
+   * textarea). The SettingsDrawer disables Save until the next `true`.
+   * Forms that always produce valid output can ignore this.
+   */
+  onValidityChange?: (valid: boolean) => void;
+}>;
+
+/**
+ * Client-safe widget definition. Renderable in the browser without
+ * pulling server-only modules (db, fs, etc) in.
+ *
+ * Server-only behaviors — `dataDeps` (which reads from db) and `validate`
+ * (which can run db queries) — live in
+ * `src/lib/widgets/server-registry.ts`. Renderer + mutation routes look
+ * those up server-side; the editor's lazy-imported registry stays clean.
+ */
 export interface WidgetDef<P = unknown> {
   type: string;
   name: string;
@@ -63,9 +93,16 @@ export interface WidgetDef<P = unknown> {
   defaultSize: { w: number; h: number };
   minSize?: { w: number; h: number };
   schema: ZodType<P>;
+  /**
+   * Initial config used when the user adds the widget from the palette.
+   * Must satisfy `schema` (the POST route validates it). Required fields
+   * that need user input (e.g. metric_block's `metric`) ship as empty
+   * strings — the Component renders a "no data" / placeholder state, the
+   * editor auto-opens the settings drawer so the user can fill them in.
+   */
+  defaultConfig: P;
   uiMeta?: UIMeta<P>;
-  dataDeps?: (config: P) => DataDep[];
-  validate?: (config: P, ctx: { db: DrizzleDb }) => Promise<ValidationResult>;
+  customSettings?: CustomSettings<P>;
   Component: ComponentType<{ config: P; data: WidgetData; widgetId: number }>;
 }
 

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { GoalBar } from "@/components/goal-bar";
-import { formatRate } from "@/lib/goal-calc";
+import { formatRate } from "@/lib/goal-format";
 import { isDataDepError, type WidgetData } from "../types";
 import type { GoalListConfig } from "./schema";
-import { dataKey, type GoalRow } from "./data";
+import { dataKey, type GoalRow } from "./keys";
 
 export function GoalListComponent({
   config,

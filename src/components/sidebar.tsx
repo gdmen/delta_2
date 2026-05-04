@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { SPORT_COLORS } from "@/lib/sport-colors";
-import type { DashboardRow } from "@/lib/dashboards/load";
+import type { DashboardRow } from "@/lib/dashboards/row-types";
 
 const SPORT_NAV = Object.entries(SPORT_COLORS).map(([name, color]) => ({
   href: `/sports/${name}`,

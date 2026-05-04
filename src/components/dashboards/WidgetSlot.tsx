@@ -1,14 +1,15 @@
 import { db } from "@/db";
 import { lookupWidget } from "@/lib/widgets/registry";
+import { lookupValidate } from "@/lib/widgets/server-registry";
 import type { WidgetData, WidgetErrorInfo } from "@/lib/widgets/types";
 import type { WidgetRow } from "@/lib/dashboards/load";
 import { WidgetErrorFallback } from "./WidgetErrorFallback";
 import { WidgetClientBoundary } from "./WidgetClientBoundary";
 
 /**
- * Server-rendered cell that owns one widget's lifecycle:
+ * Server-rendered cell content for one widget. Owns:
  *  1. look up the def in the registry (unknown widget_type → fallback)
- *  2. parse config via the def's Zod schema (malformed config → fallback)
+ *  2. handle upstream parseError (malformed config → fallback)
  *  3. run validate() if present (e.g. stale metric_type ref → fallback)
  *  4. render the def's Component, wrapped in a Client error boundary so
  *     render-time throws (Component body, descendant lifecycle, hydration)
@@ -20,12 +21,14 @@ import { WidgetClientBoundary } from "./WidgetClientBoundary";
  *    React traversal),
  *  - WidgetClientBoundary covers Component render-time throws.
  *
- * `container-type: inline-size` makes descendant container queries (chart
- * widgets) respond to the cell width rather than the viewport.
+ * Returns the inner content WITHOUT a grid-styled wrapper — the caller
+ * (DashboardRenderer in view mode, EditableWidget in edit mode) supplies
+ * the wrapper with grid-column/row spans and container-type. Splitting
+ * the wrapper out lets the editor wrap the same body in its drag-handle
+ * cell shape without double-wrapping.
  *
  * `parsed` arrives pre-parsed from DashboardRenderer (which needs it to
- * collect dataDeps) so we don't double-parse. If parsing failed upstream
- * the renderer passes a `parseError`, which we render here.
+ * collect dataDeps) so we don't double-parse.
  */
 export async function WidgetSlot({
   widget,
@@ -40,16 +43,8 @@ export async function WidgetSlot({
   data: WidgetData;
   debug: boolean;
 }) {
-  const style = {
-    gridColumn: `span ${widget.gridW}`,
-    gridRow: `span ${widget.gridH}`,
-    containerType: "inline-size",
-  } as const;
-
   const fallback = (info: WidgetErrorInfo) => (
-    <div style={style}>
-      <WidgetErrorFallback info={info} debug={debug} />
-    </div>
+    <WidgetErrorFallback info={info} debug={debug} />
   );
 
   const def = lookupWidget(widget.widgetType);
@@ -74,9 +69,10 @@ export async function WidgetSlot({
     });
   }
 
-  if (def.validate) {
+  const validate = lookupValidate(widget.widgetType);
+  if (validate) {
     try {
-      const result = await def.validate(parsed, { db });
+      const result = await validate(parsed, { db });
       if (!result.ok) {
         return fallback({
           widgetId: widget.id,
@@ -100,17 +96,15 @@ export async function WidgetSlot({
 
   const Component = def.Component;
   return (
-    <div style={style}>
-      <WidgetClientBoundary
-        info={{
-          widgetId: widget.id,
-          widgetType: widget.widgetType,
-          config: parsed,
-        }}
-        debug={debug}
-      >
-        <Component config={parsed} data={data} widgetId={widget.id} />
-      </WidgetClientBoundary>
-    </div>
+    <WidgetClientBoundary
+      info={{
+        widgetId: widget.id,
+        widgetType: widget.widgetType,
+        config: parsed,
+      }}
+      debug={debug}
+    >
+      <Component config={parsed} data={data} widgetId={widget.id} />
+    </WidgetClientBoundary>
   );
 }

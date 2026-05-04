@@ -5,9 +5,9 @@ export const dynamic = "force-dynamic";
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ debug?: string }>;
+  searchParams: Promise<{ debug?: string; edit?: string }>;
 }) {
-  const { debug } = await searchParams;
+  const { debug, edit } = await searchParams;
   const debugOn = debug === "1" || process.env.NODE_ENV !== "production";
-  return <DashboardRenderer slug="today" debug={debugOn} />;
+  return <DashboardRenderer slug="today" edit={edit === "1"} debug={debugOn} />;
 }
