@@ -49,6 +49,22 @@ timeout 60 npx drizzle-kit migrate
 step "Running seed (idempotent)"
 timeout 60 npx tsx src/db/seed.ts
 
+step "Type-checking (gates the build)"
+# Diagnostics so the deploy log tells us if a future OOM is "Node didn't
+# get the heap flag" vs "kernel can't give that much physical memory".
+echo "Total RAM:"; free -h | awk '/^Mem:/ {print "  " $2 " (avail " $7 ")"}'
+echo "Node default heap cap (no flag):"
+node -e 'console.log("  ~" + Math.round(require("v8").getHeapStatistics().heap_size_limit / 1024 / 1024) + " MB")'
+echo "Node heap cap with --max-old-space-size=4096:"
+node --max-old-space-size=4096 -e 'console.log("  ~" + Math.round(require("v8").getHeapStatistics().heap_size_limit / 1024 / 1024) + " MB")'
+
+# Next's in-build TS pass runs in worker_threads with a hardcoded ~512MB
+# heap cap that OOMs on small instances. We skip it via next.config.ts and
+# run tsc here instead. Invoke node directly (not via npx) so we KNOW the
+# --max-old-space-size flag reaches the Node process running tsc — npx's
+# wrapper has eaten env-var heap bumps in the past.
+node --max-old-space-size=4096 ./node_modules/typescript/lib/tsc.js --noEmit
+
 step "Building Next.js"
 npm run build
 
