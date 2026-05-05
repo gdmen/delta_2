@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { metrics, metricTypes, metricTypeAliases } from "@/db/schema";
+import { metrics, metricTypes, metricTypeAliases, workoutSets } from "@/db/schema";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
@@ -44,6 +44,18 @@ export default async function MetricHistoryPage({
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(requestedPage, pageCount);
 
+  // Synthesized count (per-rep readings derived from workout_sets, see
+  // src/lib/metric-history.ts). Surface separately so the count on this
+  // page matches the count on /data without pretending the readings are
+  // editable here — they're not, the user has to edit the underlying set.
+  const synthRow = await db
+    .select({
+      reps: sql<number>`coalesce(sum(${workoutSets.reps}), 0)`,
+    })
+    .from(workoutSets)
+    .where(eq(workoutSets.exerciseMetricTypeId, type.id));
+  const synthCount = Number(synthRow[0]?.reps ?? 0);
+
   const rows = await db
     .select({
       id: metrics.id,
@@ -77,7 +89,8 @@ export default async function MetricHistoryPage({
       <div className="flex items-baseline justify-between mt-3 mb-2 gap-3">
         <h1 className="text-2xl font-semibold font-mono">{type.name}</h1>
         <span className="font-mono text-[0.6875rem] text-muted">
-          {total.toLocaleString()} total
+          {total.toLocaleString()} stored
+          {synthCount > 0 && ` · ${synthCount.toLocaleString()} from sets`}
           {pageCount > 1 && ` · page ${currentPage} of ${pageCount}`}
           {type.unit && ` · unit: ${type.unit}`}
         </span>
@@ -86,6 +99,18 @@ export default async function MetricHistoryPage({
         All measurements for this metric, across every source. Edits to
         source-imported rows may be overwritten on the next sync.
       </p>
+      {synthCount > 0 && (
+        <p className="mb-6 text-[0.8125rem] text-muted border-l-2 border-border pl-3">
+          {synthCount.toLocaleString()} additional readings are synthesized at
+          read time from workout_sets (one reading per rep, value = added
+          weight). They drive charts and goal progress but are not editable
+          from this page — edit the underlying sets via the{" "}
+          <Link href="/data/exercises" className="underline hover:text-foreground">
+            exercises tab
+          </Link>
+          .
+        </p>
+      )}
       <MetricTargetEditor
         metricTypeId={type.id}
         unit={type.unit}
