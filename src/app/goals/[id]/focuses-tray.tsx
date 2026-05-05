@@ -186,7 +186,7 @@ function AddFocusForm({ goalId }: { goalId: number }) {
         type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="+ add a focus (e.g. side control escapes)"
+        placeholder="+ add a focus"
         className="flex-1 px-2 py-1 border border-border rounded text-[0.8125rem] bg-transparent placeholder:text-muted"
         disabled={busy}
       />
