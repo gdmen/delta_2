@@ -559,16 +559,36 @@ async function importMetricTypes(text: string): Promise<TableResult> {
       const unit = row[idx.get("unit")!] ?? "";
       const freqStr = row[idx.get("frequency_hint")!] ?? "daily";
       const sportName = idx.has("sport") ? row[idx.get("sport")!] : "";
+      // target + higher_is_better are optional for backward compat with
+      // pre-2026-05-04 exports (the columns didn't exist yet). Missing
+      // column = leave existing values alone on conflict.
+      const targetRaw = idx.has("target") ? row[idx.get("target")!] : "";
+      const hibRaw = idx.has("higher_is_better") ? row[idx.get("higher_is_better")!] : "";
       if (!name) throw new Error("missing name");
       if (freqStr !== "daily" && freqStr !== "weekly" && freqStr !== "occasional") {
         throw new Error(`invalid frequency_hint "${freqStr}"`);
       }
+      let target: number | null = null;
+      if (targetRaw !== "") {
+        const n = Number(targetRaw);
+        if (!Number.isFinite(n)) throw new Error(`non-numeric target "${targetRaw}"`);
+        target = n;
+      }
+      const higherIsBetter = hibRaw === "" ? true : hibRaw === "1" || hibRaw === "true";
       const sportId = sportName ? sportCache.get(sportName) ?? null : null;
       if (sportName && !sportId) throw new Error(`unknown sport "${sportName}"`);
+
+      // Upsert on the unique name index so re-import refreshes target /
+      // higher_is_better on existing rows (insert-only would skip them
+      // and the user's "import to restore my targets" flow would silently
+      // fail). Only update mutable config fields — never touch identity.
       const inserted = await db
         .insert(metricTypes)
-        .values({ name, unit, frequencyHint: freqStr, sportId })
-        .onConflictDoNothing()
+        .values({ name, unit, frequencyHint: freqStr, sportId, target, higherIsBetter })
+        .onConflictDoUpdate({
+          target: metricTypes.name,
+          set: { unit, frequencyHint: freqStr, sportId, target, higherIsBetter },
+        })
         .returning({ id: metricTypes.id });
       return inserted.length > 0 ? "accepted" : "skipped";
     },

@@ -69,19 +69,31 @@ export async function GET() {
 
   // --- metric_types.csv ----------------------------------------------------
   // Left-join sports so the optional sport link round-trips by name.
+  // target + higher_is_better drive widget headline color coding (see
+  // src/lib/metric-history.ts); re-importing a CSV without them would
+  // silently reset every metric's target to NULL.
   const mtRows = await db
     .select({
       name: metricTypes.name,
       unit: metricTypes.unit,
       frequencyHint: metricTypes.frequencyHint,
+      target: metricTypes.target,
+      higherIsBetter: metricTypes.higherIsBetter,
       sport: sports.name,
     })
     .from(metricTypes)
     .leftJoin(sports, eq(metricTypes.sportId, sports.id))
     .orderBy(asc(metricTypes.name));
   const metricTypesCsv = serializeCsv(
-    ["name", "unit", "frequency_hint", "sport"],
-    mtRows.map((r) => [r.name, r.unit, r.frequencyHint, r.sport ?? ""]),
+    ["name", "unit", "frequency_hint", "target", "higher_is_better", "sport"],
+    mtRows.map((r) => [
+      r.name,
+      r.unit,
+      r.frequencyHint,
+      r.target == null ? "" : String(r.target),
+      r.higherIsBetter ? "1" : "0",
+      r.sport ?? "",
+    ]),
   );
 
   // --- metric_type_aliases.csv ---------------------------------------------
