@@ -111,19 +111,32 @@ export function oconnorE1RM(weight: number, reps: number): number {
 // Aggregate
 // -----------------------------------------------------------------------------
 
+export interface BigThreeStats {
+  /** Sport color (hex). Falls back to a neutral muted gray when no
+   * powerlifting sport row exists yet. */
+  color: string;
+  lifts: Record<Lift, LiftStats>;
+}
+
+const FALLBACK_COLOR = "#737373"; // neutral-500 — used when sport row missing
+
 /**
- * Returns stats for all three lifts. Reads workout_sets joined to events
- * filtered to the powerlifting sport. Safe when empty.
+ * Returns stats for all three lifts plus the sport color. Reads workout_sets
+ * joined to events filtered to the powerlifting sport. Safe when empty.
  */
-export async function getBigThreeStats(): Promise<Record<Lift, LiftStats>> {
-  // Find the powerlifting sport id.  Return empty stats if it isn't seeded.
+export async function getBigThreeStats(): Promise<BigThreeStats> {
+  // Find the powerlifting sport. Return empty stats if it isn't present —
+  // can happen on a fresh DB before any merge has produced a canonical
+  // "powerlifting" row.
   const sportRow = await db
-    .select({ id: sports.id })
+    .select({ id: sports.id, color: sports.color })
     .from(sports)
     .where(eq(sports.name, "powerlifting"))
     .limit(1);
-  if (sportRow.length === 0) return emptyStats();
-  const powerliftingId = sportRow[0].id;
+  if (sportRow.length === 0) {
+    return { color: FALLBACK_COLOR, lifts: emptyStats() };
+  }
+  const { id: powerliftingId, color } = sportRow[0];
 
   const rows = await db
     .select({
@@ -147,9 +160,12 @@ export async function getBigThreeStats(): Promise<Record<Lift, LiftStats>> {
   }
 
   return {
-    squat: buildLiftStats("squat", byLift.squat),
-    bench: buildLiftStats("bench", byLift.bench),
-    deadlift: buildLiftStats("deadlift", byLift.deadlift),
+    color,
+    lifts: {
+      squat: buildLiftStats("squat", byLift.squat),
+      bench: buildLiftStats("bench", byLift.bench),
+      deadlift: buildLiftStats("deadlift", byLift.deadlift),
+    },
   };
 }
 
