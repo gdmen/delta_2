@@ -15,7 +15,6 @@ interface SyncResult {
   fetched: number;
   accepted: number;
   skipped: number;
-  unmappedTypes: Record<string, number>;
   errors: string[];
 }
 
@@ -232,14 +231,6 @@ function Connected({
             <div>fetched:  {syncResult.fetched}</div>
             <div>accepted: {syncResult.accepted}</div>
             <div>skipped:  {syncResult.skipped}</div>
-            {Object.keys(syncResult.unmappedTypes).length > 0 && (
-              <div>
-                unmapped types:{" "}
-                {Object.entries(syncResult.unmappedTypes)
-                  .map(([k, v]) => `${k} (${v})`)
-                  .join(", ")}
-              </div>
-            )}
             {syncResult.errors.length > 0 && (
               <div className="text-accent-red pt-1">
                 errors: {syncResult.errors.length}
