@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { goals, focuses } from "@/db/schema";
+import { goals, focuses, metricTypes } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { STATUSES, type Status, isStatus } from "@/lib/enums";
 
@@ -8,6 +8,7 @@ interface UpdateGoalBody {
   targetValue?: number;
   deadline?: string; // YYYY-MM-DD
   status?: Status;
+  metricTypeId?: number;
   // Only meaningful when status is set to "abandoned". If true, every active
   // focus pointing at this goal is also moved to "abandoned" in the same
   // request so callers don't have to orchestrate two PATCHes.
@@ -50,6 +51,29 @@ export async function PATCH(
       );
     }
     updates.status = body.status;
+  }
+  if (body.metricTypeId !== undefined) {
+    if (!Number.isInteger(body.metricTypeId) || body.metricTypeId <= 0) {
+      return NextResponse.json(
+        { error: "metricTypeId must be a positive integer" },
+        { status: 400 },
+      );
+    }
+    // Verify the metric_type exists. The goals table has a FK on
+    // metricTypeId so a bad id would 500 from SQLite; better to 400 here
+    // with a useful message.
+    const exists = await db
+      .select({ id: metricTypes.id })
+      .from(metricTypes)
+      .where(eq(metricTypes.id, body.metricTypeId))
+      .limit(1);
+    if (exists.length === 0) {
+      return NextResponse.json(
+        { error: `metric_type ${body.metricTypeId} not found` },
+        { status: 400 },
+      );
+    }
+    updates.metricTypeId = body.metricTypeId;
   }
 
   if (Object.keys(updates).length === 0) {

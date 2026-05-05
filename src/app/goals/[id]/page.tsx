@@ -7,6 +7,7 @@ import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
 import { EditableGoalTarget } from "./editable-target";
 import { EditableGoalDeadline } from "./editable-deadline";
+import { EditableGoalMetric } from "./editable-metric";
 import { AbandonGoalButton } from "./delete-button";
 import { JournalEntryForm } from "./journal-entry-form";
 import { JournalList } from "./journal-list";
@@ -134,6 +135,17 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
   const signalsBlock = renderSignalsBlock(signals);
   const lastSuggestedAt = await getLastSuccessfulCallAt(goal.id, "suggest-focuses");
 
+  // Catalog passed to the editable-metric dropdown. Filtered + sorted in
+  // the client component; we just dump the full list here.
+  const allMetricTypes = await db
+    .select({
+      id: metricTypes.id,
+      name: metricTypes.name,
+      unit: metricTypes.unit,
+    })
+    .from(metricTypes)
+    .orderBy(asc(metricTypes.name));
+
   return (
     <div className="max-w-[720px]">
       {/* HEADER */}
@@ -148,8 +160,13 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
             style={{ backgroundColor: goal.sportColor }}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[0.75rem] font-mono uppercase tracking-wider text-muted mb-1">
-              {goal.sportName} · {goal.metricName}
+            <div className="mb-1">
+              <EditableGoalMetric
+                goalId={goal.id}
+                sportName={goal.sportName}
+                initialMetricName={goal.metricName}
+                options={allMetricTypes}
+              />
             </div>
             <EditableGoalTarget goalId={goal.id} initialValue={goal.targetValue} unit={goal.metricUnit} />
             <div className="font-mono text-[0.75rem] text-muted mt-2">
