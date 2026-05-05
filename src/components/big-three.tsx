@@ -160,7 +160,10 @@ function LiftCard({
         </div>
       )}
 
-      {/* Trend chart - convert series to display unit on the fly */}
+      {/* Trend chart - convert series to display unit on the fly. Line +
+         points stay at the MetricTrend default (foreground / near-black)
+         regardless of sport — the sport-colored dot beside the lift name
+         carries the sport identity; a colored chart on top is just noise. */}
       {stats.history.length >= 2 && (
         <div className="mt-1">
           <div className="font-mono text-[0.625rem] uppercase tracking-wider text-muted mb-1">
@@ -172,7 +175,6 @@ function LiftCard({
               value: Number(displayWeight(h.e1rm, unit)),
             }))}
             unit={unit}
-            color={color}
             height="6rem"
           />
         </div>
