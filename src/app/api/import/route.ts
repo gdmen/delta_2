@@ -13,6 +13,9 @@ import {
   goalJournalEntries,
   dashboards,
   dashboardWidgets,
+  coachCalls,
+  reconcileLog,
+  dailySummaries,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
@@ -122,6 +125,9 @@ export async function POST(request: NextRequest) {
     "events.csv",
     "event_metrics.csv",
     "workout_sets.csv",
+    "coach_calls.csv",
+    "reconcile_log.csv",
+    "daily_summaries.csv",
   ];
   const matched = recognized.filter((n) => n in csvs);
   if (matched.length === 0) {
@@ -219,6 +225,28 @@ export async function POST(request: NextRequest) {
   // events by their natural key; if missing, we error on that row.
   if (csvs["workout_sets.csv"]) {
     out.workout_sets = await importWorkoutSets(csvs["workout_sets.csv"]);
+  }
+
+  // --- coach_calls.csv -----------------------------------------------------
+  // Operational history. Runs after goals so the goal_id FK can be resolved
+  // by natural key (sport, metric, deadline).
+  if (csvs["coach_calls.csv"]) {
+    out.coach_calls = await importCoachCalls(csvs["coach_calls.csv"]);
+  }
+
+  // --- reconcile_log.csv ---------------------------------------------------
+  // Runs after metric_types so the metric_type_id reference resolves by name.
+  // Tolerates an empty `metric` column (matches the schema's nullable FK).
+  if (csvs["reconcile_log.csv"]) {
+    out.reconcile_log = await importReconcileLog(csvs["reconcile_log.csv"]);
+  }
+
+  // --- daily_summaries.csv -------------------------------------------------
+  // Aggregation cache. Upserts on (date, metric_type_id) so re-importing
+  // refreshes the cached values; also regenerates organically from raw
+  // metrics, so importing this is purely a recovery-time-saver.
+  if (csvs["daily_summaries.csv"]) {
+    out.daily_summaries = await importDailySummaries(csvs["daily_summaries.csv"]);
   }
 
   return NextResponse.json(out);
@@ -1016,6 +1044,228 @@ async function importDashboardWidgets(text: string): Promise<TableResult> {
         position,
       });
       return "accepted";
+    },
+  );
+}
+
+// -----------------------------------------------------------------------------
+// coach_calls.csv
+// -----------------------------------------------------------------------------
+
+/**
+ * coach_calls is an audit log: append-mostly, no schema-level uniqueness.
+ * For idempotent re-imports we dedupe on (ts, endpoint, model, status) —
+ * tight enough that two separate calls won't collide, loose enough that
+ * the same row from two exports skips cleanly. goal_id resolves from the
+ * (sport, metric, deadline) natural key; missing or unresolvable = NULL
+ * (matches the schema's set-null on goal delete).
+ */
+async function importCoachCalls(text: string): Promise<TableResult> {
+  const sportCache = await loadSportCache();
+  const typeCache = await buildMetricTypeCache();
+  return processCsv(
+    "coach_calls.csv",
+    text,
+    ["ts", "endpoint", "model"],
+    async (row, idx) => {
+      const ts = row[idx.get("ts")!];
+      const endpoint = row[idx.get("endpoint")!];
+      const model = row[idx.get("model")!];
+      const tokensIn = idx.has("tokens_in") ? Number(row[idx.get("tokens_in")!] || 0) : 0;
+      const tokensOut = idx.has("tokens_out") ? Number(row[idx.get("tokens_out")!] || 0) : 0;
+      const durationMs = idx.has("duration_ms") ? Number(row[idx.get("duration_ms")!] || 0) : 0;
+      const status = (idx.has("status") ? row[idx.get("status")!] : "success") || "success";
+      const goalSport = idx.has("goal_sport") ? row[idx.get("goal_sport")!] : "";
+      const goalMetric = idx.has("goal_metric") ? row[idx.get("goal_metric")!] : "";
+      const goalDeadline = idx.has("goal_deadline") ? row[idx.get("goal_deadline")!] : "";
+
+      if (!ts || !endpoint || !model) throw new Error("missing required field");
+      if (![tokensIn, tokensOut, durationMs].every(Number.isFinite)) {
+        throw new Error("token / duration columns must be numeric");
+      }
+
+      let goalId: number | null = null;
+      if (goalSport && goalMetric && goalDeadline) {
+        const sportId = sportCache.get(goalSport);
+        const metricTypeId = typeCache.byName.get(goalMetric);
+        if (sportId && metricTypeId !== undefined) {
+          const g = await db
+            .select({ id: goals.id })
+            .from(goals)
+            .where(
+              and(
+                eq(goals.sportId, sportId),
+                eq(goals.metricTypeId, metricTypeId),
+                eq(goals.deadline, goalDeadline),
+              ),
+            )
+            .limit(1);
+          goalId = g[0]?.id ?? null;
+        }
+      }
+
+      // Soft uniqueness check (no DB constraint to lean on). Cheap because
+      // ts is indexed.
+      const existing = await db
+        .select({ id: coachCalls.id })
+        .from(coachCalls)
+        .where(
+          and(
+            eq(coachCalls.ts, ts),
+            eq(coachCalls.endpoint, endpoint),
+            eq(coachCalls.model, model),
+            eq(coachCalls.status, status),
+          ),
+        )
+        .limit(1);
+      if (existing.length > 0) return "skipped";
+
+      await db.insert(coachCalls).values({
+        ts,
+        endpoint,
+        goalId,
+        tokensIn,
+        tokensOut,
+        durationMs,
+        model,
+        status,
+      });
+      return "accepted";
+    },
+  );
+}
+
+// -----------------------------------------------------------------------------
+// reconcile_log.csv
+// -----------------------------------------------------------------------------
+
+/**
+ * reconcile_log is also append-mostly. Soft uniqueness on
+ * (source, kind, at, range_start, range_end) — these together identify a
+ * single reconcile batch. metric is a natural-key reference to a
+ * metric_type that may have been merged away (the schema's metric_type_id
+ * has no FK for that reason); we resolve when possible, NULL otherwise.
+ */
+async function importReconcileLog(text: string): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache();
+  return processCsv(
+    "reconcile_log.csv",
+    text,
+    ["source", "kind", "deleted_count", "range_start", "range_end", "at"],
+    async (row, idx) => {
+      const source = row[idx.get("source")!];
+      const kind = row[idx.get("kind")!];
+      const metric = idx.has("metric") ? row[idx.get("metric")!] : "";
+      const deletedCount = Number(row[idx.get("deleted_count")!]);
+      const rangeStart = row[idx.get("range_start")!];
+      const rangeEnd = row[idx.get("range_end")!];
+      const at = row[idx.get("at")!];
+
+      if (!source || !kind || !rangeStart || !rangeEnd || !at) {
+        throw new Error("missing required field");
+      }
+      if (kind !== "metric" && kind !== "event") {
+        throw new Error(`invalid kind "${kind}"`);
+      }
+      if (!Number.isFinite(deletedCount)) {
+        throw new Error("deleted_count must be numeric");
+      }
+
+      const metricTypeId = metric ? typeCache.byName.get(metric) ?? null : null;
+
+      const existing = await db
+        .select({ id: reconcileLog.id })
+        .from(reconcileLog)
+        .where(
+          and(
+            eq(reconcileLog.source, source),
+            eq(reconcileLog.kind, kind),
+            eq(reconcileLog.at, at),
+            eq(reconcileLog.rangeStart, rangeStart),
+            eq(reconcileLog.rangeEnd, rangeEnd),
+          ),
+        )
+        .limit(1);
+      if (existing.length > 0) return "skipped";
+
+      await db.insert(reconcileLog).values({
+        source,
+        kind,
+        metricTypeId,
+        deletedCount,
+        rangeStart,
+        rangeEnd,
+        at,
+      });
+      return "accepted";
+    },
+  );
+}
+
+// -----------------------------------------------------------------------------
+// daily_summaries.csv
+// -----------------------------------------------------------------------------
+
+/**
+ * Cache of per-day per-metric aggregates. Has a unique index on
+ * (date, metric_type_id) so we can upsert directly. Skips rows whose
+ * metric doesn't exist locally (the cache will rebuild from raw metrics
+ * on the next aggregation pass).
+ */
+async function importDailySummaries(text: string): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache();
+  return processCsv(
+    "daily_summaries.csv",
+    text,
+    ["date", "metric", "count"],
+    async (row, idx) => {
+      const date = row[idx.get("date")!];
+      const metric = row[idx.get("metric")!];
+      const count = Number(row[idx.get("count")!]);
+      const avgRaw = idx.has("avg_value") ? row[idx.get("avg_value")!] : "";
+      const minRaw = idx.has("min_value") ? row[idx.get("min_value")!] : "";
+      const maxRaw = idx.has("max_value") ? row[idx.get("max_value")!] : "";
+      const lastIngestAt = idx.has("last_ingest_at") ? row[idx.get("last_ingest_at")!] : "";
+
+      if (!date || !metric) throw new Error("missing date or metric");
+      if (!Number.isFinite(count)) throw new Error("count must be numeric");
+
+      const metricTypeId = typeCache.byName.get(metric);
+      if (metricTypeId === undefined) return "skipped";
+
+      const parseNullable = (s: string): number | null => {
+        if (s === "") return null;
+        const n = Number(s);
+        if (!Number.isFinite(n)) throw new Error(`non-numeric value "${s}"`);
+        return n;
+      };
+      const avgValue = parseNullable(avgRaw);
+      const minValue = parseNullable(minRaw);
+      const maxValue = parseNullable(maxRaw);
+
+      const inserted = await db
+        .insert(dailySummaries)
+        .values({
+          date,
+          metricTypeId,
+          avgValue,
+          minValue,
+          maxValue,
+          count,
+          lastIngestAt: lastIngestAt || null,
+        })
+        .onConflictDoUpdate({
+          target: [dailySummaries.date, dailySummaries.metricTypeId],
+          set: {
+            avgValue,
+            minValue,
+            maxValue,
+            count,
+            lastIngestAt: lastIngestAt || null,
+          },
+        })
+        .returning({ id: dailySummaries.id });
+      return inserted.length > 0 ? "accepted" : "skipped";
     },
   );
 }

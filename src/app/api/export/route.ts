@@ -16,6 +16,9 @@ import {
   goalJournalEntries,
   dashboards,
   dashboardWidgets,
+  coachCalls,
+  reconcileLog,
+  dailySummaries,
 } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -49,11 +52,16 @@ import { serializeCsv } from "@/lib/csv";
  *   - event_metrics.csv          - per-event dimensions (distance, HR, ...)
  *   - workout_sets.csv           - per-set lifting details
  *
+ * Operational history (re-importable so trends survive a wipe):
+ *   - coach_calls.csv            - LLM call audit log (tokens, duration, status)
+ *   - reconcile_log.csv          - per-source reconcile-batch deletions
+ *   - daily_summaries.csv        - per-day per-metric aggregates (regenerates
+ *                                    organically too, but exporting cuts the
+ *                                    rebuild lag after a restore)
+ *
  * Deliberately NOT exported:
  *   - ingest_configs             - OAuth tokens; re-connect after restore
- *   - coach_calls                - LLM call metadata; rebuilds on use
- *   - daily_summaries            - aggregation cache; regenerates
- *   - reconcile_log              - audit trail; regenerates
+ *                                    (key + ciphertext in one CSV ≈ plaintext)
  *
  * Everything uses human-readable natural keys (metric / sport / focus name)
  * instead of DB IDs so the CSVs are self-describing and round-trip through
@@ -460,6 +468,118 @@ export async function GET() {
     ]),
   );
 
+  // --- coach_calls.csv -----------------------------------------------------
+  // LLM API audit log. goal_id is exported as the goal's natural key
+  // (sport, metric, deadline) so it survives ID drift across re-imports.
+  // Calls without an associated goal (e.g. dashboard-level coach actions)
+  // export with empty goal_* columns.
+  const coachCallRows = await db
+    .select({
+      ts: coachCalls.ts,
+      endpoint: coachCalls.endpoint,
+      tokensIn: coachCalls.tokensIn,
+      tokensOut: coachCalls.tokensOut,
+      durationMs: coachCalls.durationMs,
+      model: coachCalls.model,
+      status: coachCalls.status,
+      goalSport: sports.name,
+      goalMetric: metricTypes.name,
+      goalDeadline: goals.deadline,
+    })
+    .from(coachCalls)
+    .leftJoin(goals, eq(coachCalls.goalId, goals.id))
+    .leftJoin(sports, eq(goals.sportId, sports.id))
+    .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
+    .orderBy(asc(coachCalls.ts));
+  const coachCallsCsv = serializeCsv(
+    [
+      "ts",
+      "endpoint",
+      "tokens_in",
+      "tokens_out",
+      "duration_ms",
+      "model",
+      "status",
+      "goal_sport",
+      "goal_metric",
+      "goal_deadline",
+    ],
+    coachCallRows.map((r) => [
+      r.ts,
+      r.endpoint,
+      r.tokensIn,
+      r.tokensOut,
+      r.durationMs,
+      r.model,
+      r.status,
+      r.goalSport ?? "",
+      r.goalMetric ?? "",
+      r.goalDeadline ?? "",
+    ]),
+  );
+
+  // --- reconcile_log.csv ---------------------------------------------------
+  // Audit trail for source reconciliation deletions. metric_type_id has no
+  // FK in the schema (rows survive metric deletes), so we carry the metric
+  // name as natural key but tolerate it being missing on import (the row
+  // may reference a metric_type that was merged away).
+  const reconcileLogRows = await db
+    .select({
+      source: reconcileLog.source,
+      kind: reconcileLog.kind,
+      deletedCount: reconcileLog.deletedCount,
+      rangeStart: reconcileLog.rangeStart,
+      rangeEnd: reconcileLog.rangeEnd,
+      at: reconcileLog.at,
+      metric: metricTypes.name,
+    })
+    .from(reconcileLog)
+    .leftJoin(metricTypes, eq(reconcileLog.metricTypeId, metricTypes.id))
+    .orderBy(asc(reconcileLog.at));
+  const reconcileLogCsv = serializeCsv(
+    ["source", "kind", "metric", "deleted_count", "range_start", "range_end", "at"],
+    reconcileLogRows.map((r) => [
+      r.source,
+      r.kind,
+      r.metric ?? "",
+      r.deletedCount,
+      r.rangeStart,
+      r.rangeEnd,
+      r.at,
+    ]),
+  );
+
+  // --- daily_summaries.csv -------------------------------------------------
+  // Per-day per-metric aggregation cache. Has a unique index on
+  // (date, metric_type_id) so re-import upserts cleanly. Metric is exported
+  // by name (natural key); rows skipped if the metric doesn't exist on
+  // import (the cache will rebuild organically from raw metrics anyway).
+  const dailySummaryRows = await db
+    .select({
+      date: dailySummaries.date,
+      metric: metricTypes.name,
+      avgValue: dailySummaries.avgValue,
+      minValue: dailySummaries.minValue,
+      maxValue: dailySummaries.maxValue,
+      count: dailySummaries.count,
+      lastIngestAt: dailySummaries.lastIngestAt,
+    })
+    .from(dailySummaries)
+    .innerJoin(metricTypes, eq(dailySummaries.metricTypeId, metricTypes.id))
+    .orderBy(asc(dailySummaries.date), asc(metricTypes.name));
+  const dailySummariesCsv = serializeCsv(
+    ["date", "metric", "avg_value", "min_value", "max_value", "count", "last_ingest_at"],
+    dailySummaryRows.map((r) => [
+      r.date,
+      r.metric,
+      r.avgValue ?? "",
+      r.minValue ?? "",
+      r.maxValue ?? "",
+      r.count,
+      r.lastIngestAt ?? "",
+    ]),
+  );
+
   // --- bundle ---------------------------------------------------------------
   const zipped = zipSync({
     "sports.csv": strToU8(sportsCsv),
@@ -476,6 +596,9 @@ export async function GET() {
     "events.csv": strToU8(eventsCsv),
     "event_metrics.csv": strToU8(eventMetricsCsv),
     "workout_sets.csv": strToU8(workoutSetsCsv),
+    "coach_calls.csv": strToU8(coachCallsCsv),
+    "reconcile_log.csv": strToU8(reconcileLogCsv),
+    "daily_summaries.csv": strToU8(dailySummariesCsv),
   });
 
   const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
