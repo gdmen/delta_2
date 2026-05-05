@@ -7,6 +7,7 @@ import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 import { MetricTargetEditor } from "./target-editor";
 import { PaginationControls } from "@/components/pagination-controls";
+import { describeComputedSource, matchComputed } from "@/lib/computed-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,13 @@ export default async function MetricHistoryPage({
   const total = Number(totalRow[0]?.c ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(requestedPage, pageCount);
+
+  // Computed metric (read-time synthesized from underlying tables — see
+  // src/lib/computed-metrics.ts). The metric_types row exists for catalog
+  // / goal-target purposes but holds no metrics rows; the per-row editor
+  // is hidden and we render an explanatory banner instead.
+  const computed = matchComputed(decoded);
+  const computedDescription = computed ? describeComputedSource(decoded) : null;
 
   // Synthesized count (per-rep readings derived from workout_sets, see
   // src/lib/metric-history.ts). Surface separately so the count on this
@@ -89,17 +97,37 @@ export default async function MetricHistoryPage({
       <div className="flex items-baseline justify-between mt-3 mb-2 gap-3">
         <h1 className="text-2xl font-semibold font-mono">{type.name}</h1>
         <span className="font-mono text-[0.6875rem] text-muted">
-          {total.toLocaleString()} stored
-          {synthCount > 0 && ` · ${synthCount.toLocaleString()} from sets`}
-          {pageCount > 1 && ` · page ${currentPage} of ${pageCount}`}
+          {computed ? (
+            <>computed</>
+          ) : (
+            <>
+              {total.toLocaleString()} stored
+              {synthCount > 0 && ` · ${synthCount.toLocaleString()} from sets`}
+              {pageCount > 1 && ` · page ${currentPage} of ${pageCount}`}
+            </>
+          )}
           {type.unit && ` · unit: ${type.unit}`}
         </span>
       </div>
-      <p className="text-[0.875rem] text-text-secondary mb-6">
-        All measurements for this metric, across every source. Edits to
-        source-imported rows may be overwritten on the next sync.
-      </p>
-      {synthCount > 0 && (
+      {computed ? (
+        <p className="mb-6 text-[0.875rem] text-text-secondary">
+          Computed at read time. This metric has no stored rows; values are
+          synthesized from underlying tables on each query.
+        </p>
+      ) : (
+        <p className="text-[0.875rem] text-text-secondary mb-6">
+          All measurements for this metric, across every source. Edits to
+          source-imported rows may be overwritten on the next sync.
+        </p>
+      )}
+      {computedDescription && (
+        <p className="mb-6 text-[0.8125rem] text-muted border-l-2 border-border pl-3">
+          Source: {computedDescription}. Not editable from this page — change
+          the underlying data ({computed?.family.startsWith("sport_") ? "events" : "workout sets"})
+          and the value will update on the next read.
+        </p>
+      )}
+      {!computed && synthCount > 0 && (
         <p className="mb-6 text-[0.8125rem] text-muted border-l-2 border-border pl-3">
           {synthCount.toLocaleString()} additional readings are synthesized at
           read time from workout_sets (one reading per rep, value = added
@@ -117,31 +145,39 @@ export default async function MetricHistoryPage({
         initialTarget={type.target}
         initialHigherIsBetter={type.higherIsBetter}
       />
-      <AliasesSection
-        metricTypeId={type.id}
-        initialAliases={aliases.map((a) => a.alias)}
-      />
-      <PaginationControls
-        currentPage={currentPage}
-        pageCount={pageCount}
-        linkWithPage={linkWithPage}
-        className="mb-4"
-      />
-      {/* key forces a remount when paginating — the editor uses useState
-          to host optimistic edits, so without a key change it keeps showing
-          page 1's rows after navigation. */}
-      <MetricHistoryEditor
-        key={`${type.id}-${currentPage}`}
-        metricTypeId={type.id}
-        unit={type.unit}
-        initialRows={rows}
-      />
-      <PaginationControls
-        currentPage={currentPage}
-        pageCount={pageCount}
-        linkWithPage={linkWithPage}
-        className="mt-4"
-      />
+      {!computed && (
+        <AliasesSection
+          metricTypeId={type.id}
+          initialAliases={aliases.map((a) => a.alias)}
+        />
+      )}
+      {!computed && (
+        <PaginationControls
+          currentPage={currentPage}
+          pageCount={pageCount}
+          linkWithPage={linkWithPage}
+          className="mb-4"
+        />
+      )}
+      {!computed && (
+        // key forces a remount when paginating — the editor uses useState
+        // to host optimistic edits, so without a key change it keeps showing
+        // page 1's rows after navigation.
+        <MetricHistoryEditor
+          key={`${type.id}-${currentPage}`}
+          metricTypeId={type.id}
+          unit={type.unit}
+          initialRows={rows}
+        />
+      )}
+      {!computed && (
+        <PaginationControls
+          currentPage={currentPage}
+          pageCount={pageCount}
+          linkWithPage={linkWithPage}
+          className="mt-4"
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { events, metrics, metricTypes, workoutSets } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { resolveComputedSamples } from "./computed-metrics";
 
 export interface Series {
   samples: Array<{ date: string; value: number }>;
@@ -69,10 +70,45 @@ async function loadSyntheticSamples(
   return out;
 }
 
+/**
+ * Build a Series from samples + the metric_types row's metadata. Used by
+ * both the primitive/synthesized path and the computed path so they
+ * return the same shape.
+ */
+function makeSeries(
+  samples: Array<{ date: string; value: number }>,
+  type: { unit: string; target: number | null; higherIsBetter: boolean } | null,
+): Series {
+  return {
+    samples,
+    unit: type?.unit ?? "",
+    target: type?.target ?? null,
+    higherIsBetter: type?.higherIsBetter ?? true,
+  };
+}
+
+function sortByDate(samples: Array<{ date: string; value: number }>) {
+  return samples.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: string) {
+  return samples.filter((s) => s.date >= sinceIso);
+}
+
 /** Pull the full history of a metric, no time window. */
 export async function getAllHistory(metricName: string): Promise<Series> {
   const type = await loadType(metricName);
-  if (!type) return { samples: [], unit: "", target: null, higherIsBetter: true };
+
+  // Computed metrics are pattern-matched on name. They route around the
+  // metrics + workout_sets fanout and return their own samples; metadata
+  // (unit/target/higherIsBetter) still comes from the metric_types row,
+  // which is auto-seeded so it always exists.
+  const computed = await resolveComputedSamples(metricName);
+  if (computed !== null) {
+    return makeSeries(sortByDate(computed), type);
+  }
+
+  if (!type) return makeSeries([], null);
 
   const rows = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
@@ -81,26 +117,23 @@ export async function getAllHistory(metricName: string): Promise<Series> {
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
   const synthetic = await loadSyntheticSamples(type.id);
-  const samples = [...real, ...synthetic].sort((a, b) =>
-    a.date < b.date ? -1 : a.date > b.date ? 1 : 0,
-  );
-
-  return {
-    samples,
-    unit: type.unit,
-    target: type.target,
-    higherIsBetter: type.higherIsBetter,
-  };
+  return makeSeries(sortByDate([...real, ...synthetic]), type);
 }
 
 /** Pull the last N days of a metric, ordered oldest-to-newest. */
 export async function getLastDays(metricName: string, days: number): Promise<Series> {
   const type = await loadType(metricName);
-  if (!type) return { samples: [], unit: "", target: null, higherIsBetter: true };
 
   const since = new Date();
   since.setDate(since.getDate() - days);
   const sinceIso = since.toISOString();
+
+  const computed = await resolveComputedSamples(metricName);
+  if (computed !== null) {
+    return makeSeries(sortByDate(filterSince(computed, sinceIso)), type);
+  }
+
+  if (!type) return makeSeries([], null);
 
   const rows = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
@@ -109,15 +142,6 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
   const synthetic = await loadSyntheticSamples(type.id);
-  const samples = [...real, ...synthetic]
-    .filter((s) => s.date >= sinceIso)
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-  return {
-    samples,
-    unit: type.unit,
-    target: type.target,
-    higherIsBetter: type.higherIsBetter,
-  };
+  return makeSeries(sortByDate(filterSince([...real, ...synthetic], sinceIso)), type);
 }
 

@@ -1,8 +1,9 @@
 import { db } from "@/db";
-import { events, metrics, metricTypes, workoutSets } from "@/db/schema";
+import { events, metrics, metricTypes, sports, workoutSets } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { MetricsTable } from "./metrics-table";
 import { DataTabShell } from "@/components/data-tab-shell";
+import { matchComputed, slugifyExercise } from "@/lib/computed-metrics";
 
 export const dynamic = "force-dynamic";
 
@@ -43,8 +44,97 @@ export default async function DataPage() {
     });
   }
 
+  // Aggregates feeding the computed-metric counts. One round-trip each;
+  // the resolver in computed-metrics.ts does the same arithmetic at read
+  // time. We avoid calling the resolver for every row (~600 metric_types
+  // would be ~600 queries) by precomputing per-sport and per-exercise
+  // day counts here and looking them up by name match.
+  const sportDayCounts = await db
+    .select({
+      sportId: events.sportId,
+      sportName: sports.name,
+      days: sql<number>`count(distinct substr(${events.startedAt}, 1, 10))`,
+      daysWithMinutes: sql<number>`count(distinct case when ${events.durationMinutes} > 0 then substr(${events.startedAt}, 1, 10) end)`,
+      lastAt: sql<string>`max(${events.startedAt})`,
+    })
+    .from(events)
+    .innerJoin(sports, eq(events.sportId, sports.id))
+    .groupBy(events.sportId, sports.name);
+  const bySport = new Map<string, { days: number; daysWithMinutes: number; lastAt: string | null }>();
+  for (const r of sportDayCounts) {
+    bySport.set(r.sportName, {
+      days: Number(r.days),
+      daysWithMinutes: Number(r.daysWithMinutes),
+      lastAt: r.lastAt ?? null,
+    });
+  }
+
+  const exerciseDayCounts = await db
+    .select({
+      metricTypeId: workoutSets.exerciseMetricTypeId,
+      name: metricTypes.name,
+      days: sql<number>`count(distinct substr(${events.startedAt}, 1, 10))`,
+      lastAt: sql<string>`max(${events.startedAt})`,
+    })
+    .from(workoutSets)
+    .innerJoin(events, eq(workoutSets.eventId, events.id))
+    .innerJoin(metricTypes, eq(metricTypes.id, workoutSets.exerciseMetricTypeId))
+    .groupBy(workoutSets.exerciseMetricTypeId, metricTypes.name);
+  const byExerciseSlug = new Map<string, { days: number; lastAt: string | null }>();
+  for (const r of exerciseDayCounts) {
+    const slug = slugifyExercise(r.name);
+    if (!slug) continue;
+    byExerciseSlug.set(slug, {
+      days: Number(r.days),
+      lastAt: r.lastAt ?? null,
+    });
+  }
+
   const rows = realRows
     .map((t) => {
+      // Computed metric? Skip the real+synth path — the underlying tables
+      // hold no rows for these names. Pull the count from the per-sport /
+      // per-exercise aggregates above.
+      const computed = matchComputed(t.name);
+      if (computed) {
+        let count = 0;
+        let lastAt: string | null = null;
+        switch (computed.family) {
+          case "sport_sessions_count": {
+            const s = bySport.get(computed.subject);
+            count = s?.days ?? 0;
+            lastAt = s?.lastAt ?? null;
+            break;
+          }
+          case "sport_minutes": {
+            const s = bySport.get(computed.subject);
+            count = s?.daysWithMinutes ?? 0;
+            lastAt = s?.lastAt ?? null;
+            break;
+          }
+          case "exercise_max":
+          case "exercise_max_12mo":
+          case "exercise_e1rm":
+          case "exercise_volume_per_day": {
+            const ex = byExerciseSlug.get(computed.subject);
+            // Day count is an upper bound for *_max (PRs ≤ workout-days).
+            // Exact for *_e1rm and *_volume_per_day (one sample per day).
+            // Trailing-12mo collapses consecutive equal samples so it can be
+            // less than this; close enough for a "data exists" indicator.
+            count = ex?.days ?? 0;
+            lastAt = ex?.lastAt ?? null;
+            break;
+          }
+        }
+        return {
+          id: t.id,
+          name: t.name,
+          unit: t.unit,
+          count,
+          lastAt,
+        };
+      }
+
       const synth = synthByType.get(t.id);
       const realCount = Number(t.count);
       const synthCount = synth?.count ?? 0;

@@ -1,6 +1,4 @@
-import { db } from "@/db";
-import { metrics } from "@/db/schema";
-import { and, eq, gte, desc, asc } from "drizzle-orm";
+import { getAllHistory } from "./metric-history";
 import type { GoalProgress } from "./goal-format";
 
 // Re-export so server callers don't need to know about the split.
@@ -53,54 +51,29 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
   const daysRemaining = Math.max(0, Math.ceil((deadlineTs - now) / MS_PER_DAY));
   const weeksRemaining = daysRemaining / 7;
 
-  // Parallel fire the four fixed-size lookups; they don't depend on each other.
+  // Read once through metric-history. That layer transparently unions the
+  // primitive `metrics` table with workout_sets fanout and computed
+  // metrics (e.g. bench_press_max). Goal-calc no longer needs to know
+  // where samples come from — any metric_type that has a Series is
+  // goal-targetable. Series.samples is sorted ASC by date.
+  const series = await getAllHistory(goal.metricName);
+  const samples = series.samples;
+
   const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();
   // goal.createdAt is SQLite datetime('now') ("YYYY-MM-DD HH:MM:SS", UTC).
-  // metrics.recordedAt is always ISO ("YYYY-MM-DDTHH:MM:SS..."). Convert so
-  // string comparison in `gte` below lines up with chronological ordering.
+  // Convert to ISO so lexicographic comparison against sample dates lines
+  // up chronologically.
   const createdAtIso = goal.createdAt.includes("T")
     ? goal.createdAt
     : goal.createdAt.replace(" ", "T") + "Z";
-  const [latestRows, afterCreateRows, earliestRows, recentRows] = await Promise.all([
-    db
-      .select({ value: metrics.value })
-      .from(metrics)
-      .where(eq(metrics.metricTypeId, goal.metricTypeId))
-      .orderBy(desc(metrics.recordedAt))
-      .limit(1),
-    db
-      .select({ value: metrics.value })
-      .from(metrics)
-      .where(
-        and(
-          eq(metrics.metricTypeId, goal.metricTypeId),
-          gte(metrics.recordedAt, createdAtIso),
-        ),
-      )
-      .orderBy(asc(metrics.recordedAt))
-      .limit(1),
-    db
-      .select({ value: metrics.value })
-      .from(metrics)
-      .where(eq(metrics.metricTypeId, goal.metricTypeId))
-      .orderBy(asc(metrics.recordedAt))
-      .limit(1),
-    db
-      .select({ value: metrics.value, recordedAt: metrics.recordedAt })
-      .from(metrics)
-      .where(
-        and(
-          eq(metrics.metricTypeId, goal.metricTypeId),
-          gte(metrics.recordedAt, fourWeeksAgo),
-        ),
-      )
-      .orderBy(asc(metrics.recordedAt)),
-  ]);
 
-  const currentValue = latestRows[0]?.value ?? null;
-  // Start value: earliest sample at or after goal creation, falling back to
-  // the earliest sample overall (useful when a goal was set retroactively).
-  const startValue = afterCreateRows[0]?.value ?? earliestRows[0]?.value ?? null;
+  const currentValue = samples.length > 0 ? samples[samples.length - 1].value : null;
+  // Start value: earliest sample at or after goal creation, falling back
+  // to the earliest sample overall (useful when a goal was set retroactively).
+  const earliestAfterCreate = samples.find((s) => s.date >= createdAtIso);
+  const earliestOverall = samples[0];
+  const startValue = earliestAfterCreate?.value ?? earliestOverall?.value ?? null;
+  const recentRows = samples.filter((s) => s.date >= fourWeeksAgo);
 
   const direction: "up" | "down" = startValue !== null
     ? (goal.targetValue >= startValue ? "up" : "down")
@@ -119,9 +92,9 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
     requiredRatePerWeek = (goal.targetValue - currentValue) / weeksRemaining;
   }
 
-  // Actual rate: linear regression over the last 4 weeks (SQL-filtered above).
+  // Actual rate: linear regression over the last 4 weeks (filtered above).
   const recent = recentRows.map((r) => ({
-    t: new Date(r.recordedAt).getTime(),
+    t: new Date(r.date).getTime(),
     v: r.value,
   }));
   const actualRatePerWeek = regressionSlopePerWeek(recent);

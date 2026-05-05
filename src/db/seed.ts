@@ -1,5 +1,7 @@
 import { db } from "./index";
-import { sports, metricTypes } from "./schema";
+import { sports, metricTypes, workoutSets } from "./schema";
+import { eq, sql } from "drizzle-orm";
+import { slugifyExercise } from "../lib/computed-metrics";
 
 // NOTE: Delta's canonical metric_types are also seeded by migration
 // 0006_redundant_bullseye.sql so every DB has them regardless of whether
@@ -51,7 +53,78 @@ async function seed() {
     await db.insert(metricTypes).values(mt).onConflictDoNothing();
   }
 
+  await seedComputedMetricTypes();
+
   console.log("Seed complete.");
+}
+
+/**
+ * Auto-seed metric_types entries for the auto-computed metric families.
+ * They have no underlying metrics rows — the resolver in computed-metrics.ts
+ * synthesizes their values at read time. The metric_types row exists so:
+ *   - the metric-picker shows them
+ *   - goals can FK to them
+ *   - target / higher-is-better edits via /data/metrics/<name> work
+ *
+ * Idempotent: re-running the seed is safe (INSERT OR IGNORE on the
+ * unique-name index). Adding a new sport or starting to record a new
+ * exercise will pick up its computed entries on the next seed run.
+ */
+async function seedComputedMetricTypes() {
+  console.log("Seeding computed metric types...");
+
+  const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
+  for (const s of sportRows) {
+    await db
+      .insert(metricTypes)
+      .values({
+        name: `sport_sessions_count_${s.name}`,
+        unit: "sessions",
+        sportId: s.id,
+        frequencyHint: "daily",
+      })
+      .onConflictDoNothing();
+    await db
+      .insert(metricTypes)
+      .values({
+        name: `sport_minutes_${s.name}`,
+        unit: "min",
+        sportId: s.id,
+        frequencyHint: "daily",
+      })
+      .onConflictDoNothing();
+  }
+
+  // Distinct exercises: any metric_types row referenced by at least one
+  // workout_set. New exercises picked up automatically on the next seed.
+  const exerciseRows = await db
+    .select({ id: metricTypes.id, name: metricTypes.name })
+    .from(metricTypes)
+    .innerJoin(workoutSets, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
+    .groupBy(metricTypes.id, metricTypes.name)
+    .having(sql`count(${workoutSets.id}) > 0`);
+
+  const seenSlugs = new Set<string>();
+  for (const ex of exerciseRows) {
+    const slug = slugifyExercise(ex.name);
+    if (!slug || seenSlugs.has(slug)) {
+      // Empty slug or collision (different display names slugifying the
+      // same way). Skip rather than risk a wrong association — the unique
+      // index would reject anyway.
+      continue;
+    }
+    seenSlugs.add(slug);
+    for (const suffix of ["_max", "_max_12mo", "_e1rm", "_volume_per_day"]) {
+      await db
+        .insert(metricTypes)
+        .values({
+          name: `${slug}${suffix}`,
+          unit: "lb",
+          frequencyHint: "weekly",
+        })
+        .onConflictDoNothing();
+    }
+  }
 }
 
 seed().catch(console.error);
