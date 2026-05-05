@@ -13,9 +13,10 @@ export interface Series {
 }
 
 /**
- * Lookup metric_type by name once (carries unit + target + direction). When
- * the name doesn't exist we still return a usable Series so the caller can
- * render an empty placeholder rather than crashing.
+ * Lookup metric_type by name once (carries unit + target + direction +
+ * frequencyHint). When the name doesn't exist we still return a usable
+ * Series so the caller can render an empty placeholder rather than
+ * crashing.
  */
 async function loadType(metricName: string) {
   const rows = await db
@@ -24,11 +25,47 @@ async function loadType(metricName: string) {
       unit: metricTypes.unit,
       target: metricTypes.target,
       higherIsBetter: metricTypes.higherIsBetter,
+      frequencyHint: metricTypes.frequencyHint,
     })
     .from(metricTypes)
     .where(eq(metricTypes.name, metricName))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Daily-aggregated metrics — one observation per calendar day where the
+ * value rolls up the day's worth of activity (steps, sleep hours, sport
+ * minutes, *_max). Today's value is mid-flight and would mislead trends,
+ * so we drop it from the series. Detection:
+ *   - Computed metric (every family in computed-metrics.ts is per-day).
+ *   - frequencyHint === "daily" on the metric_types row.
+ * Instantaneous metrics (body weight, body fat %, set-by-set lifts) are
+ * unaffected — today's reading IS complete.
+ */
+function isDailyAggregate(
+  type: { frequencyHint: string | null } | null,
+  computed: Array<{ date: string; value: number }> | null,
+): boolean {
+  return computed !== null || type?.frequencyHint === "daily";
+}
+
+/** Start-of-today in server-local time, ISO. Server colocates with the
+ * single user, so local-time matches the user's "today". */
+function startOfTodayLocalIso(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function excludeTodayIfDaily(
+  samples: Array<{ date: string; value: number }>,
+  type: { frequencyHint: string | null } | null,
+  computed: Array<{ date: string; value: number }> | null,
+): Array<{ date: string; value: number }> {
+  if (!isDailyAggregate(type, computed)) return samples;
+  const cutoff = startOfTodayLocalIso();
+  return samples.filter((s) => s.date < cutoff);
 }
 
 /**
@@ -95,7 +132,9 @@ function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: 
   return samples.filter((s) => s.date >= sinceIso);
 }
 
-/** Pull the full history of a metric, no time window. */
+/** Pull the full history of a metric, ordered oldest-to-newest.
+ * Daily-aggregate metrics (computed families, frequencyHint === "daily")
+ * drop today's still-mid-flight value. */
 export async function getAllHistory(metricName: string): Promise<Series> {
   const type = await loadType(metricName);
 
@@ -105,7 +144,7 @@ export async function getAllHistory(metricName: string): Promise<Series> {
   // which is auto-seeded so it always exists.
   const computed = await resolveComputedSamples(metricName);
   if (computed !== null) {
-    return makeSeries(sortByDate(computed), type);
+    return makeSeries(sortByDate(excludeTodayIfDaily(computed, type, computed)), type);
   }
 
   if (!type) return makeSeries([], null);
@@ -117,10 +156,15 @@ export async function getAllHistory(metricName: string): Promise<Series> {
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
   const synthetic = await loadSyntheticSamples(type.id);
-  return makeSeries(sortByDate([...real, ...synthetic]), type);
+  return makeSeries(
+    sortByDate(excludeTodayIfDaily([...real, ...synthetic], type, computed)),
+    type,
+  );
 }
 
-/** Pull the last N days of a metric, ordered oldest-to-newest. */
+/** Pull the last N days of a metric, ordered oldest-to-newest.
+ * Daily-aggregate metrics (computed families, frequencyHint === "daily")
+ * drop today's still-mid-flight value. */
 export async function getLastDays(metricName: string, days: number): Promise<Series> {
   const type = await loadType(metricName);
 
@@ -130,7 +174,10 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
 
   const computed = await resolveComputedSamples(metricName);
   if (computed !== null) {
-    return makeSeries(sortByDate(filterSince(computed, sinceIso)), type);
+    return makeSeries(
+      sortByDate(excludeTodayIfDaily(filterSince(computed, sinceIso), type, computed)),
+      type,
+    );
   }
 
   if (!type) return makeSeries([], null);
@@ -142,6 +189,11 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
   const synthetic = await loadSyntheticSamples(type.id);
-  return makeSeries(sortByDate(filterSince([...real, ...synthetic], sinceIso)), type);
+  return makeSeries(
+    sortByDate(
+      excludeTodayIfDaily(filterSince([...real, ...synthetic], sinceIso), type, computed),
+    ),
+    type,
+  );
 }
 
