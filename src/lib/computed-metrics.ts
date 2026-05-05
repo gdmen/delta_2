@@ -212,52 +212,76 @@ async function loadSetsForExercise(metricTypeId: number): Promise<SetRow[]> {
     .orderBy(events.startedAt);
 }
 
+/**
+ * Collapse sets to one entry per calendar day, keeping the day's max
+ * weight (and a representative timestamp from that max set so charts
+ * still place the dot on the right calendar position). Used as the
+ * per-day input for both lifetime and trailing-window max so a single
+ * session that ramps weight (e.g. 135 → 185 → 225) yields one sample
+ * for the day at 225 instead of three step-up samples on the same date.
+ */
+function collapseSetsToDailyMax(
+  sets: SetRow[],
+): Array<{ startedAt: string; weight: number }> {
+  const byDay = new Map<string, { startedAt: string; weight: number }>();
+  for (const s of sets) {
+    const day = s.startedAt.slice(0, 10);
+    const existing = byDay.get(day);
+    if (!existing || s.weight > existing.weight) {
+      byDay.set(day, { startedAt: s.startedAt, weight: s.weight });
+    }
+  }
+  return [...byDay.values()].sort((a, b) =>
+    a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0,
+  );
+}
+
 async function exerciseLifetimeMax(slug: string): Promise<Sample[]> {
   const id = await loadExerciseId(slug);
   if (id === null) return [];
   const sets = await loadSetsForExercise(id);
+  // Day-collapse first so a session that warms up through several sub-PRs
+  // (e.g. 135 → 185 → 225 → 245) emits at most one sample for that day.
+  const daily = collapseSetsToDailyMax(sets);
   const out: Sample[] = [];
   let runningMax = -Infinity;
-  for (const s of sets) {
-    if (s.weight > runningMax) {
-      runningMax = s.weight;
-      out.push({ date: s.startedAt, value: s.weight });
+  for (const d of daily) {
+    if (d.weight > runningMax) {
+      runningMax = d.weight;
+      out.push({ date: d.startedAt, value: d.weight });
     }
   }
   return out;
 }
 
 /**
- * Sliding-window max via a monotonic deque. Each set advances time by
- * its `started_at`; we evict deque entries older than `windowDays` and
- * push entries less than the current weight off the back so the deque
- * front is always the window max. Emit a sample at every set with the
- * current windowed max — duplicates (consecutive sets where the max
- * didn't change) are collapsed at the end.
+ * Sliding-window max via a monotonic deque, keyed on day-collapsed sets.
+ * Each day advances time by its representative timestamp; we evict deque
+ * entries older than `windowDays` and pop entries less than the current
+ * day's max off the back so the deque front is always the window max.
+ * Emit one sample per active day with the current windowed max, then
+ * collapse consecutive equal-value samples to keep the chart sparse.
  */
 async function exerciseTrailingMax(slug: string, windowDays: number): Promise<Sample[]> {
   const id = await loadExerciseId(slug);
   if (id === null) return [];
   const sets = await loadSetsForExercise(id);
-  if (sets.length === 0) return [];
+  const daily = collapseSetsToDailyMax(sets);
+  if (daily.length === 0) return [];
   const windowMs = windowDays * 24 * 60 * 60 * 1000;
-  const deque: SetRow[] = [];
+  const deque: Array<{ startedAt: string; weight: number }> = [];
   const samples: Sample[] = [];
-  for (const s of sets) {
-    const t = new Date(s.startedAt).getTime();
-    // Evict from front: anything older than the window
+  for (const d of daily) {
+    const t = new Date(d.startedAt).getTime();
     while (deque.length > 0 && new Date(deque[0].startedAt).getTime() < t - windowMs) {
       deque.shift();
     }
-    // Pop from back: anything smaller than the current weight
-    while (deque.length > 0 && deque[deque.length - 1].weight < s.weight) {
+    while (deque.length > 0 && deque[deque.length - 1].weight < d.weight) {
       deque.pop();
     }
-    deque.push(s);
-    samples.push({ date: s.startedAt, value: deque[0].weight });
+    deque.push(d);
+    samples.push({ date: d.startedAt, value: deque[0].weight });
   }
-  // Collapse consecutive equal-value samples to keep the chart sparse.
-  // First and last always retained.
   const collapsed: Sample[] = [];
   for (let i = 0; i < samples.length; i++) {
     const cur = samples[i];
