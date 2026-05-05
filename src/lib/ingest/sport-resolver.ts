@@ -14,9 +14,9 @@ import { eq } from "drizzle-orm";
  *   1. Cache hit by raw name — covers user-renamed canonicals (e.g. the
  *      user already merged `strava:Ride` into `biking`; raw is `biking`).
  *   2. Cache hit by `${source}:${rawName}` — covers post-import re-runs.
- *   3. Auto-create with name `${source}:${rawName}` and a curated-palette
- *      color. Race-safe: INSERT OR IGNORE + SELECT-by-name fallback so
- *      two concurrent imports converge on the same id without throwing.
+ *   3. Auto-create with name `${source}:${rawName}` and a random color.
+ *      Race-safe: INSERT OR IGNORE + SELECT-by-name fallback so two
+ *      concurrent imports converge on the same id without throwing.
  *
  * No alias table for sports today (unlike metric_types). The merge UI at
  * /data/sports updates `events.sport_id`, `goals.sport_id`,
@@ -63,7 +63,7 @@ async function autoCreate(name: string, cache: SportCache): Promise<number> {
   const cached = cache.byName.get(name);
   if (cached !== undefined) return cached;
 
-  const color = paletteColor(name);
+  const color = randomColor();
   const inserted = await db
     .insert(sports)
     .values({ name, color })
@@ -93,44 +93,25 @@ async function autoCreate(name: string, cache: SportCache): Promise<number> {
 }
 
 /**
- * Curated 12-color qualitative palette indexed by stable string hash.
- * Picked for visual distinguishability without being garish — mid-tone
- * saturation, mid-light, no two adjacent hues clash. Deterministic:
- * same name → same color across runs.
- *
- * Why a palette and not free-floating HSL: hashing into a continuous
- * hue gives ~25% birthday-collision odds at 10 sports for "visually
- * distinguishable" (~30° hue separation). A 12-slot palette guarantees
- * no two sports share a color until the catalog exceeds 12, at which
- * point the user is in heavy-merge territory anyway.
+ * Random hex color for a freshly minted sport. Stored once on the row,
+ * so non-determinism across runs is fine — the user can override via
+ * /data/sports if a generated color is hard to read or clashes with a
+ * neighbour. Hue is bounded in HSL space (mid-saturation, mid-light)
+ * so no auto-created sport ends up near-white or near-black on the
+ * default theme.
  */
-const PALETTE = [
-  "#2563eb", // blue
-  "#dc2626", // red
-  "#16a34a", // green
-  "#d97706", // amber
-  "#7c3aed", // violet
-  "#db2777", // pink
-  "#0891b2", // cyan
-  "#65a30d", // lime
-  "#c026d3", // fuchsia
-  "#ea580c", // orange
-  "#0d9488", // teal
-  "#a16207", // brown-amber
-];
-
-export function paletteColor(name: string): string {
-  return PALETTE[hashString(name) % PALETTE.length];
+export function randomColor(): string {
+  const h = Math.floor(Math.random() * 360);
+  return hslToHex(h, 65, 50);
 }
 
-/**
- * Tiny deterministic string hash. Not cryptographic — just stable across
- * runs and well-distributed across the 12-slot palette. djb2-style.
- */
-function hashString(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) {
-    h = (h * 33) ^ s.charCodeAt(i);
-  }
-  return Math.abs(h | 0);
+function hslToHex(h: number, s: number, l: number): string {
+  const ll = l / 100;
+  const a = (s / 100) * Math.min(ll, 1 - ll);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const v = ll - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(v * 255).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
 }
