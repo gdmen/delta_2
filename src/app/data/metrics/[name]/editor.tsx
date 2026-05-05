@@ -1,15 +1,36 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatShort } from "@/lib/format";
 
 interface MetricRow {
-  id: number;
+  /**
+   * Stored rows: the metrics.id (real DB id, used for PATCH/DELETE).
+   * Synthesized rows: a stable string id like "set:42:rep:0" — never
+   * sent to /api/metrics/* because edit/delete actions are hidden for
+   * these rows. Type widened to `number | string` so the existing
+   * editor logic still works for stored rows.
+   */
+  id: number | string;
   value: number;
   recordedAt: string;
   source: string;
   sourceId: string | null;
+  /**
+   * True when this row's authoritative copy lives elsewhere — e.g.
+   * synthesized at read time from per-rep workout_sets fanout, or
+   * archived from a frozen-on-the-wire source. Hides Edit/Delete
+   * buttons and links the source label to the parent record.
+   */
+  readOnly?: boolean;
+  /**
+   * Optional href for read-only rows — points at the parent record
+   * (e.g. /data/events/123 for a workout_sets row's parent event).
+   * Rendered as a link in the Source column.
+   */
+  parentHref?: string;
 }
 
 export function MetricHistoryEditor({
@@ -23,7 +44,7 @@ export function MetricHistoryEditor({
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<MetricRow[]>(initialRows);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | string | null>(null);
   const [draft, setDraft] = useState<{ value: string; recordedAt: string }>({ value: "", recordedAt: "" });
   const [newDraft, setNewDraft] = useState<{ value: string; recordedAt: string }>({
     value: "",
@@ -42,7 +63,8 @@ export function MetricHistoryEditor({
     setErr(null);
   }
 
-  async function saveEdit(id: number) {
+  async function saveEdit(id: number | string) {
+    if (typeof id !== "number") return; // read-only row — id is a synthetic string key
     const val = Number(draft.value);
     if (!Number.isFinite(val)) {
       setErr("value must be a number");
@@ -69,7 +91,8 @@ export function MetricHistoryEditor({
     setErr(null);
   }
 
-  async function remove(id: number) {
+  async function remove(id: number | string) {
+    if (typeof id !== "number") return; // read-only row — id is a synthetic string key
     if (!confirm("Delete this row?")) return;
     setBusy(true);
     const res = await fetch(`/api/metrics/${id}`, { method: "DELETE" });
@@ -184,7 +207,15 @@ export function MetricHistoryEditor({
                     )}
                   </td>
                   <td className="px-3 py-2 font-mono text-[0.75rem]">
-                    {imported ? (
+                    {r.readOnly && r.parentHref ? (
+                      <Link
+                        href={r.parentHref}
+                        className="text-muted hover:text-foreground underline-offset-2 hover:underline"
+                        title="Read-only — owned by another table; click to open the parent record"
+                      >
+                        {r.source}
+                      </Link>
+                    ) : imported ? (
                       <span
                         className="text-accent-orange"
                         title="Imported from external source; edits may be overwritten on next sync"
@@ -199,7 +230,12 @@ export function MetricHistoryEditor({
                     {r.sourceId}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    {isEditing ? (
+                    {r.readOnly ? (
+                      // Authoritative copy lives in another table (e.g.
+                      // workout_sets); edits belong on the parent record's
+                      // page.
+                      <span className="text-[0.6875rem] text-muted italic">read-only</span>
+                    ) : isEditing ? (
                       <>
                         <button
                           type="button"

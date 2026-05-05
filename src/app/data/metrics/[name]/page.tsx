@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import {
+  events,
   eventMetrics,
   goals,
   metrics,
@@ -49,9 +50,7 @@ export default async function MetricHistoryPage({
     .select({ c: sql<number>`count(*)` })
     .from(metrics)
     .where(eq(metrics.metricTypeId, type.id));
-  const total = Number(totalRow[0]?.c ?? 0);
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(requestedPage, pageCount);
+  const storedCount = Number(totalRow[0]?.c ?? 0);
 
   // Computed metric (read-time synthesized from underlying tables — see
   // src/lib/computed-metrics.ts). The metric_types row exists for catalog
@@ -60,10 +59,9 @@ export default async function MetricHistoryPage({
   const computed = matchComputed(decoded);
   const computedDescription = computed ? describeComputedSource(decoded) : null;
 
-  // Synthesized count (per-rep readings derived from workout_sets, see
-  // src/lib/metric-history.ts). Surface separately so the count on this
-  // page matches the count on /data without pretending the readings are
-  // editable here — they're not, the user has to edit the underlying set.
+  // Synthesized rep count derived from workout_sets — one virtual reading
+  // per rep, value = workout_sets.weight. Counted via SUM(reps) so the
+  // total agrees with what metric-history.ts produces at read time.
   const synthRow = await db
     .select({
       reps: sql<number>`coalesce(sum(${workoutSets.reps}), 0)`,
@@ -71,6 +69,13 @@ export default async function MetricHistoryPage({
     .from(workoutSets)
     .where(eq(workoutSets.exerciseMetricTypeId, type.id));
   const synthCount = Number(synthRow[0]?.reps ?? 0);
+
+  // Total = stored rows + synthesized reps. Pagination is across the
+  // combined list; the editor renders both kinds in the same table with
+  // a `readOnly` flag that hides edit/delete on synthesized rows.
+  const total = storedCount + synthCount;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, pageCount);
 
   // Reference counts that gate deletion. The DELETE endpoint repeats
   // these checks server-side, but we use them here to decide whether
@@ -92,19 +97,79 @@ export default async function MetricHistoryPage({
     refCounts.eventMetrics === 0 &&
     refCounts.goals === 0;
 
-  const rows = await db
-    .select({
-      id: metrics.id,
-      value: metrics.value,
-      recordedAt: metrics.recordedAt,
-      source: metrics.source,
-      sourceId: metrics.sourceId,
-    })
-    .from(metrics)
-    .where(eq(metrics.metricTypeId, type.id))
-    .orderBy(desc(metrics.recordedAt))
-    .limit(PAGE_SIZE)
-    .offset((currentPage - 1) * PAGE_SIZE);
+  // Both rows lists are pulled in full for this page so we can interleave
+  // by date in JS. At single-user scales the cost is negligible (largest
+  // case is one exercise's full workout_sets fanout: ~7K rows ≈ <100ms).
+  // If this ever bites for performance, push the merge into SQLite via
+  // UNION ALL with a recursive-CTE rep expander.
+  const storedRows =
+    storedCount > 0
+      ? await db
+          .select({
+            id: metrics.id,
+            value: metrics.value,
+            recordedAt: metrics.recordedAt,
+            source: metrics.source,
+            sourceId: metrics.sourceId,
+          })
+          .from(metrics)
+          .where(eq(metrics.metricTypeId, type.id))
+          .orderBy(desc(metrics.recordedAt))
+      : [];
+
+  const synthSetRows =
+    synthCount > 0
+      ? await db
+          .select({
+            id: workoutSets.id,
+            eventId: workoutSets.eventId,
+            reps: workoutSets.reps,
+            weight: workoutSets.weight,
+            startedAt: events.startedAt,
+          })
+          .from(workoutSets)
+          .innerJoin(events, eq(workoutSets.eventId, events.id))
+          .where(eq(workoutSets.exerciseMetricTypeId, type.id))
+          .orderBy(desc(events.startedAt))
+      : [];
+
+  // Fan each set out into `reps` virtual MetricRow entries. value = weight,
+  // recordedAt = parent event's started_at. Stable ids ("set:N:rep:M")
+  // give the React key something unique without colliding with metrics.id.
+  type EditorRow = {
+    id: number | string;
+    value: number;
+    recordedAt: string;
+    source: string;
+    sourceId: string | null;
+    readOnly?: boolean;
+    parentHref?: string;
+  };
+  const synthRows: EditorRow[] = [];
+  for (const s of synthSetRows) {
+    for (let i = 0; i < s.reps; i++) {
+      synthRows.push({
+        id: `set:${s.id}:rep:${i}`,
+        value: s.weight,
+        recordedAt: s.startedAt,
+        source: "workout_set",
+        sourceId: `set:${s.id}:rep:${i}`,
+        readOnly: true,
+        parentHref: `/data/events/${s.eventId}`,
+      });
+    }
+  }
+
+  // Merge + sort DESC by recordedAt; slice for current page.
+  const merged: EditorRow[] = [
+    ...storedRows.map((r) => ({ ...r, sourceId: r.sourceId })),
+    ...synthRows,
+  ];
+  merged.sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1));
+  const rows = merged.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   const aliases = await db
     .select({ alias: metricTypeAliases.alias })
@@ -129,8 +194,8 @@ export default async function MetricHistoryPage({
             <>computed</>
           ) : (
             <>
-              {total.toLocaleString()} stored
-              {synthCount > 0 && ` · ${synthCount.toLocaleString()} from sets`}
+              {total.toLocaleString()} total
+              {synthCount > 0 && ` (${storedCount.toLocaleString()} stored, ${synthCount.toLocaleString()} from sets)`}
               {pageCount > 1 && ` · page ${currentPage} of ${pageCount}`}
             </>
           )}
@@ -157,14 +222,11 @@ export default async function MetricHistoryPage({
       )}
       {!computed && synthCount > 0 && (
         <p className="mb-6 text-[0.8125rem] text-muted border-l-2 border-border pl-3">
-          {synthCount.toLocaleString()} additional readings are synthesized at
-          read time from workout_sets (one reading per rep, value = added
-          weight). They drive charts and goal progress but are not editable
-          from this page — edit the underlying sets via the{" "}
-          <Link href="/data/exercises" className="underline hover:text-foreground">
-            exercises tab
-          </Link>
-          .
+          {synthCount.toLocaleString()} of these readings are synthesized at
+          read time from workout_sets (one row per rep, value = added
+          weight). They appear in the table below tagged{" "}
+          <code className="font-mono">workout_set</code> and read-only —
+          click the source label to open the parent event for edits.
         </p>
       )}
       <MetricTargetEditor
