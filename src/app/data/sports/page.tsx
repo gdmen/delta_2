@@ -1,10 +1,25 @@
 import { db } from "@/db";
 import { sports, events, focuses, goals } from "@/db/schema";
-import { and, eq, like, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { SportsTable } from "./sports-table";
 import { DataTabShell } from "@/components/data-tab-shell";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Orphan = name carries a `<source>:<rawName>` prefix from auto-import.
+ * Detected purely by the colon — any prefix counts (strava, apple_health,
+ * bodyspec, future sources). Canonical sport names don't include colons.
+ */
+function isOrphanName(name: string): boolean {
+  return name.includes(":");
+}
+
+/** Strip the `<source>:` prefix to recover the raw label. */
+function suffixOf(name: string): string {
+  const idx = name.indexOf(":");
+  return idx === -1 ? name : name.slice(idx + 1);
+}
 
 export default async function SportsPage() {
   // One round-trip: left-join each dependent table, aggregate in SQL.
@@ -32,30 +47,40 @@ export default async function SportsPage() {
     .groupBy(sports.id)
     .orderBy(sql`COUNT(DISTINCT ${events.id}) DESC`);
 
-  const data = rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    color: r.color,
-    eventCount: Number(r.eventCount),
-    focusCount: Number(r.focusCount),
-    goalCount: Number(r.goalCount),
-    lastEventAt: r.lastEventAt,
-  }));
+  // Build a case-insensitive lookup of canonical (non-orphan) names so we
+  // can suggest a merge target for orphans whose suffix matches one. Cheap:
+  // sports table is small and we already have it in memory.
+  const canonicalByLower = new Map<string, { id: number; name: string }>();
+  for (const r of rows) {
+    if (!isOrphanName(r.name)) {
+      canonicalByLower.set(r.name.toLowerCase(), { id: r.id, name: r.name });
+    }
+  }
 
-  // Source-prefixed orphans: rows the importers auto-created that the user
-  // hasn't yet merged into a canonical name. The badge nudges merging
-  // without baking opinionated mappings into the importer code.
-  const orphanRows = await db
-    .select({ c: sql<number>`count(*)` })
-    .from(sports)
-    .where(
-      or(
-        like(sports.name, "strava:%"),
-        like(sports.name, "apple_health:%"),
-        like(sports.name, "bodyspec:%"),
-      ),
-    );
-  const orphanCount = Number(orphanRows[0]?.c ?? 0);
+  const data = rows.map((r) => {
+    const orphan = isOrphanName(r.name);
+    // Suggested merge target: orphan whose suffix (case-folded) matches an
+    // existing canonical. e.g. `strava:Running` -> suggest `running` if the
+    // user already has it. Returns null when no match — the user merges by
+    // hand the first time, the second source's matching orphan auto-suggests.
+    const suggestion =
+      orphan
+        ? canonicalByLower.get(suffixOf(r.name).toLowerCase()) ?? null
+        : null;
+    return {
+      id: r.id,
+      name: r.name,
+      color: r.color,
+      eventCount: Number(r.eventCount),
+      focusCount: Number(r.focusCount),
+      goalCount: Number(r.goalCount),
+      lastEventAt: r.lastEventAt,
+      isOrphan: orphan,
+      suggestedTarget: suggestion,
+    };
+  });
+
+  const orphanCount = data.filter((r) => r.isOrphan).length;
 
   return (
     <DataTabShell
@@ -69,8 +94,9 @@ export default async function SportsPage() {
           {orphanCount} unmerged
           <span className="text-muted">
             {" "}
-            — auto-created from imports. Select rows below and merge into a
-            canonical name.
+            — auto-created from imports. Tagged{" "}
+            <span className="text-accent-orange">auto</span> below; matching
+            canonicals get a → suggestion. Select two or more rows to merge.
           </span>
         </div>
       )}

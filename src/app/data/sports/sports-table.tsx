@@ -12,6 +12,14 @@ interface SportRow {
   focusCount: number;
   goalCount: number;
   lastEventAt: string | null;
+  /** True when the name carries a `<source>:` prefix from auto-import. */
+  isOrphan: boolean;
+  /**
+   * Existing canonical sport whose name matches this orphan's suffix
+   * (case-insensitive). Rendered inline as a "→ canonical" hint so the
+   * user can spot likely merges without scanning the whole table.
+   */
+  suggestedTarget: { id: number; name: string } | null;
 }
 
 export function SportsTable({ rows }: { rows: SportRow[] }) {
@@ -30,13 +38,29 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           header: "Sport",
           className: "font-mono",
           render: (r) => (
-            <>
+            <div className="flex items-center gap-2 flex-wrap">
               <span
-                className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
+                className="inline-block w-2 h-2 rounded-full align-middle shrink-0"
                 style={{ backgroundColor: r.color }}
               />
-              {r.name}
-            </>
+              <span>{r.name}</span>
+              {r.isOrphan && (
+                <span
+                  className="font-mono text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent-orange/40 text-accent-orange"
+                  title="Auto-created on import. Merge into a canonical sport."
+                >
+                  auto
+                </span>
+              )}
+              {r.suggestedTarget && (
+                <span className="text-[0.6875rem] text-muted">
+                  → suggests{" "}
+                  <span className="text-foreground">
+                    {r.suggestedTarget.name}
+                  </span>
+                </span>
+              )}
+            </div>
           ),
         },
         {
