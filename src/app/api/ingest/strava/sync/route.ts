@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { sports, ingestConfigs } from "@/db/schema";
+import { ingestConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
-import { mapStravaType } from "@/lib/strava/mapping";
 import { upsertEvent, upsertEventMetric } from "@/lib/ingest-service";
 import { buildMetricTypeCache, MetricTypeCache } from "@/lib/ingest/metric-resolver";
+import { buildSportCache, resolveSportId, SportCache } from "@/lib/ingest/sport-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
 // Strava emits SI (meters). distance_km for the canonical metric;
@@ -25,7 +25,6 @@ interface SyncResult {
   fetched: number;
   accepted: number;
   skipped: number;
-  unmappedTypes: Record<string, number>;
   errors: string[];
 }
 
@@ -67,17 +66,17 @@ export async function POST(request: NextRequest) {
     afterUnix = Math.floor(fallback / 1000);
   }
 
-  // Preload sport name → id, and metric_type cache (used for attaching
-  // distance/elevation event_metrics).
-  const allSports = await db.select().from(sports);
-  const sportIdByName = new Map(allSports.map((s) => [s.name, s.id]));
+  // Sport cache feeds resolveSportId; metric_type cache attaches
+  // canonical per-event metrics (distance_km, elevation_gain_m, etc.).
+  // Sport names that don't already exist auto-create as `strava:<sport_type>`
+  // — see src/lib/ingest/sport-resolver.ts for the rationale.
+  const sportCache = await buildSportCache();
   const typeCache = await buildMetricTypeCache();
 
   const result: SyncResult = {
     fetched: 0,
     accepted: 0,
     skipped: 0,
-    unmappedTypes: {},
     errors: [],
   };
 
@@ -86,7 +85,7 @@ export async function POST(request: NextRequest) {
   try {
     for await (const activity of iterateActivities(afterUnix)) {
       result.fetched++;
-      await ingestOne(activity, sportIdByName, typeCache, result, tracker);
+      await ingestOne(activity, sportCache, typeCache, result, tracker);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
@@ -109,24 +108,27 @@ export async function POST(request: NextRequest) {
 
 async function ingestOne(
   activity: StravaActivity,
-  sportIdByName: Map<string, number>,
+  sportCache: SportCache,
   typeCache: MetricTypeCache,
   result: SyncResult,
   tracker: ReconcileTracker
 ): Promise<void> {
-  const mapping = mapStravaType(activity.type, activity.sport_type);
-  if (!mapping) {
-    const key = activity.sport_type ?? activity.type;
-    result.unmappedTypes[key] = (result.unmappedTypes[key] ?? 0) + 1;
+  // Strava's `sport_type` is newer/more specific than `type`; prefer it
+  // when present. Falling back to `type` covers older activities that
+  // predate the sport_type field.
+  const rawSport = activity.sport_type ?? activity.type;
+  if (!rawSport) {
     result.skipped++;
     return;
   }
 
-  const sportId = sportIdByName.get(mapping.sport);
-  if (!sportId) {
-    result.errors.push(`No sport row for '${mapping.sport}' - run seed.`);
-    return;
-  }
+  // Auto-create the sport if it's never been seen. The user merges
+  // `strava:Ride` etc. into canonical names via /data/sports.
+  const sportId = await resolveSportId({
+    rawName: rawSport,
+    sourceSystem: "strava",
+    cache: sportCache,
+  });
 
   // Compose notes from activity metadata that doesn't fit the schema columns.
   const notesParts: string[] = [];
@@ -148,7 +150,9 @@ async function ingestOne(
     const sourceId = `strava-${activity.id}`;
     const { status, eventId } = await upsertEvent({
       sportId,
-      type: mapping.type,
+      // Raw Strava sport_type / type goes into events.type verbatim.
+      // No canonical translation — events.type is a free-text label.
+      type: rawSport,
       durationMinutes: Math.round((activity.moving_time ?? activity.elapsed_time ?? 0) / 60),
       notes,
       startedAt: activity.start_date,

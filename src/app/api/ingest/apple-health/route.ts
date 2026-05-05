@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateApiKey } from "@/lib/auth";
 import { batchUpsertMetrics, upsertEvent, MetricInput } from "@/lib/ingest-service";
-import { db } from "@/db";
-import { sports } from "@/db/schema";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
+import { buildSportCache, resolveSportId } from "@/lib/ingest/sport-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
 /**
@@ -45,22 +44,17 @@ import { ReconcileTracker } from "@/lib/reconcile";
  * `hae-<metric-or-workout>-<iso-date>` which is stable across re-exports.
  */
 
-// HAE metric-name routing lives in the `metric_type_aliases` DB table now
-// (seeded in migration 0006 with the former hardcoded values). Users edit
-// it via the merge UI on /data and the per-alias remove button on each
-// metric detail page. Resolver checks aliases before auto-creating orphans.
-
-// HAE workout `name` (matches HKWorkoutActivityType display name) →
-// (sport_name, event_type).
-const WORKOUT_NAME_MAP: Record<string, { sport: string; type: string }> = {
-  "Running": { sport: "running", type: "run" },
-  "Cycling": { sport: "biking", type: "ride" },
-  "Hiking": { sport: "hiking", type: "hike" },
-  "Walking": { sport: "hiking", type: "walk" },
-  "Traditional Strength Training": { sport: "powerlifting", type: "strength" },
-  "Functional Strength Training": { sport: "powerlifting", type: "strength" },
-  "Martial Arts": { sport: "bjj", type: "session" },
-};
+// HAE metric-name routing lives in the `metric_type_aliases` DB table.
+// Users edit it via the merge UI on /data and the per-alias remove
+// button on each metric detail page. Resolver checks aliases before
+// auto-creating `apple_health:<rawName>` orphans.
+//
+// HAE workout names (matches HKWorkoutActivityType display name) used to
+// translate to canonical sports + event types via a hardcoded map.
+// As of 2026-05-05 they auto-create `apple_health:<workoutName>` sport
+// rows the same way metric_types do; the user merges them into clean
+// canonicals (e.g. "Running" → existing or new `running`) via /data/sports.
+// events.type stores the raw workout name verbatim.
 
 interface HAEMetricPoint {
   date: string;
@@ -123,8 +117,7 @@ export async function POST(request: NextRequest) {
   const typeNameById = new Map<number, string>();
   for (const [name, id] of typeCache.byName) typeNameById.set(id, name);
 
-  const allSports = await db.select().from(sports);
-  const sportByName = new Map(allSports.map((s) => [s.name, s.id]));
+  const sportCache = await buildSportCache();
 
   const inputs: MetricInput[] = [];
 
@@ -198,17 +191,22 @@ export async function POST(request: NextRequest) {
 
   let workoutsAccepted = 0;
   let workoutsSkipped = 0;
-  const unknownWorkoutNames: string[] = [];
   const workoutErrors: string[] = [];
 
   for (const w of workoutsIn) {
-    const mapping = WORKOUT_NAME_MAP[w.name];
-    if (!mapping) {
-      if (!unknownWorkoutNames.includes(w.name)) unknownWorkoutNames.push(w.name);
+    if (!w.name) {
+      workoutsSkipped++;
       continue;
     }
-    const sportId = sportByName.get(mapping.sport);
-    if (!sportId) continue;
+
+    // Auto-create the sport on first encounter. Raw HAE name (e.g.
+    // "Running", "Martial Arts") becomes `apple_health:<name>` until
+    // the user merges it into a canonical sport via /data/sports.
+    const sportId = await resolveSportId({
+      rawName: w.name,
+      sourceSystem: "apple_health",
+      cache: sportCache,
+    });
 
     const startIso = normalizeDate(w.start);
     const durationMin =
@@ -220,7 +218,9 @@ export async function POST(request: NextRequest) {
       const sourceId = `hae-workout-${w.name}-${startIso}`;
       const { status } = await upsertEvent({
         sportId,
-        type: mapping.type,
+        // events.type holds the raw HAE workout name verbatim. No
+        // canonical translation — user can rename via the event editor.
+        type: w.name,
         durationMinutes: durationMin,
         notes: null,
         startedAt: startIso,
@@ -244,7 +244,6 @@ export async function POST(request: NextRequest) {
       skipped: workoutsSkipped,
       errors: workoutErrors,
     },
-    unknownWorkoutNames,
     reconcile,
   });
 }

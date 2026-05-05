@@ -113,7 +113,6 @@ export function Sidebar({ dashboards }: SidebarProps) {
         <Section label="Quick Add">
           <NavItem href="/input/goal" label="+ New Goal" active={false} />
           <NavItem href="/input/metric" label="+ New Metric" active={false} />
-          <NavItem href="/input/bjj" label="+ Log BJJ Session" active={false} />
         </Section>
       </nav>
     </>

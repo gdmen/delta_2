@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { sports, events, focuses, goals } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, like, or, sql } from "drizzle-orm";
 import { SportsTable } from "./sports-table";
 import { DataTabShell } from "@/components/data-tab-shell";
 
@@ -42,6 +42,21 @@ export default async function SportsPage() {
     lastEventAt: r.lastEventAt,
   }));
 
+  // Source-prefixed orphans: rows the importers auto-created that the user
+  // hasn't yet merged into a canonical name. The badge nudges merging
+  // without baking opinionated mappings into the importer code.
+  const orphanRows = await db
+    .select({ c: sql<number>`count(*)` })
+    .from(sports)
+    .where(
+      or(
+        like(sports.name, "strava:%"),
+        like(sports.name, "apple_health:%"),
+        like(sports.name, "bodyspec:%"),
+      ),
+    );
+  const orphanCount = Number(orphanRows[0]?.c ?? 0);
+
   return (
     <DataTabShell
       active="sports"
@@ -49,6 +64,16 @@ export default async function SportsPage() {
       label="Sports"
       count={{ value: data.length, unit: data.length === 1 ? "sport" : "sports" }}
     >
+      {orphanCount > 0 && (
+        <div className="mb-3 text-[0.6875rem] font-mono text-accent-orange">
+          {orphanCount} unmerged
+          <span className="text-muted">
+            {" "}
+            — auto-created from imports. Select rows below and merge into a
+            canonical name.
+          </span>
+        </div>
+      )}
       <SportsTable rows={data} />
     </DataTabShell>
   );

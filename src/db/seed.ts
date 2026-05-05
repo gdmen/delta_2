@@ -1,24 +1,26 @@
 import { db } from "./index";
-import { sports, metricTypes, workoutSets } from "./schema";
+import { metricTypes, sports, workoutSets } from "./schema";
 import { eq, sql } from "drizzle-orm";
 import { slugifyExercise } from "../lib/computed-metrics";
 
 // NOTE: Delta's canonical metric_types are also seeded by migration
 // 0006_redundant_bullseye.sql so every DB has them regardless of whether
 // this script is run. Keep the two lists in sync when adding canonicals.
-
-const SPORTS = [
-  { name: "powerlifting", color: "#2563eb" },
-  { name: "bjj", color: "#db2777" },
-  { name: "running", color: "#059669" },
-  { name: "hiking", color: "#7c3aed" },
-  { name: "biking", color: "#d97706" },
-];
+//
+// Sports are NOT seeded. They auto-create on first import via
+// src/lib/ingest/sport-resolver.ts as `<source>:<rawName>` (e.g.
+// `strava:Ride`, `apple_health:Hiking`); the user merges them into
+// canonical names via /data/sports. Migration 0021 deletes any
+// previously-seeded canonicals that no rows reference.
 
 const METRIC_TYPES = [
-  { name: "bench_1rm", unit: "lb", frequencyHint: "weekly" as const },
-  { name: "squat_1rm", unit: "lb", frequencyHint: "weekly" as const },
-  { name: "deadlift_1rm", unit: "lb", frequencyHint: "weekly" as const },
+  // Note: bench_1rm / squat_1rm / deadlift_1rm were seeded primitives in
+  // earlier versions. Removed 2026-05-04 — equivalent computed metrics
+  // (e.g. flat_barbell_bench_press_e1rm, barbell_back_squat_max) are
+  // auto-seeded from workout_sets in seedComputedMetricTypes() and carry
+  // strictly more information (per-day max e1RM, lifetime PR step graph,
+  // etc.). Migration 0020 deletes them from existing DBs and re-points
+  // any goal that targeted them.
   { name: "bodyweight", unit: "lb", frequencyHint: "daily" as const },
   { name: "body_fat_pct", unit: "%", frequencyHint: "occasional" as const },
   { name: "lean_mass", unit: "lb", frequencyHint: "occasional" as const },
@@ -43,11 +45,6 @@ const METRIC_TYPES = [
 ];
 
 async function seed() {
-  console.log("Seeding sports...");
-  for (const sport of SPORTS) {
-    await db.insert(sports).values(sport).onConflictDoNothing();
-  }
-
   console.log("Seeding metric types...");
   for (const mt of METRIC_TYPES) {
     await db.insert(metricTypes).values(mt).onConflictDoNothing();
