@@ -8,10 +8,19 @@ interface Sport {
   name: string;
 }
 
-export function NewEventForm({ sports }: { sports: Sport[] }) {
+export function NewEventForm({
+  sports,
+  typesBySport,
+}: {
+  sports: Sport[];
+  typesBySport: Record<number, string[]>;
+}) {
   const router = useRouter();
   const [sportId, setSportId] = useState<number>(sports[0]?.id ?? 0);
-  const [type, setType] = useState("strength");
+  const typeSuggestions = typesBySport[sportId] ?? [];
+  // Default to the most common existing type for the chosen sport so the
+  // form lands in a useful state. Free-text fallback for anything new.
+  const [type, setType] = useState(typeSuggestions[0] ?? "");
   const [startedAt, setStartedAt] = useState(() => localDatetimeValue(new Date()));
   const [durationMinutes, setDurationMinutes] = useState("");
   const [notes, setNotes] = useState("");
@@ -62,7 +71,14 @@ export function NewEventForm({ sports }: { sports: Sport[] }) {
       <Field label="Sport">
         <select
           value={sportId}
-          onChange={(e) => setSportId(Number(e.target.value))}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setSportId(next);
+            // Re-seed the type with the most common existing type for the
+            // newly-picked sport so the field stays consistent with the
+            // selection. Empty string when the sport has no events yet.
+            setType((typesBySport[next] ?? [])[0] ?? "");
+          }}
           className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
         >
           {sports.map((s) => (
@@ -77,9 +93,24 @@ export function NewEventForm({ sports }: { sports: Sport[] }) {
           type="text"
           value={type}
           onChange={(e) => setType(e.target.value)}
-          placeholder="e.g. strength, run, ride, class"
+          list="event-type-suggestions"
+          placeholder={
+            typeSuggestions.length > 0
+              ? `e.g. ${typeSuggestions.slice(0, 3).join(", ")}`
+              : "e.g. strength, run, ride, class"
+          }
           className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem]"
         />
+        <datalist id="event-type-suggestions">
+          {typeSuggestions.map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
+        {typeSuggestions.length > 0 && (
+          <p className="mt-1 text-[0.6875rem] font-mono text-muted">
+            existing types for this sport: {typeSuggestions.join(", ")}
+          </p>
+        )}
       </Field>
       <Field label="Started at">
         <input
