@@ -40,7 +40,20 @@ export function MetricTrend({
     );
   }
 
-  const data = samples.map((s) => ({
+  // Per-rep synthesized data (workout_sets fanout in metric-history) can hit
+  // a few thousand samples sharing per-set timestamps — Recharts will render
+  // each as a separate SVG element and Firefox stalls past ~3K. Above the
+  // threshold we collapse to one point per day with the day's max value,
+  // which is also a more informative chart shape (peak lift per day) than a
+  // cloud of identical points. Below the threshold, the input is rendered
+  // verbatim — small daily-cadence metrics (sleep, weight) are unaffected.
+  const HEAVY_THRESHOLD = 365;
+  const collapsed =
+    samples.length > HEAVY_THRESHOLD
+      ? collapseToDailyMax(samples)
+      : samples;
+
+  const data = collapsed.map((s) => ({
     ts: new Date(s.date).getTime(),
     value: s.value,
   }));
@@ -119,13 +132,51 @@ export function MetricTrend({
             dataKey="value"
             stroke={color}
             strokeWidth={1.5}
-            dot={{ r: 2, fill: color }}
+            // Dots are decorative on dense series and dominate render cost
+            // (one SVG circle per point). Drop them above the heavy
+            // threshold; keep the small per-point dots on sparse series
+            // where they read as data marks.
+            dot={data.length > HEAVY_THRESHOLD ? false : { r: 2, fill: color }}
             activeDot={{ r: 4 }}
+            // Animation cost scales with the number of segments. Off
+            // unconditionally — animating a dashboard chart is jarring
+            // anyway; the page already loaded, the line should just be
+            // there.
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
+}
+
+/**
+ * Walk the (already date-sorted) sample array and emit one row per
+ * calendar day with that day's max value. Used as a decimation pass for
+ * dense / per-rep series before handing them to Recharts. O(n), one
+ * allocation per distinct day.
+ */
+function collapseToDailyMax(
+  samples: Sample[],
+): Sample[] {
+  const out: Sample[] = [];
+  let currentDay = "";
+  let currentMax = -Infinity;
+  let currentRepresentative = "";
+  for (const s of samples) {
+    const day = s.date.slice(0, 10);
+    if (day !== currentDay) {
+      if (currentDay) out.push({ date: currentRepresentative, value: currentMax });
+      currentDay = day;
+      currentMax = s.value;
+      currentRepresentative = s.date;
+    } else if (s.value > currentMax) {
+      currentMax = s.value;
+      currentRepresentative = s.date;
+    }
+  }
+  if (currentDay) out.push({ date: currentRepresentative, value: currentMax });
+  return out;
 }
 
 /**
