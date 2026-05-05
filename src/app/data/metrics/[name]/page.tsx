@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { metrics, metricTypes, metricTypeAliases, workoutSets } from "@/db/schema";
+import {
+  eventMetrics,
+  goals,
+  metrics,
+  metricTypes,
+  metricTypeAliases,
+  workoutSets,
+} from "@/db/schema";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 import { MetricTargetEditor } from "./target-editor";
+import { DeleteMetricTypeButton } from "./delete-button";
 import { PaginationControls } from "@/components/pagination-controls";
 import { describeComputedSource, matchComputed } from "@/lib/computed-metrics";
 
@@ -63,6 +71,26 @@ export default async function MetricHistoryPage({
     .from(workoutSets)
     .where(eq(workoutSets.exerciseMetricTypeId, type.id));
   const synthCount = Number(synthRow[0]?.reps ?? 0);
+
+  // Reference counts that gate deletion. The DELETE endpoint repeats
+  // these checks server-side, but we use them here to decide whether
+  // to render the delete button at all.
+  const [wsRefRow, emRefRow, goalRefRow] = await Promise.all([
+    db.select({ c: sql<number>`count(*)` }).from(workoutSets).where(eq(workoutSets.exerciseMetricTypeId, type.id)),
+    db.select({ c: sql<number>`count(*)` }).from(eventMetrics).where(eq(eventMetrics.metricTypeId, type.id)),
+    db.select({ c: sql<number>`count(*)` }).from(goals).where(eq(goals.metricTypeId, type.id)),
+  ]);
+  const refCounts = {
+    metrics: total,
+    workoutSets: Number(wsRefRow[0]?.c ?? 0),
+    eventMetrics: Number(emRefRow[0]?.c ?? 0),
+    goals: Number(goalRefRow[0]?.c ?? 0),
+  };
+  const isDeletable =
+    refCounts.metrics === 0 &&
+    refCounts.workoutSets === 0 &&
+    refCounts.eventMetrics === 0 &&
+    refCounts.goals === 0;
 
   const rows = await db
     .select({
@@ -177,6 +205,9 @@ export default async function MetricHistoryPage({
           linkWithPage={linkWithPage}
           className="mt-4"
         />
+      )}
+      {isDeletable && (
+        <DeleteMetricTypeButton metricTypeId={type.id} metricName={type.name} />
       )}
     </div>
   );
