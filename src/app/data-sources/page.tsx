@@ -8,12 +8,12 @@ import { formatShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-type Status = "ready" | "coming-soon" | "manual-only";
+type Status = "ready" | "coming-soon";
 
 interface Row {
   status: Status;
   title: string;
-  sourceKey: string | null; // metrics/events.source value, or null for manual-only rows
+  sourceKey: string | null; // metrics/events.source value, or null for non-source rows
   href: string; // where to go for setup + data details; ignored for "coming-soon" rows
 }
 
@@ -37,24 +37,6 @@ const ROWS: Row[] = [
     title: "BodySpec DEXA",
     sourceKey: "bodyspec_dexa",
     href: "/data-sources/bodyspec",
-  },
-  {
-    status: "manual-only",
-    title: "Goals",
-    sourceKey: null,
-    href: "/goals",
-  },
-  {
-    status: "manual-only",
-    title: "Focuses",
-    sourceKey: null,
-    href: "/focuses",
-  },
-  {
-    status: "manual-only",
-    title: "BJJ Sessions",
-    sourceKey: null,
-    href: "/input/bjj",
   },
   {
     status: "coming-soon",
@@ -81,8 +63,8 @@ export default async function DataSourcesPage() {
   const activity = await getSourceActivity();
 
   // Dynamically fold user-defined import sources into the table. Inserted
-  // between the built-in "ready" integrations and the manual-only rows so
-  // they sit alongside the real data pipelines.
+  // between the built-in "ready" integrations and the "coming soon" tail
+  // so they sit alongside the real data pipelines.
   const customSources = await db
     .select()
     .from(importSources)
@@ -98,7 +80,7 @@ export default async function DataSourcesPage() {
   const rows: Row[] = [
     ...ROWS.slice(0, 3),        // Apple Health, Strava, BodySpec
     ...customRows,              // user-defined
-    ...ROWS.slice(3),           // manual-only + coming-soon
+    ...ROWS.slice(3),           // coming-soon
   ];
 
   return (
@@ -120,8 +102,8 @@ export default async function DataSourcesPage() {
           <div className="hidden sm:block text-right">Latest</div>
         </div>
 
-        {/* Data rows - ready + manual-only rows are clickable; coming-soon ones
-            are static so they don't imply clickability. */}
+        {/* Data rows - ready rows are clickable; coming-soon ones are static
+            so they don't imply clickability. */}
         {rows.map((row) => {
           const act = row.sourceKey ? activity[row.sourceKey] : null;
           const totalRows = act ? act.metricRowCount + act.eventRowCount : 0;
@@ -202,10 +184,6 @@ function StatusBadge({ status }: { status: Status }) {
     "coming-soon": {
       text: "SOON",
       classes: "text-muted border-muted",
-    },
-    "manual-only": {
-      text: "MANUAL",
-      classes: "text-sport-pl border-sport-pl",
     },
   }[status];
 
