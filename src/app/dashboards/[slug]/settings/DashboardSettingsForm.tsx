@@ -55,8 +55,7 @@ export function DashboardSettingsForm({ dashboard, sports }: Props) {
       }
       // If the slug changed, the URL we're on is now stale.
       const newSlug = json.dashboard.slug;
-      const target = newSlug === "today" ? "/" : `/dashboards/${newSlug}`;
-      router.push(`${target}/settings`);
+      router.push(`/dashboards/${newSlug}/settings`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

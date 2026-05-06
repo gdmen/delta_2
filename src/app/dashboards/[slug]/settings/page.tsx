@@ -25,7 +25,7 @@ export default async function DashboardSettingsPage({
     .from(sports)
     .orderBy(asc(sports.name));
 
-  const backHref = slug === "today" ? "/" : `/dashboards/${slug}`;
+  const backHref = `/dashboards/${slug}`;
 
   return (
     <div className="max-w-[36rem]">

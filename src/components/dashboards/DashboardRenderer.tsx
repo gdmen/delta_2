@@ -48,7 +48,7 @@ export async function DashboardRenderer({
 
   const data = await runDataDeps(collectDataDeps(parsedWidgets.map((p) => p.deps)));
 
-  const viewHref = dashboard.slug === "today" ? "/" : `/dashboards/${dashboard.slug}`;
+  const viewHref = `/dashboards/${dashboard.slug}`;
   const editHref = `${viewHref}?edit=1`;
   const settingsHref = `/dashboards/${dashboard.slug}/settings`;
 

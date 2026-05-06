@@ -5,9 +5,8 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import type { DashboardRow } from "@/lib/dashboards/row-types";
 
-/** "Today" links to / instead of /dashboards/today; everywhere else goes to the canonical slug route. */
 function dashboardHref(slug: string): string {
-  return slug === "today" ? "/" : `/dashboards/${slug}`;
+  return `/dashboards/${slug}`;
 }
 
 interface SidebarProps {
@@ -130,15 +129,8 @@ function DashboardsSection({
     <Section label="Dashboards">
       {dashboards.map((d) => {
         const href = dashboardHref(d.slug);
-        // Match the dashboard route AND its settings sub-route. Today is
-        // special-cased because its href is `/`, which would startsWith every
-        // path — we explicitly compare against the canonical /dashboards/today
-        // path (used by the settings page) for the sub-route check.
-        const subRouteBase = d.slug === "today" ? "/dashboards/today" : href;
-        const active =
-          pathname === href ||
-          pathname === subRouteBase ||
-          pathname.startsWith(`${subRouteBase}/`);
+        // Match the dashboard route AND its settings sub-route.
+        const active = pathname === href || pathname.startsWith(`${href}/`);
         return <NavItem key={d.id} href={href} label={d.name} active={active} />;
       })}
       <Link
