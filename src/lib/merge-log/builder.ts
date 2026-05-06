@@ -1,5 +1,6 @@
 import {
   metricTypes,
+  metricTypeAliases,
   metrics,
   eventMetrics,
   goals,
@@ -152,6 +153,17 @@ export function buildMetricTypeMergedEntry(
     .all()
     .map((r) => r.id);
 
+  // Aliases currently pointing at the merged type. The merge re-points
+  // them to canonical (instead of letting the FK cascade-delete them),
+  // so chain-merges keep all source-prefixed names routed to the final
+  // canonical.
+  const aliasesRepointed = tx
+    .select({ alias: metricTypeAliases.alias })
+    .from(metricTypeAliases)
+    .where(eq(metricTypeAliases.canonicalMetricTypeId, mergedId))
+    .all()
+    .map((r) => r.alias);
+
   return {
     row,
     scale,
@@ -161,6 +173,7 @@ export function buildMetricTypeMergedEntry(
     goalsMovedIds,
     journalEntriesMovedIds,
     workoutSetsMovedIds,
+    aliasesRepointed,
   };
 }
 

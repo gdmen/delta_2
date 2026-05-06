@@ -79,6 +79,38 @@ describe("buildMetricTypeMergePayload", () => {
     const round = JSON.parse(JSON.stringify(payload));
     expect(round).toEqual(payload);
   });
+
+  it("round-trips aliasesRepointed (chain-merge regression)", () => {
+    // The merge route re-points existing aliases from merged → canonical
+    // (instead of letting the FK CASCADE DELETE them). The undo path
+    // needs to point them back at the (re-inserted) merged row, so the
+    // captured list MUST survive the JSON round-trip into payload.
+    const payload = buildMetricTypeMergePayload(3, [
+      {
+        row: {
+          id: 1,
+          name: "fitnotes_bodyweight:weight",
+          unit: "lb",
+          sportId: null,
+          frequencyHint: "daily" as const,
+          target: null,
+          higherIsBetter: true,
+        },
+        scale: 1,
+        metricsMovedIds: [],
+        eventMetricsMovedIds: [],
+        eventMetricsDeleted: [],
+        goalsMovedIds: [],
+        journalEntriesMovedIds: [],
+        workoutSetsMovedIds: [],
+        aliasesRepointed: ["fitnotes_bodytracker:weight"],
+      },
+    ]);
+    const round = JSON.parse(JSON.stringify(payload));
+    expect(round.merged[0].aliasesRepointed).toEqual([
+      "fitnotes_bodytracker:weight",
+    ]);
+  });
 });
 
 describe("buildSportMergePayload", () => {

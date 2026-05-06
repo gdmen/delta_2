@@ -49,6 +49,12 @@ export interface MetricTypeMergedEntry {
   journalEntriesMovedIds: number[];
   /** workout_sets.exercise_metric_type_id rewires. */
   workoutSetsMovedIds: number[];
+  /** Aliases that previously pointed at the merged metric_type and got
+   * re-pointed to canonical so chain-merges don't lose them to the FK
+   * CASCADE DELETE. Undo points them back at the (re-inserted) merged
+   * row. Optional for backward-compat with v1 payloads written before
+   * this field existed; absent = empty list. */
+  aliasesRepointed?: string[];
 }
 
 export interface MetricTypeMergePayloadV1 {

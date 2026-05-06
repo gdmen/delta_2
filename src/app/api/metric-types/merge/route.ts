@@ -235,17 +235,31 @@ export async function POST(request: NextRequest) {
         .returning({ id: workoutSets.id })
         .all();
 
-      // Record the alias so future ingests route here directly.
+      // Re-point any aliases that pointed AT the merged type to canonical
+      // BEFORE the metric_types delete. Otherwise the alias FK's
+      // ON DELETE CASCADE would silently drop them. That matters for
+      // chain merges: if `src1:weight` was aliased to A, and A is now
+      // being merged into B, future ingests of `src1:weight` must route
+      // to B — not auto-create an orphan.
+      tx
+        .update(metricTypeAliases)
+        .set({ canonicalMetricTypeId: canonicalId })
+        .where(eq(metricTypeAliases.canonicalMetricTypeId, mergeId))
+        .run();
+
+      // Record the alias so future ingests route here directly. Goes
+      // after the re-point so a no-op ON CONFLICT path is fine if
+      // `merged.name` was already in the table from a prior merge.
       tx
         .insert(metricTypeAliases)
         .values({ alias: merged.name, canonicalMetricTypeId: canonicalId })
         .onConflictDoNothing()
         .run();
 
-      // ON DELETE CASCADE on the alias FK auto-cleans any aliases that
-      // pointed AT this merged type. All FK references (metrics, event_metrics,
-      // daily_summaries, goals, focus_metric_links, workout_sets) were retargeted
-      // above, so this delete has nothing holding it back.
+      // All FK references (metrics, event_metrics, daily_summaries, goals,
+      // focus_metric_links, workout_sets) were retargeted above, and aliases
+      // pointing at this row were re-pointed (not cascade-deleted), so the
+      // delete has nothing holding it back.
       tx.delete(metricTypes).where(eq(metricTypes.id, mergeId)).run();
 
       out.push({

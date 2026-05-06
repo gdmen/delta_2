@@ -161,11 +161,23 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
     GROUP BY substr(recorded_at, 1, 10), metric_type_id
   `);
 
-  // 6. Delete each alias inserted by the merge.
+  // 6. Delete each alias inserted by the merge, then re-point aliases
+  //    that were re-pointed from merged → canonical back to merged.
+  //    Order matters: if `merged.row.name` happens to coincide with one
+  //    of the re-pointed aliases (i.e., merged.row.name was already an
+  //    alias before this merge), we want the re-point to win — delete
+  //    first, then UPDATE recreates the row keyed by alias.
   for (const m of payload.merged) {
     tx.delete(metricTypeAliases)
       .where(eq(metricTypeAliases.alias, m.row.name))
       .run();
+    const repointed = m.aliasesRepointed ?? [];
+    if (repointed.length > 0) {
+      tx.update(metricTypeAliases)
+        .set({ canonicalMetricTypeId: m.row.id })
+        .where(inArray(metricTypeAliases.alias, repointed))
+        .run();
+    }
   }
 }
 
