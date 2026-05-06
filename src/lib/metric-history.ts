@@ -50,12 +50,17 @@ function isDailyAggregate(
   return computed !== null || type?.frequencyHint === "daily";
 }
 
-/** Start-of-today in server-local time, ISO. Server colocates with the
- * single user, so local-time matches the user's "today". */
-function startOfTodayLocalIso(): string {
+/** Start-of-today in server-local time, as epoch ms. Server colocates
+ * with the single user, so local-time matches the user's "today". Epoch
+ * ms (not ISO string) because two ISO strings for the same instant in
+ * different offsets — e.g. `2026-05-05T00:00:00-07:00` and the
+ * equivalent `2026-05-05T07:00:00.000Z` — sort differently as strings
+ * but are equal as instants. The first form is what Apple Health writes
+ * for daily metrics; lexicographic compare wrongly lets it through. */
+function startOfTodayLocalMs(): number {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return d.getTime();
 }
 
 function excludeTodayIfDaily(
@@ -64,8 +69,8 @@ function excludeTodayIfDaily(
   computed: Array<{ date: string; value: number }> | null,
 ): Array<{ date: string; value: number }> {
   if (!isDailyAggregate(type, computed)) return samples;
-  const cutoff = startOfTodayLocalIso();
-  return samples.filter((s) => s.date < cutoff);
+  const cutoffMs = startOfTodayLocalMs();
+  return samples.filter((s) => Date.parse(s.date) < cutoffMs);
 }
 
 /**
