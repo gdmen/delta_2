@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { metricTypes } from "@/db/schema";
 import { upsertMetric } from "@/lib/ingest-service";
 import { ReconcileTracker } from "@/lib/reconcile";
+import {
+  buildMetricTypeCache,
+  resolveMetricTypeId,
+} from "@/lib/ingest/metric-resolver";
 
 /**
  * POST /api/ingest/bodyspec-dexa/save
@@ -12,17 +14,26 @@ import { ReconcileTracker } from "@/lib/reconcile";
  * the user can opt out of any field they don't trust by clearing it in
  * the review form.
  *
- * Every metric_type written here is `body_spec:*` — the source-prefix
- * pattern matches sports auto-import. The user can later alias-merge
- * `body_spec:bodyweight` into a canonical `bodyweight` via the existing
- * merge UI when other DEXA sources show up.
+ * Each value resolves to a metric_types.id via the shared
+ * `resolveMetricTypeId` helper — same path used by Strava, Apple Health,
+ * and the CSV importer. That gives BodySpec the same name handling as
+ * every other source:
+ *
+ *   1. Direct hit on `bodyspec_dexa:lean_mass` (the canonical orphan
+ *      created on first import).
+ *   2. Alias hit when the user has merged `bodyspec_dexa:lean_mass`
+ *      into a canonical like `lean_mass` — the resolver routes to the
+ *      canonical id automatically. (The original BodySpec save did a
+ *      naive byName lookup that missed this case and silently dropped
+ *      the field.)
+ *   3. Auto-create the orphan if neither hit. No seed step needed; the
+ *      first import populates the catalog organically, just like the
+ *      other importers.
  *
  * Source IDs use the unprefixed canonical short name as the stem
- * (`bodyspec-2016-02-25-body_fat_pct`). This keeps the IDs stable even
- * as the metric_type names changed in this refactor — `upsertMetric`'s
- * source_id-keyed dedup means a re-upload UPDATEs in place rather than
- * creating duplicates. See the plan's Idempotency section for the full
- * argument.
+ * (e.g., `bodyspec-2016-02-25-body_fat_pct`). Stable across re-imports
+ * so `upsertMetric` UPDATEs the existing row instead of inserting a
+ * duplicate.
  */
 
 interface SaveBody {
@@ -93,75 +104,75 @@ interface SaveBody {
 type FieldKey = keyof Omit<SaveBody, "scan_date">;
 
 /**
- * One row per save-body field:
- *  - `metric`     : metric_types.name (always `body_spec:*` here).
- *  - `sourceIdKey`: the unprefixed canonical short name used in the
- *    `bodyspec-${date}-${sourceIdKey}` source_id stem. Kept stable across
- *    schema changes so existing rows from past saves match by source_id
- *    and get UPDATEd instead of duplicated.
+ * SaveBody field key → { rawName, unit }.
+ *  - rawName: unprefixed canonical short name. Doubles as the resolver's
+ *    `rawName` and the source_id stem. The full metric_type name is
+ *    `bodyspec_dexa:<rawName>`, built at resolution time so the prefix
+ *    lives in exactly one place (SOURCE_SYSTEM below).
+ *  - unit: passed to resolver's auto-create so freshly-minted rows have
+ *    the right unit. Without this they default to "" and a later merge
+ *    into a unit-bearing canonical (`lean_mass` → "lb") trips the
+ *    unit-mismatch guard.
  */
-const FIELD_TO_METRIC: Record<FieldKey, { metric: string; sourceIdKey: string }> = {
-  // Total composition + supplemental
-  body_weight_lb: { metric: "body_spec:bodyweight", sourceIdKey: "bodyweight" },
-  body_fat_pct: { metric: "body_spec:body_fat_pct", sourceIdKey: "body_fat_pct" },
-  lean_mass_lb: { metric: "body_spec:lean_mass", sourceIdKey: "lean_mass" },
-  fat_mass_lb: { metric: "body_spec:fat_mass", sourceIdKey: "fat_mass" },
-  bone_mineral_content_lb: { metric: "body_spec:bone_mineral_content", sourceIdKey: "bone_mineral_content" },
-  bone_mineral_density: { metric: "body_spec:bone_mineral_density", sourceIdKey: "bone_mineral_density" },
-  visceral_fat_lb: { metric: "body_spec:visceral_fat_mass", sourceIdKey: "visceral_fat_mass" },
-  vat_volume_in3: { metric: "body_spec:vat_volume", sourceIdKey: "vat_volume" },
-  t_score: { metric: "body_spec:t_score", sourceIdKey: "t_score" },
-  z_score: { metric: "body_spec:z_score", sourceIdKey: "z_score" },
-  rmr_kcal: { metric: "body_spec:rmr_kcal", sourceIdKey: "rmr_kcal" },
-  ag_ratio: { metric: "body_spec:ag_ratio", sourceIdKey: "ag_ratio" },
-  height_in: { metric: "body_spec:height", sourceIdKey: "height" },
-
-  // Regional
-  arms_fat_pct: { metric: "body_spec:arms_fat_pct", sourceIdKey: "arms_fat_pct" },
-  arms_total_mass_lb: { metric: "body_spec:arms_total_mass", sourceIdKey: "arms_total_mass" },
-  arms_fat_mass_lb: { metric: "body_spec:arms_fat_mass", sourceIdKey: "arms_fat_mass" },
-  arms_lean_mass_lb: { metric: "body_spec:arms_lean_mass", sourceIdKey: "arms_lean_mass" },
-  arms_bmc_lb: { metric: "body_spec:arms_bmc", sourceIdKey: "arms_bmc" },
-  legs_fat_pct: { metric: "body_spec:legs_fat_pct", sourceIdKey: "legs_fat_pct" },
-  legs_total_mass_lb: { metric: "body_spec:legs_total_mass", sourceIdKey: "legs_total_mass" },
-  legs_fat_mass_lb: { metric: "body_spec:legs_fat_mass", sourceIdKey: "legs_fat_mass" },
-  legs_lean_mass_lb: { metric: "body_spec:legs_lean_mass", sourceIdKey: "legs_lean_mass" },
-  legs_bmc_lb: { metric: "body_spec:legs_bmc", sourceIdKey: "legs_bmc" },
-  trunk_fat_pct: { metric: "body_spec:trunk_fat_pct", sourceIdKey: "trunk_fat_pct" },
-  trunk_total_mass_lb: { metric: "body_spec:trunk_total_mass", sourceIdKey: "trunk_total_mass" },
-  trunk_fat_mass_lb: { metric: "body_spec:trunk_fat_mass", sourceIdKey: "trunk_fat_mass" },
-  trunk_lean_mass_lb: { metric: "body_spec:trunk_lean_mass", sourceIdKey: "trunk_lean_mass" },
-  trunk_bmc_lb: { metric: "body_spec:trunk_bmc", sourceIdKey: "trunk_bmc" },
-  android_fat_pct: { metric: "body_spec:android_fat_pct", sourceIdKey: "android_fat_pct" },
-  android_total_mass_lb: { metric: "body_spec:android_total_mass", sourceIdKey: "android_total_mass" },
-  android_fat_mass_lb: { metric: "body_spec:android_fat_mass", sourceIdKey: "android_fat_mass" },
-  android_lean_mass_lb: { metric: "body_spec:android_lean_mass", sourceIdKey: "android_lean_mass" },
-  android_bmc_lb: { metric: "body_spec:android_bmc", sourceIdKey: "android_bmc" },
-  gynoid_fat_pct: { metric: "body_spec:gynoid_fat_pct", sourceIdKey: "gynoid_fat_pct" },
-  gynoid_total_mass_lb: { metric: "body_spec:gynoid_total_mass", sourceIdKey: "gynoid_total_mass" },
-  gynoid_fat_mass_lb: { metric: "body_spec:gynoid_fat_mass", sourceIdKey: "gynoid_fat_mass" },
-  gynoid_lean_mass_lb: { metric: "body_spec:gynoid_lean_mass", sourceIdKey: "gynoid_lean_mass" },
-  gynoid_bmc_lb: { metric: "body_spec:gynoid_bmc", sourceIdKey: "gynoid_bmc" },
-
-  // Per-region BMD
-  head_bmd: { metric: "body_spec:head_bmd", sourceIdKey: "head_bmd" },
-  arms_bmd: { metric: "body_spec:arms_bmd", sourceIdKey: "arms_bmd" },
-  legs_bmd: { metric: "body_spec:legs_bmd", sourceIdKey: "legs_bmd" },
-  trunk_bmd: { metric: "body_spec:trunk_bmd", sourceIdKey: "trunk_bmd" },
-  ribs_bmd: { metric: "body_spec:ribs_bmd", sourceIdKey: "ribs_bmd" },
-  spine_bmd: { metric: "body_spec:spine_bmd", sourceIdKey: "spine_bmd" },
-  pelvis_bmd: { metric: "body_spec:pelvis_bmd", sourceIdKey: "pelvis_bmd" },
-
-  // Muscle balance
-  right_arm_lean_mass_lb: { metric: "body_spec:right_arm_lean_mass", sourceIdKey: "right_arm_lean_mass" },
-  right_arm_fat_mass_lb: { metric: "body_spec:right_arm_fat_mass", sourceIdKey: "right_arm_fat_mass" },
-  left_arm_lean_mass_lb: { metric: "body_spec:left_arm_lean_mass", sourceIdKey: "left_arm_lean_mass" },
-  left_arm_fat_mass_lb: { metric: "body_spec:left_arm_fat_mass", sourceIdKey: "left_arm_fat_mass" },
-  right_leg_lean_mass_lb: { metric: "body_spec:right_leg_lean_mass", sourceIdKey: "right_leg_lean_mass" },
-  right_leg_fat_mass_lb: { metric: "body_spec:right_leg_fat_mass", sourceIdKey: "right_leg_fat_mass" },
-  left_leg_lean_mass_lb: { metric: "body_spec:left_leg_lean_mass", sourceIdKey: "left_leg_lean_mass" },
-  left_leg_fat_mass_lb: { metric: "body_spec:left_leg_fat_mass", sourceIdKey: "left_leg_fat_mass" },
+const FIELD_TO_RAW: Record<FieldKey, { rawName: string; unit: string }> = {
+  body_weight_lb: { rawName: "bodyweight", unit: "lb" },
+  body_fat_pct: { rawName: "body_fat_pct", unit: "%" },
+  lean_mass_lb: { rawName: "lean_mass", unit: "lb" },
+  fat_mass_lb: { rawName: "fat_mass", unit: "lb" },
+  bone_mineral_content_lb: { rawName: "bone_mineral_content", unit: "lb" },
+  bone_mineral_density: { rawName: "bone_mineral_density", unit: "g/cm²" },
+  visceral_fat_lb: { rawName: "visceral_fat_mass", unit: "lb" },
+  vat_volume_in3: { rawName: "vat_volume", unit: "in³" },
+  t_score: { rawName: "t_score", unit: "" },
+  z_score: { rawName: "z_score", unit: "" },
+  rmr_kcal: { rawName: "rmr_kcal", unit: "kcal/day" },
+  ag_ratio: { rawName: "ag_ratio", unit: "" },
+  height_in: { rawName: "height", unit: "in" },
+  arms_fat_pct: { rawName: "arms_fat_pct", unit: "%" },
+  arms_total_mass_lb: { rawName: "arms_total_mass", unit: "lb" },
+  arms_fat_mass_lb: { rawName: "arms_fat_mass", unit: "lb" },
+  arms_lean_mass_lb: { rawName: "arms_lean_mass", unit: "lb" },
+  arms_bmc_lb: { rawName: "arms_bmc", unit: "lb" },
+  legs_fat_pct: { rawName: "legs_fat_pct", unit: "%" },
+  legs_total_mass_lb: { rawName: "legs_total_mass", unit: "lb" },
+  legs_fat_mass_lb: { rawName: "legs_fat_mass", unit: "lb" },
+  legs_lean_mass_lb: { rawName: "legs_lean_mass", unit: "lb" },
+  legs_bmc_lb: { rawName: "legs_bmc", unit: "lb" },
+  trunk_fat_pct: { rawName: "trunk_fat_pct", unit: "%" },
+  trunk_total_mass_lb: { rawName: "trunk_total_mass", unit: "lb" },
+  trunk_fat_mass_lb: { rawName: "trunk_fat_mass", unit: "lb" },
+  trunk_lean_mass_lb: { rawName: "trunk_lean_mass", unit: "lb" },
+  trunk_bmc_lb: { rawName: "trunk_bmc", unit: "lb" },
+  android_fat_pct: { rawName: "android_fat_pct", unit: "%" },
+  android_total_mass_lb: { rawName: "android_total_mass", unit: "lb" },
+  android_fat_mass_lb: { rawName: "android_fat_mass", unit: "lb" },
+  android_lean_mass_lb: { rawName: "android_lean_mass", unit: "lb" },
+  android_bmc_lb: { rawName: "android_bmc", unit: "lb" },
+  gynoid_fat_pct: { rawName: "gynoid_fat_pct", unit: "%" },
+  gynoid_total_mass_lb: { rawName: "gynoid_total_mass", unit: "lb" },
+  gynoid_fat_mass_lb: { rawName: "gynoid_fat_mass", unit: "lb" },
+  gynoid_lean_mass_lb: { rawName: "gynoid_lean_mass", unit: "lb" },
+  gynoid_bmc_lb: { rawName: "gynoid_bmc", unit: "lb" },
+  head_bmd: { rawName: "head_bmd", unit: "g/cm²" },
+  arms_bmd: { rawName: "arms_bmd", unit: "g/cm²" },
+  legs_bmd: { rawName: "legs_bmd", unit: "g/cm²" },
+  trunk_bmd: { rawName: "trunk_bmd", unit: "g/cm²" },
+  ribs_bmd: { rawName: "ribs_bmd", unit: "g/cm²" },
+  spine_bmd: { rawName: "spine_bmd", unit: "g/cm²" },
+  pelvis_bmd: { rawName: "pelvis_bmd", unit: "g/cm²" },
+  right_arm_lean_mass_lb: { rawName: "right_arm_lean_mass", unit: "lb" },
+  right_arm_fat_mass_lb: { rawName: "right_arm_fat_mass", unit: "lb" },
+  left_arm_lean_mass_lb: { rawName: "left_arm_lean_mass", unit: "lb" },
+  left_arm_fat_mass_lb: { rawName: "left_arm_fat_mass", unit: "lb" },
+  right_leg_lean_mass_lb: { rawName: "right_leg_lean_mass", unit: "lb" },
+  right_leg_fat_mass_lb: { rawName: "right_leg_fat_mass", unit: "lb" },
+  left_leg_lean_mass_lb: { rawName: "left_leg_lean_mass", unit: "lb" },
+  left_leg_fat_mass_lb: { rawName: "left_leg_fat_mass", unit: "lb" },
 };
+
+// Source value on the metrics row AND the metric_type prefix. They match
+// — same convention as `apple_health:*` / `strava:*` / per-CSV.
+const SOURCE_SYSTEM = "bodyspec_dexa";
 
 export async function POST(request: NextRequest) {
   let body: SaveBody;
@@ -175,17 +186,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "scan_date must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const allMetricTypes = await db.select().from(metricTypes);
-  const typeByName = new Map(allMetricTypes.map((m) => [m.name, m.id]));
-
+  const cache = await buildMetricTypeCache();
   const recordedAt = `${body.scan_date}T12:00:00Z`;
   const saved: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
   const tracker = new ReconcileTracker();
 
-  for (const [field, { metric, sourceIdKey }] of Object.entries(FIELD_TO_METRIC) as Array<
-    [FieldKey, (typeof FIELD_TO_METRIC)[FieldKey]]
+  for (const [field, { rawName, unit }] of Object.entries(FIELD_TO_RAW) as Array<
+    [FieldKey, (typeof FIELD_TO_RAW)[FieldKey]]
   >) {
     const value = body[field];
     if (value === null || value === undefined) {
@@ -197,29 +206,37 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const typeId = typeByName.get(metric);
-    if (!typeId) {
-      errors.push(`${metric}: metric type missing from DB (run seed)`);
-      continue;
-    }
-
     try {
-      const sourceId = `bodyspec-${body.scan_date}-${sourceIdKey}`;
+      // Resolver: direct → alias → auto-create. The map points the raw
+      // name at the prefixed canonical so a populated catalog hits
+      // directly; merges + cold runs route through the alias and
+      // auto-create paths respectively. Unit lands on auto-created rows
+      // so a later merge into a unit-bearing canonical doesn't trip the
+      // unit-mismatch guard.
+      const typeId = await resolveMetricTypeId({
+        rawName,
+        map: { [rawName]: `${SOURCE_SYSTEM}:${rawName}` },
+        sourceSystem: SOURCE_SYSTEM,
+        unit,
+        cache,
+      });
+
+      const sourceId = `bodyspec-${body.scan_date}-${rawName}`;
       await upsertMetric({
         metricTypeId: typeId,
         value,
         recordedAt,
-        source: "bodyspec_dexa",
+        source: SOURCE_SYSTEM,
         sourceId,
       });
       tracker.recordMetric(typeId, sourceId, recordedAt);
-      saved.push(metric);
+      saved.push(rawName);
     } catch (err) {
-      errors.push(`${metric}: ${err instanceof Error ? err.message : String(err)}`);
+      errors.push(`${rawName}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  const reconcile = await tracker.apply("bodyspec_dexa");
+  const reconcile = await tracker.apply(SOURCE_SYSTEM);
 
   return NextResponse.json({
     scanDate: body.scan_date,
