@@ -110,11 +110,6 @@ export function Sidebar({ dashboards }: SidebarProps) {
           <NavItem href="/data" label="Data" active={pathname === "/data"} />
           <NavItem href="/preferences" label="Preferences" active={pathname === "/preferences"} />
         </Section>
-
-        <Section label="Quick Add">
-          <NavItem href="/input/goal" label="+ New Goal" active={false} />
-          <NavItem href="/input/metric" label="+ New Metric" active={false} />
-        </Section>
       </nav>
     </>
   );
