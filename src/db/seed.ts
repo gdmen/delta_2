@@ -42,6 +42,73 @@ const METRIC_TYPES = [
   { name: "elevation_gain_m", unit: "m", frequencyHint: "occasional" as const },
   { name: "avg_hr", unit: "bpm", frequencyHint: "occasional" as const },
   { name: "max_hr", unit: "bpm", frequencyHint: "occasional" as const },
+
+  // BodySpec DEXA: 53 fields under the `body_spec:` prefix. Mirrors the
+  // <source>:<rawName> pattern used for sports auto-import. The user can
+  // alias-merge these into shared canonicals (`bodyweight`, etc.) via the
+  // existing merge UI when other DEXA sources show up. See
+  // src/lib/bodyspec/parse.ts for the extraction shape.
+
+  // -- Group A: total composition + supplemental (13)
+  { name: "body_spec:bodyweight", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:body_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:bone_mineral_density", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:visceral_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:bone_mineral_content", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:vat_volume", unit: "in³", frequencyHint: "occasional" as const },
+  { name: "body_spec:t_score", unit: "", frequencyHint: "occasional" as const },
+  { name: "body_spec:z_score", unit: "", frequencyHint: "occasional" as const },
+  { name: "body_spec:rmr_kcal", unit: "kcal/day", frequencyHint: "occasional" as const },
+  { name: "body_spec:ag_ratio", unit: "", frequencyHint: "occasional" as const },
+  { name: "body_spec:height", unit: "in", frequencyHint: "occasional" as const },
+
+  // -- Group B: per-region body comp (5 regions × 5 measures = 25)
+  { name: "body_spec:arms_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:arms_total_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:arms_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:arms_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:arms_bmc", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_total_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_bmc", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_total_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_bmc", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:android_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:android_total_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:android_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:android_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:android_bmc", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:gynoid_fat_pct", unit: "%", frequencyHint: "occasional" as const },
+  { name: "body_spec:gynoid_total_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:gynoid_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:gynoid_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:gynoid_bmc", unit: "lb", frequencyHint: "occasional" as const },
+
+  // -- Group C: per-region BMD (7)
+  { name: "body_spec:head_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:arms_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:legs_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:trunk_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:ribs_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:spine_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+  { name: "body_spec:pelvis_bmd", unit: "g/cm²", frequencyHint: "occasional" as const },
+
+  // -- Group D: muscle balance per side (8)
+  { name: "body_spec:right_arm_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:right_arm_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:left_arm_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:left_arm_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:right_leg_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:right_leg_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:left_leg_lean_mass", unit: "lb", frequencyHint: "occasional" as const },
+  { name: "body_spec:left_leg_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
 ];
 
 async function seed() {
