@@ -199,6 +199,21 @@ export const importSources = sqliteTable("import_sources", {
 });
 
 /**
+ * App-wide preferences. Single row by convention (`id = 1`). Migration
+ * 0022 inserts that row so reads can be unconditional.
+ *
+ * - `timezone`: IANA name (e.g. `America/Los_Angeles`). null falls back
+ *   to the JS runtime's resolved TZ. Used by metric-history to compute
+ *   the user's "today" when filtering daily-aggregate windows — without
+ *   it, a UTC server makes the wrong call for any user not on UTC.
+ */
+export const appSettings = sqliteTable("app_settings", {
+  id: integer("id").primaryKey().default(1),
+  timezone: text("timezone"),
+  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+});
+
+/**
  * Per-source config. Today: just the reconcile toggle. Future per-source
  * prefs fit here too. One row per `source` tag (matches the `source`
  * column on metrics/events).

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { events, metrics, metricTypes, workoutSets } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveComputedSamples } from "./computed-metrics";
+import { loadUserTimezone } from "./app-settings";
 
 export interface Series {
   samples: Array<{ date: string; value: number }>;
@@ -50,27 +51,26 @@ function isDailyAggregate(
   return computed !== null || type?.frequencyHint === "daily";
 }
 
-/** Start-of-today in server-local time, as epoch ms. Server colocates
- * with the single user, so local-time matches the user's "today". Epoch
- * ms (not ISO string) because two ISO strings for the same instant in
- * different offsets — e.g. `2026-05-05T00:00:00-07:00` and the
- * equivalent `2026-05-05T07:00:00.000Z` — sort differently as strings
- * but are equal as instants. The first form is what Apple Health writes
- * for daily metrics; lexicographic compare wrongly lets it through. */
-function startOfTodayLocalMs(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+/** YYYY-MM-DD calendar date for an instant, in a given IANA timezone. */
+function calendarDateInTz(when: Date | string, tz: string): string {
+  const d = typeof when === "string" ? new Date(when) : when;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
 function excludeTodayIfDaily(
   samples: Array<{ date: string; value: number }>,
   type: { frequencyHint: string | null } | null,
   computed: Array<{ date: string; value: number }> | null,
+  userTz: string,
 ): Array<{ date: string; value: number }> {
   if (!isDailyAggregate(type, computed)) return samples;
-  const cutoffMs = startOfTodayLocalMs();
-  return samples.filter((s) => Date.parse(s.date) < cutoffMs);
+  const today = calendarDateInTz(new Date(), userTz);
+  return samples.filter((s) => calendarDateInTz(s.date, userTz) < today);
 }
 
 /**
@@ -141,7 +141,7 @@ function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: 
  * Daily-aggregate metrics (computed families, frequencyHint === "daily")
  * drop today's still-mid-flight value. */
 export async function getAllHistory(metricName: string): Promise<Series> {
-  const type = await loadType(metricName);
+  const [type, userTz] = await Promise.all([loadType(metricName), loadUserTimezone()]);
 
   // Computed metrics are pattern-matched on name. They route around the
   // metrics + workout_sets fanout and return their own samples; metadata
@@ -149,7 +149,7 @@ export async function getAllHistory(metricName: string): Promise<Series> {
   // which is auto-seeded so it always exists.
   const computed = await resolveComputedSamples(metricName);
   if (computed !== null) {
-    return makeSeries(sortByDate(excludeTodayIfDaily(computed, type, computed)), type);
+    return makeSeries(sortByDate(excludeTodayIfDaily(computed, type, computed, userTz)), type);
   }
 
   if (!type) return makeSeries([], null);
@@ -162,7 +162,7 @@ export async function getAllHistory(metricName: string): Promise<Series> {
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
   const synthetic = await loadSyntheticSamples(type.id);
   return makeSeries(
-    sortByDate(excludeTodayIfDaily([...real, ...synthetic], type, computed)),
+    sortByDate(excludeTodayIfDaily([...real, ...synthetic], type, computed, userTz)),
     type,
   );
 }
@@ -171,7 +171,7 @@ export async function getAllHistory(metricName: string): Promise<Series> {
  * Daily-aggregate metrics (computed families, frequencyHint === "daily")
  * drop today's still-mid-flight value. */
 export async function getLastDays(metricName: string, days: number): Promise<Series> {
-  const type = await loadType(metricName);
+  const [type, userTz] = await Promise.all([loadType(metricName), loadUserTimezone()]);
 
   const since = new Date();
   since.setDate(since.getDate() - days);
@@ -180,7 +180,7 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
   const computed = await resolveComputedSamples(metricName);
   if (computed !== null) {
     return makeSeries(
-      sortByDate(excludeTodayIfDaily(filterSince(computed, sinceIso), type, computed)),
+      sortByDate(excludeTodayIfDaily(filterSince(computed, sinceIso), type, computed, userTz)),
       type,
     );
   }
@@ -196,7 +196,12 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
   const synthetic = await loadSyntheticSamples(type.id);
   return makeSeries(
     sortByDate(
-      excludeTodayIfDaily(filterSince([...real, ...synthetic], sinceIso), type, computed),
+      excludeTodayIfDaily(
+        filterSince([...real, ...synthetic], sinceIso),
+        type,
+        computed,
+        userTz,
+      ),
     ),
     type,
   );
