@@ -49,6 +49,15 @@ timeout 60 npx drizzle-kit migrate
 step "Running seed (idempotent)"
 timeout 60 npx tsx src/db/seed.ts
 
+step "Clearing stale .next build artifacts"
+# Next 15+ generates `.next/types/validator.ts` (typed-routes table) during
+# `next dev` / `next build`. Deleted source routes leave stale validator
+# entries pointing at missing pages, which the next tsc pass then fails on
+# (observed 2026-05-05: removing /input/bjj killed the deploy until the
+# validator was nuked). Clearing the whole `.next/` is cheap — the build
+# step below regenerates it from scratch.
+rm -rf .next
+
 step "Type-checking (gates the build)"
 # Diagnostics so the deploy log tells us if a future OOM is "Node didn't
 # get the heap flag" vs "kernel can't give that much physical memory".
