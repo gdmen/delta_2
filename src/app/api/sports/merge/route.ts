@@ -5,9 +5,15 @@ import {
   events,
   goals,
   metricTypes,
+  mergeLog,
 } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { parseMergeByIdBody } from "@/lib/merge-validation";
+import {
+  buildSportMergedEntry,
+  buildSportMergePayload,
+} from "@/lib/merge-log/builder";
+import type { SportMergedEntry } from "@/lib/merge-log/types";
 
 /**
  * POST /api/sports/merge
@@ -49,10 +55,18 @@ export async function POST(request: NextRequest) {
 
   type Report = { mergeId: number; name: string; eventsMoved: number };
 
+  const mergedEntries: SportMergedEntry[] = [];
+  let mergeLogId: number | null = null;
+
   const report: Report[] = db.transaction((tx) => {
     const out: Report[] = [];
     for (const mergeId of mergeIds) {
       const merged = byId.get(mergeId)!;
+
+      // Snapshot BEFORE the sport delete — dashboards.sport_id has
+      // ON DELETE SET NULL, so a post-delete read would always return
+      // empty. Capture mid-loop for multi-row merge correctness.
+      mergedEntries.push(buildSportMergedEntry(tx, mergeId));
 
       const eventsUpd = tx
         .update(events)
@@ -74,11 +88,28 @@ export async function POST(request: NextRequest) {
 
       out.push({ mergeId, name: merged.name, eventsMoved: eventsUpd.length });
     }
+
+    const payload = buildSportMergePayload(canonicalId, mergedEntries);
+    const mergedNames = mergedEntries.map((m) => m.row.name).join(", ");
+    const inserted = tx
+      .insert(mergeLog)
+      .values({
+        kind: "sport",
+        canonicalId,
+        canonicalName: canonical.name,
+        mergedNames,
+        payload: JSON.stringify(payload),
+      })
+      .returning({ id: mergeLog.id })
+      .all();
+    mergeLogId = inserted[0]?.id ?? null;
+
     return out;
   });
 
   return NextResponse.json({
     canonical: { id: canonical.id, name: canonical.name },
     merged: report,
+    mergeLogId,
   });
 }

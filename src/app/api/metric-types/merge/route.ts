@@ -9,9 +9,15 @@ import {
   goals,
   goalJournalEntries,
   workoutSets,
+  mergeLog,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { parseMergeByIdBody } from "@/lib/merge-validation";
+import {
+  buildMetricTypeMergedEntry,
+  buildMetricTypeMergePayload,
+} from "@/lib/merge-log/builder";
+import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
 
 /**
  * POST /api/metric-types/merge
@@ -108,11 +114,23 @@ export async function POST(request: NextRequest) {
     setsMoved: number;
   };
 
+  // Capture for the merge_log: one entry per mergeId, accumulated as we
+  // run the per-mergeId mutations. Snapshot must be captured BEFORE this
+  // mergeId's mutations (per-iteration, not pre-loop) because in a
+  // multi-row merge (A→C, B→C), B's snapshot must reflect post-A state.
+  const mergedEntries: MetricTypeMergedEntry[] = [];
+  let mergeLogId: number | null = null;
+
   const report: Report[] = db.transaction((tx) => {
     const out: Report[] = [];
     for (const mergeId of mergeIds) {
       const merged = byId.get(mergeId)!;
       const rescale = scales[mergeId] ?? 1;
+
+      // Snapshot BEFORE mutations for this mergeId.
+      mergedEntries.push(
+        buildMetricTypeMergedEntry(tx, canonicalId, mergeId, rescale),
+      );
 
       const metricsUpd = tx
         .update(metrics)
@@ -238,11 +256,30 @@ export async function POST(request: NextRequest) {
         setsMoved: setsUpd.length,
       });
     }
+
+    // Insert the merge_log row inside the same tx so a partial failure
+    // rolls back both mutations and log together.
+    const payload = buildMetricTypeMergePayload(canonicalId, mergedEntries);
+    const mergedNames = mergedEntries.map((m) => m.row.name).join(", ");
+    const inserted = tx
+      .insert(mergeLog)
+      .values({
+        kind: "metric_type",
+        canonicalId,
+        canonicalName: canonical.name,
+        mergedNames,
+        payload: JSON.stringify(payload),
+      })
+      .returning({ id: mergeLog.id })
+      .all();
+    mergeLogId = inserted[0]?.id ?? null;
+
     return out;
   });
 
   return NextResponse.json({
     canonical: { id: canonical.id, name: canonical.name },
     merged: report,
+    mergeLogId,
   });
 }

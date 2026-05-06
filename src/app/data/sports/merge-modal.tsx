@@ -24,7 +24,7 @@ export function SportsMergeModal({
   const [canonicalId, setCanonicalId] = useState<number>(
     pickMaxBy(candidates, (c) => c.eventCount).id,
   );
-  const { busy, error, submit } = useMergeSubmit("/api/sports/merge", onClose);
+  const { busy, error, submit } = useMergeSubmit("/api/sports/merge", onClose, "sport");
 
   const canonical = candidates.find((c) => c.id === canonicalId)!;
   const merged = candidates.filter((c) => c.id !== canonicalId);
@@ -108,8 +108,7 @@ export function SportsMergeModal({
           {merged.length === 1 ? "" : "s"} deleted.
         </div>
         <div className="text-muted text-[0.75rem] mt-2">
-          This cannot be undone. Consider backing up{" "}
-          <code className="font-mono">delta2.db</code> first.
+          You can undo this merge from Recent merges.
         </div>
       </div>
     </MergeModalShell>

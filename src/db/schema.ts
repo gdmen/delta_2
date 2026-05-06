@@ -214,6 +214,42 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 /**
+ * Audit log for merges (sport + metric_type). One row per merge call,
+ * inserted inside the same transaction that performs the merge so a
+ * failure rolls everything back together. Drives /data/merges and the
+ * inline undo toast.
+ *
+ * - `payload` is a versioned JSON blob (top-level `v: 1`) carrying
+ *   everything needed to reverse the merge. Snapshot includes the
+ *   merged metric_type/sport row data, the lists of FK row ids that
+ *   were re-pointed, deduped-and-deleted event_metrics rows, and the
+ *   rescale factor (if any). Daily_summaries is NOT in the payload —
+ *   it's recomputed from `metrics` on undo so post-merge ingest
+ *   survives.
+ * - `userId` is nullable and indexed alongside createdAt so the
+ *   future multi-user list query (`WHERE user_id = ? ORDER BY ...`)
+ *   stays efficient. NULL today (no auth/user table yet); when auth
+ *   lands the merge endpoints fill it in and the GET/undo endpoints
+ *   filter by it.
+ * - `undoneAt` flips from NULL to a timestamp via CAS at undo start
+ *   (TOCTOU-safe — concurrent double-undos see only one winner).
+ */
+export const mergeLog = sqliteTable("merge_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
+  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  canonicalId: integer("canonical_id").notNull(),
+  canonicalName: text("canonical_name").notNull(),
+  mergedNames: text("merged_names").notNull(),
+  payload: text("payload").notNull(),
+  undoneAt: text("undone_at"),
+  userId: integer("user_id"),
+}, (table) => [
+  index("idx_merge_log_created_at").on(table.createdAt),
+  index("idx_merge_log_user_id_created_at").on(table.userId, table.createdAt),
+]);
+
+/**
  * Per-source config. Today: just the reconcile toggle. Future per-source
  * prefs fit here too. One row per `source` tag (matches the `source`
  * column on metrics/events).

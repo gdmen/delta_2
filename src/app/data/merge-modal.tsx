@@ -25,7 +25,7 @@ export function MergeModal({
   );
   const [rescale, setRescale] = useState(false);
   const [scales, setScales] = useState<Record<number, string>>({});
-  const { busy, error, submit } = useMergeSubmit("/api/metric-types/merge", onClose);
+  const { busy, error, submit } = useMergeSubmit("/api/metric-types/merge", onClose, "metric_type");
 
   const canonical = candidates.find((c) => c.id === canonicalId)!;
   const merged = candidates.filter((c) => c.id !== canonicalId);
@@ -153,8 +153,7 @@ export function MergeModal({
           {merged.length === 1 ? "" : "s"} deleted and aliased.
         </div>
         <div className="text-muted text-[0.75rem] mt-2">
-          This cannot be undone. Consider backing up{" "}
-          <code className="font-mono">delta2.db</code> first.
+          You can undo this merge from Recent merges.
         </div>
       </div>
     </MergeModalShell>

@@ -2,12 +2,21 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { dispatchUndoToast } from "@/components/undo-toast";
 
 /**
  * Shared submit pattern for the merge modals: POST a JSON payload, manage
  * busy/error state, trigger router.refresh() + the supplied onSuccess on 2xx.
+ *
+ * On 2xx the response body is parsed for `mergeLogId` + `canonical` +
+ * `merged` and dispatched as a `delta:undo-toast` event so the global
+ * <UndoToastHost> can show the inline Undo affordance.
  */
-export function useMergeSubmit(url: string, onSuccess: () => void) {
+export function useMergeSubmit(
+  url: string,
+  onSuccess: () => void,
+  toastKind: "metric_type" | "sport",
+) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +38,19 @@ export function useMergeSubmit(url: string, onSuccess: () => void) {
           const j = await res.json().catch(() => ({}));
           throw new Error(j.error ?? `HTTP ${res.status}`);
         }
+        const json = (await res.json().catch(() => null)) as {
+          mergeLogId?: number;
+          canonical?: { id: number; name: string };
+          merged?: unknown[];
+        } | null;
+        if (json?.mergeLogId && json.canonical && Array.isArray(json.merged)) {
+          dispatchUndoToast({
+            mergeLogId: json.mergeLogId,
+            canonicalName: json.canonical.name,
+            mergedCount: json.merged.length,
+            kind: toastKind,
+          });
+        }
         router.refresh();
         setBusy(false);
         onSuccess();
@@ -37,7 +59,7 @@ export function useMergeSubmit(url: string, onSuccess: () => void) {
         setBusy(false);
       }
     },
-    [url, onSuccess, router],
+    [url, onSuccess, router, toastKind],
   );
 
   return { busy, error, submit };

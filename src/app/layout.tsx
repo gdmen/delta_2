@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
+import { UndoToastHost } from "@/components/undo-toast";
 import { loadAllDashboards } from "@/lib/dashboards/load";
 
 export const metadata: Metadata = {
@@ -25,6 +26,7 @@ export default async function RootLayout({
         <main className="md:ml-[200px] pt-16 md:pt-8 px-4 md:px-10 pb-8 max-w-[1400px]">
           {children}
         </main>
+        <UndoToastHost />
       </body>
     </html>
   );

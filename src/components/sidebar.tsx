@@ -107,6 +107,11 @@ export function Sidebar({ dashboards }: SidebarProps) {
         <Section label="Settings">
           <NavItem href="/data-sources" label="Sources" active={pathname === "/data-sources"} />
           <NavItem href="/data" label="Data" active={pathname === "/data"} />
+          <NavItem
+            href="/data/merges"
+            label="Recent merges"
+            active={pathname === "/data/merges"}
+          />
           <NavItem href="/preferences" label="Preferences" active={pathname === "/preferences"} />
         </Section>
       </nav>
