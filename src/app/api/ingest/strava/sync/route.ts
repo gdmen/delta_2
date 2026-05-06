@@ -177,9 +177,13 @@ async function ingestOne(
     if (typeof activity.max_heartrate === "number") {
       attach.push(["max_hr", Math.round(activity.max_heartrate)]);
     }
+    // Alias-aware lookup: byName covers the seeded canonical; aliasToId
+    // covers the case where the user merged the canonical (e.g.
+    // `distance_km` → `distance_total_km`). Without the fallback the
+    // attachment would silently drop on every future sync after a merge.
     await Promise.all(
       attach.map(([name, value]) => {
-        const id = typeCache.byName.get(name);
+        const id = typeCache.byName.get(name) ?? typeCache.aliasToId.get(name);
         return id === undefined ? undefined : upsertEventMetric(eventId, id, value);
       }),
     );

@@ -112,11 +112,6 @@ export async function POST(request: NextRequest) {
   const workoutsIn = payload.data?.workouts ?? [];
 
   const typeCache = await buildMetricTypeCache();
-  // Reverse lookup for source_id composition — preserves existing
-  // `hae-<canonical>-<iso>` source_ids so re-ingests still dedup correctly.
-  const typeNameById = new Map<number, string>();
-  for (const [name, id] of typeCache.byName) typeNameById.set(id, name);
-
   const sportCache = await buildSportCache();
 
   const inputs: MetricInput[] = [];
@@ -164,9 +159,13 @@ export async function POST(request: NextRequest) {
       cache: typeCache,
     });
 
-    // Compose source_id from the canonical metric_type name so it remains
-    // stable across HAE re-exports — same scheme as before aliases.
-    const canonicalName = typeNameById.get(typeId) ?? `apple_health:${m.name}`;
+    // Source ID stem is the RAW HAE metric name. Stable across user
+    // merges — if the user merges `apple_health:carbohydrates` into
+    // `carbs`, the resolved typeId changes (now points at `carbs` via
+    // the alias) but the source_id stays `hae-carbohydrates-${iso}`,
+    // so the next ingest UPDATEs the existing row instead of inserting
+    // a duplicate. Earlier code stemmed on the resolved canonical name
+    // and got bitten by that exact merge case.
     for (const p of m.data) {
       if (typeof p.qty !== "number") continue;
       const iso = normalizeDate(p.date);
@@ -175,7 +174,7 @@ export async function POST(request: NextRequest) {
         value: p.qty,
         recordedAt: iso,
         source: "apple_health",
-        sourceId: `hae-${canonicalName}-${iso}`,
+        sourceId: `hae-${m.name}-${iso}`,
       });
     }
   }
