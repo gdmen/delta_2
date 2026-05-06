@@ -44,6 +44,16 @@ export async function POST(request: NextRequest) {
   if (name.length > 120) {
     return NextResponse.json({ error: "name too long (max 120 chars)" }, { status: 400 });
   }
+  // Reserve `:` for source-imported metric names (`apple_health:HKFoo`,
+  // `body_spec:arms_fat_pct`, etc.). Manual creation must use unprefixed
+  // canonicals so the user merge UI stays unambiguous about which rows
+  // are auto-created vs. user-created.
+  if (name.includes(":")) {
+    return NextResponse.json(
+      { error: "name cannot contain ':' — that's reserved for source-imported metrics like body_spec:arms_fat_pct" },
+      { status: 400 },
+    );
+  }
 
   const unit = typeof b.unit === "string" ? b.unit.trim() : "";
   // Empty unit is valid (e.g. reps, count). Cap length to keep the column sane.

@@ -88,12 +88,19 @@ export default function NewMetricPage() {
             onChange={(e) => setName(e.target.value)}
             placeholder="overhead_1rm"
             autoFocus
+            pattern="[^:]*"
+            title="No colons — `:` is reserved for source-imported metrics like body_spec:arms_fat_pct"
             className="w-full px-3 py-1.5 border border-border rounded text-[0.875rem] font-mono"
             disabled={submitting}
           />
           <p className="text-[0.75rem] text-muted mt-1">
             Use snake_case for consistency with imported metrics. The name is
             also the route at <span className="font-mono">/data/metrics/[name]</span>.
+            <span className="block">
+              No <code className="font-mono">:</code> — that&apos;s reserved for
+              source-imported metrics like{" "}
+              <code className="font-mono">body_spec:arms_fat_pct</code>.
+            </span>
           </p>
         </div>
 
