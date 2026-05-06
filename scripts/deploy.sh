@@ -24,7 +24,21 @@ step "Fetching + hard-resetting to origin/main"
 # accidents. Hard reset avoids ff-only failures when someone tweaked a file
 # in-place (common during debugging) and guarantees the tree matches origin.
 git fetch origin
+PRE_RESET_HEAD=$(git rev-parse HEAD)
 git reset --hard origin/main
+POST_RESET_HEAD=$(git rev-parse HEAD)
+
+# Bash loads the running script into memory at parse time and won't pick up
+# in-place edits to deploy.sh during its own run (Linux file replace via
+# unlink+create leaves us holding the old inode). Re-exec from the new tree
+# the moment we know HEAD changed so any deploy.sh fix in this push takes
+# effect on the very deploy that pulled it. Guard with DELTA_DEPLOY_REEXECED
+# so we don't loop.
+if [[ "$PRE_RESET_HEAD" != "$POST_RESET_HEAD" && -z "${DELTA_DEPLOY_REEXECED:-}" ]]; then
+  echo "  HEAD moved $PRE_RESET_HEAD -> $POST_RESET_HEAD; re-exec'ing the fresh deploy.sh"
+  export DELTA_DEPLOY_REEXECED=1
+  exec "$REPO_ROOT/scripts/deploy.sh" "$@"
+fi
 
 step "Installing dependencies"
 npm ci
