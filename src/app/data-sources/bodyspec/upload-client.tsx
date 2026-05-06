@@ -7,13 +7,66 @@ import { FileDropZone } from "@/components/file-drop-zone";
 
 interface Extracted {
   scan_date: string | null;
+  height_in: number | null;
+  // Total composition + supplemental (13)
   body_weight_lb: number | null;
   body_fat_pct: number | null;
   lean_mass_lb: number | null;
   fat_mass_lb: number | null;
+  bone_mineral_content_lb: number | null;
   bone_mineral_density: number | null;
   visceral_fat_lb: number | null;
-  notes: string | null;
+  vat_volume_in3: number | null;
+  t_score: number | null;
+  z_score: number | null;
+  rmr_kcal: number | null;
+  ag_ratio: number | null;
+
+  // Regional 5x5 (25)
+  arms_fat_pct: number | null;
+  arms_total_mass_lb: number | null;
+  arms_fat_mass_lb: number | null;
+  arms_lean_mass_lb: number | null;
+  arms_bmc_lb: number | null;
+  legs_fat_pct: number | null;
+  legs_total_mass_lb: number | null;
+  legs_fat_mass_lb: number | null;
+  legs_lean_mass_lb: number | null;
+  legs_bmc_lb: number | null;
+  trunk_fat_pct: number | null;
+  trunk_total_mass_lb: number | null;
+  trunk_fat_mass_lb: number | null;
+  trunk_lean_mass_lb: number | null;
+  trunk_bmc_lb: number | null;
+  android_fat_pct: number | null;
+  android_total_mass_lb: number | null;
+  android_fat_mass_lb: number | null;
+  android_lean_mass_lb: number | null;
+  android_bmc_lb: number | null;
+  gynoid_fat_pct: number | null;
+  gynoid_total_mass_lb: number | null;
+  gynoid_fat_mass_lb: number | null;
+  gynoid_lean_mass_lb: number | null;
+  gynoid_bmc_lb: number | null;
+
+  // Bone density per region (7)
+  head_bmd: number | null;
+  arms_bmd: number | null;
+  legs_bmd: number | null;
+  trunk_bmd: number | null;
+  ribs_bmd: number | null;
+  spine_bmd: number | null;
+  pelvis_bmd: number | null;
+
+  // Muscle balance (8)
+  right_arm_lean_mass_lb: number | null;
+  right_arm_fat_mass_lb: number | null;
+  left_arm_lean_mass_lb: number | null;
+  left_arm_fat_mass_lb: number | null;
+  right_leg_lean_mass_lb: number | null;
+  right_leg_fat_mass_lb: number | null;
+  left_leg_lean_mass_lb: number | null;
+  left_leg_fat_mass_lb: number | null;
 }
 
 interface SaveResult {
@@ -369,20 +422,93 @@ export default function BodySpecUploadPage() {
                   className="font-mono text-[0.9375rem] px-3 py-2 border border-border rounded focus:outline-none focus:border-foreground"
                 />
               </Field>
+            </div>
+
+            {/* Sections collapse to keep the form scannable; Total
+                composition is open by default since those are the
+                always-watched values. Empty/cleared fields skip on save. */}
+            <SectionGroup label="Total composition" open>
               <NumField label="Body Weight" unit="lb" value={active.extracted.body_weight_lb} onChange={(v) => updateActiveField("body_weight_lb", v)} />
               <NumField label="Body Fat" unit="%" value={active.extracted.body_fat_pct} onChange={(v) => updateActiveField("body_fat_pct", v)} />
               <NumField label="Lean Mass" unit="lb" value={active.extracted.lean_mass_lb} onChange={(v) => updateActiveField("lean_mass_lb", v)} />
               <NumField label="Fat Mass" unit="lb" value={active.extracted.fat_mass_lb} onChange={(v) => updateActiveField("fat_mass_lb", v)} />
               <NumField label="Bone Mineral Density" unit="g/cm²" value={active.extracted.bone_mineral_density} onChange={(v) => updateActiveField("bone_mineral_density", v)} />
+              <NumField label="Bone Mineral Content" unit="lb" value={active.extracted.bone_mineral_content_lb} onChange={(v) => updateActiveField("bone_mineral_content_lb", v)} />
               <NumField label="Visceral Fat" unit="lb" value={active.extracted.visceral_fat_lb} onChange={(v) => updateActiveField("visceral_fat_lb", v)} />
-            </div>
+            </SectionGroup>
 
-            {active.extracted.notes && (
-              <div className="mb-6 p-3 bg-surface rounded text-[0.8125rem] text-text-secondary">
-                <div className="text-[0.6875rem] text-muted uppercase tracking-wider font-semibold mb-1">Notes from report</div>
-                {active.extracted.notes}
-              </div>
-            )}
+            <SectionGroup label="Supplemental">
+              <NumField label="RMR" unit="kcal/day" value={active.extracted.rmr_kcal} onChange={(v) => updateActiveField("rmr_kcal", v)} />
+              <NumField label="A/G Ratio" unit="" value={active.extracted.ag_ratio} onChange={(v) => updateActiveField("ag_ratio", v)} />
+              <NumField label="VAT Volume" unit="in³" value={active.extracted.vat_volume_in3} onChange={(v) => updateActiveField("vat_volume_in3", v)} />
+              <NumField label="Total T-Score" unit="" value={active.extracted.t_score} onChange={(v) => updateActiveField("t_score", v)} />
+              <NumField label="Total Z-Score" unit="" value={active.extracted.z_score} onChange={(v) => updateActiveField("z_score", v)} />
+              <NumField label="Height" unit="in" value={active.extracted.height_in} onChange={(v) => updateActiveField("height_in", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Regional — Arms">
+              <NumField label="Fat" unit="%" value={active.extracted.arms_fat_pct} onChange={(v) => updateActiveField("arms_fat_pct", v)} />
+              <NumField label="Total Mass" unit="lb" value={active.extracted.arms_total_mass_lb} onChange={(v) => updateActiveField("arms_total_mass_lb", v)} />
+              <NumField label="Fat Mass" unit="lb" value={active.extracted.arms_fat_mass_lb} onChange={(v) => updateActiveField("arms_fat_mass_lb", v)} />
+              <NumField label="Lean Mass" unit="lb" value={active.extracted.arms_lean_mass_lb} onChange={(v) => updateActiveField("arms_lean_mass_lb", v)} />
+              <NumField label="BMC" unit="lb" value={active.extracted.arms_bmc_lb} onChange={(v) => updateActiveField("arms_bmc_lb", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Regional — Legs">
+              <NumField label="Fat" unit="%" value={active.extracted.legs_fat_pct} onChange={(v) => updateActiveField("legs_fat_pct", v)} />
+              <NumField label="Total Mass" unit="lb" value={active.extracted.legs_total_mass_lb} onChange={(v) => updateActiveField("legs_total_mass_lb", v)} />
+              <NumField label="Fat Mass" unit="lb" value={active.extracted.legs_fat_mass_lb} onChange={(v) => updateActiveField("legs_fat_mass_lb", v)} />
+              <NumField label="Lean Mass" unit="lb" value={active.extracted.legs_lean_mass_lb} onChange={(v) => updateActiveField("legs_lean_mass_lb", v)} />
+              <NumField label="BMC" unit="lb" value={active.extracted.legs_bmc_lb} onChange={(v) => updateActiveField("legs_bmc_lb", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Regional — Trunk">
+              <NumField label="Fat" unit="%" value={active.extracted.trunk_fat_pct} onChange={(v) => updateActiveField("trunk_fat_pct", v)} />
+              <NumField label="Total Mass" unit="lb" value={active.extracted.trunk_total_mass_lb} onChange={(v) => updateActiveField("trunk_total_mass_lb", v)} />
+              <NumField label="Fat Mass" unit="lb" value={active.extracted.trunk_fat_mass_lb} onChange={(v) => updateActiveField("trunk_fat_mass_lb", v)} />
+              <NumField label="Lean Mass" unit="lb" value={active.extracted.trunk_lean_mass_lb} onChange={(v) => updateActiveField("trunk_lean_mass_lb", v)} />
+              <NumField label="BMC" unit="lb" value={active.extracted.trunk_bmc_lb} onChange={(v) => updateActiveField("trunk_bmc_lb", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Regional — Android">
+              <NumField label="Fat" unit="%" value={active.extracted.android_fat_pct} onChange={(v) => updateActiveField("android_fat_pct", v)} />
+              <NumField label="Total Mass" unit="lb" value={active.extracted.android_total_mass_lb} onChange={(v) => updateActiveField("android_total_mass_lb", v)} />
+              <NumField label="Fat Mass" unit="lb" value={active.extracted.android_fat_mass_lb} onChange={(v) => updateActiveField("android_fat_mass_lb", v)} />
+              <NumField label="Lean Mass" unit="lb" value={active.extracted.android_lean_mass_lb} onChange={(v) => updateActiveField("android_lean_mass_lb", v)} />
+              <NumField label="BMC" unit="lb" value={active.extracted.android_bmc_lb} onChange={(v) => updateActiveField("android_bmc_lb", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Regional — Gynoid">
+              <NumField label="Fat" unit="%" value={active.extracted.gynoid_fat_pct} onChange={(v) => updateActiveField("gynoid_fat_pct", v)} />
+              <NumField label="Total Mass" unit="lb" value={active.extracted.gynoid_total_mass_lb} onChange={(v) => updateActiveField("gynoid_total_mass_lb", v)} />
+              <NumField label="Fat Mass" unit="lb" value={active.extracted.gynoid_fat_mass_lb} onChange={(v) => updateActiveField("gynoid_fat_mass_lb", v)} />
+              <NumField label="Lean Mass" unit="lb" value={active.extracted.gynoid_lean_mass_lb} onChange={(v) => updateActiveField("gynoid_lean_mass_lb", v)} />
+              <NumField label="BMC" unit="lb" value={active.extracted.gynoid_bmc_lb} onChange={(v) => updateActiveField("gynoid_bmc_lb", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Bone density per region">
+              <NumField label="Head" unit="g/cm²" value={active.extracted.head_bmd} onChange={(v) => updateActiveField("head_bmd", v)} />
+              <NumField label="Arms" unit="g/cm²" value={active.extracted.arms_bmd} onChange={(v) => updateActiveField("arms_bmd", v)} />
+              <NumField label="Legs" unit="g/cm²" value={active.extracted.legs_bmd} onChange={(v) => updateActiveField("legs_bmd", v)} />
+              <NumField label="Trunk" unit="g/cm²" value={active.extracted.trunk_bmd} onChange={(v) => updateActiveField("trunk_bmd", v)} />
+              <NumField label="Ribs" unit="g/cm²" value={active.extracted.ribs_bmd} onChange={(v) => updateActiveField("ribs_bmd", v)} />
+              <NumField label="Spine" unit="g/cm²" value={active.extracted.spine_bmd} onChange={(v) => updateActiveField("spine_bmd", v)} />
+              <NumField label="Pelvis" unit="g/cm²" value={active.extracted.pelvis_bmd} onChange={(v) => updateActiveField("pelvis_bmd", v)} />
+            </SectionGroup>
+
+            <SectionGroup label="Muscle balance — left/right">
+              <NumField label="Right Arm Lean" unit="lb" value={active.extracted.right_arm_lean_mass_lb} onChange={(v) => updateActiveField("right_arm_lean_mass_lb", v)} />
+              <NumField label="Right Arm Fat" unit="lb" value={active.extracted.right_arm_fat_mass_lb} onChange={(v) => updateActiveField("right_arm_fat_mass_lb", v)} />
+              <NumField label="Left Arm Lean" unit="lb" value={active.extracted.left_arm_lean_mass_lb} onChange={(v) => updateActiveField("left_arm_lean_mass_lb", v)} />
+              <NumField label="Left Arm Fat" unit="lb" value={active.extracted.left_arm_fat_mass_lb} onChange={(v) => updateActiveField("left_arm_fat_mass_lb", v)} />
+              <NumField label="Right Leg Lean" unit="lb" value={active.extracted.right_leg_lean_mass_lb} onChange={(v) => updateActiveField("right_leg_lean_mass_lb", v)} />
+              <NumField label="Right Leg Fat" unit="lb" value={active.extracted.right_leg_fat_mass_lb} onChange={(v) => updateActiveField("right_leg_fat_mass_lb", v)} />
+              <NumField label="Left Leg Lean" unit="lb" value={active.extracted.left_leg_lean_mass_lb} onChange={(v) => updateActiveField("left_leg_lean_mass_lb", v)} />
+              <NumField label="Left Leg Fat" unit="lb" value={active.extracted.left_leg_fat_mass_lb} onChange={(v) => updateActiveField("left_leg_fat_mass_lb", v)} />
+            </SectionGroup>
+
+            <div className="mb-6" />
+
 
             <div className="flex flex-wrap gap-3">
               <button
@@ -455,6 +581,28 @@ function StatusDot({ status }: { status: ItemStatus }) {
     error: "bg-accent-red",
   }[status];
   return <div className={`w-2 h-2 rounded-full flex-shrink-0 ${color}`} />;
+}
+
+function SectionGroup({
+  label,
+  open,
+  children,
+}: {
+  label: string;
+  open?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      className="mb-3 border border-border rounded"
+      {...(open ? { open: true } : {})}
+    >
+      <summary className="cursor-pointer px-3 py-2 text-[0.75rem] font-mono uppercase tracking-wider text-muted hover:text-foreground select-none">
+        {label}
+      </summary>
+      <div className="px-3 pb-3 pt-1 space-y-3">{children}</div>
+    </details>
+  );
 }
 
 function Field({ label, unit, children }: { label: string; unit: string; children: React.ReactNode }) {
