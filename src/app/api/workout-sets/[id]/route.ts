@@ -37,12 +37,13 @@ export async function PATCH(
     // creation uses — known names route through aliases, unknown names
     // auto-create under `manual:<rawName>`.
     const cache = await buildMetricTypeCache();
-    updates.exerciseMetricTypeId = await resolveMetricTypeId({
+    const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
       rawName: body.exerciseName,
       map: { [body.exerciseName]: body.exerciseName },
       sourceSystem: "manual",
       cache,
     });
+    updates.exerciseMetricTypeId = exerciseMetricTypeId;
   }
   if (body.setNumber !== undefined) {
     if (typeof body.setNumber !== "number" || !Number.isFinite(body.setNumber)) {

@@ -11,7 +11,7 @@ import {
   events,
   dashboards,
 } from "@/db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type {
   MergeLogPayloadV1,
   MetricTypeMergePayloadV1,
@@ -134,6 +134,26 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
     }
   }
 
+  // 4b. CHAIN UNWIND: move metrics on canonical that came in via the
+  //     re-pointed aliases (or the new alias inserted by the merge,
+  //     which equals merged.row.name) back to merged_id. Without this,
+  //     a sequence of merge → ingest → merge → ingest → undo would
+  //     strand the post-merge ingests on canonical because they were
+  //     never in metricsMovedIds.
+  for (const m of payload.merged) {
+    const aliasKeys = [m.row.name, ...(m.aliasesRepointed ?? [])];
+    if (aliasKeys.length === 0) continue;
+    tx.update(metrics)
+      .set({ metricTypeId: m.row.id })
+      .where(
+        and(
+          eq(metrics.metricTypeId, canonicalId),
+          inArray(metrics.alias, aliasKeys),
+        ),
+      )
+      .run();
+  }
+
   // 5. RECOMPUTE daily_summaries from current `metrics` for all touched
   // metric_type ids. Post-merge ingest survives because it's already in
   // `metrics`. We delete + re-aggregate so historical rows don't drift.
@@ -161,21 +181,21 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
     GROUP BY substr(recorded_at, 1, 10), metric_type_id
   `);
 
-  // 6. Delete each alias inserted by the merge, then re-point aliases
-  //    that were re-pointed from merged → canonical back to merged.
-  //    Order matters: if `merged.row.name` happens to coincide with one
-  //    of the re-pointed aliases (i.e., merged.row.name was already an
-  //    alias before this merge), we want the re-point to win — delete
-  //    first, then UPDATE recreates the row keyed by alias.
+  // 6. Re-point aliases first (so the row exists for any merged.name
+  //    that ALSO happens to be in aliasesRepointed), then delete the
+  //    alias inserted by the merge — but only if it wasn't a
+  //    pre-existing one we just re-pointed back.
   for (const m of payload.merged) {
-    tx.delete(metricTypeAliases)
-      .where(eq(metricTypeAliases.alias, m.row.name))
-      .run();
     const repointed = m.aliasesRepointed ?? [];
     if (repointed.length > 0) {
       tx.update(metricTypeAliases)
         .set({ canonicalMetricTypeId: m.row.id })
         .where(inArray(metricTypeAliases.alias, repointed))
+        .run();
+    }
+    if (!repointed.includes(m.row.name)) {
+      tx.delete(metricTypeAliases)
+        .where(eq(metricTypeAliases.alias, m.row.name))
         .run();
     }
   }

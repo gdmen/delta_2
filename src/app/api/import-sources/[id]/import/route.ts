@@ -126,7 +126,7 @@ async function writeOutRow(
   tracker: ReconcileTracker
 ): Promise<void> {
   if (item.kind === "metric") {
-    const typeId = await resolveMetricTypeId({
+    const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
       rawName: item.metric,
       map: { [item.metric]: item.metric },
       sourceSystem: sourceTag,
@@ -141,6 +141,7 @@ async function writeOutRow(
       recordedAt: item.recordedAt,
       source: sourceTag,
       sourceId,
+      alias: typeAlias,
     };
     const status = await upsertMetric(input);
     tracker.recordMetric(typeId, sourceId, item.recordedAt);
@@ -179,7 +180,7 @@ async function writeOutRow(
 
     // Attach per-event dimensions (distance, calories, avg HR, etc.).
     for (const m of item.metrics ?? []) {
-      const typeId = await resolveMetricTypeId({
+      const { id: typeId } = await resolveMetricTypeId({
         rawName: m.metric,
         map: { [m.metric]: m.metric },
         sourceSystem: sourceTag,
@@ -257,7 +258,7 @@ async function writeOutRow(
 
     // Identity map routes the raw name to an existing canonical when one
     // exists, before falling through to the source-prefixed orphan path.
-    const exerciseMetricTypeId = await resolveMetricTypeId({
+    const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
       rawName: item.exerciseName,
       map: { [item.exerciseName]: item.exerciseName },
       sourceSystem: sourceTag,

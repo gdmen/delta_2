@@ -2,6 +2,13 @@ import { db } from "@/db";
 import { metrics, events, workoutSets, dailySummaries, eventMetrics } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 
+/**
+ * Type alias for the drizzle handle. Tests pass an in-memory instance
+ * via the optional last arg; production calls fall through to the
+ * shared `db` import.
+ */
+type DbLike = typeof db;
+
 export interface IngestResult {
   accepted: number;
   skipped: number;
@@ -14,6 +21,10 @@ export interface MetricInput {
   recordedAt: string;
   source: string;
   sourceId?: string | null;
+  /** Resolution alias key (e.g. "fitnotes_bt:weight"). REQUIRED for
+   * chain-undo coverage; pass the value the resolver returned, or
+   * null for manual entries that bypassed the resolver. */
+  alias: string | null;
 }
 
 export interface EventInput {
@@ -35,7 +46,13 @@ export interface WorkoutSetInput {
   notes?: string | null;
 }
 
-export async function upsertMetric(input: MetricInput): Promise<"accepted" | "skipped"> {
+export async function upsertMetric(
+  input: MetricInput,
+  conn: DbLike = db,
+): Promise<"accepted" | "skipped"> {
+  // Shadow `db` inside this function so all the existing query-builder
+  // calls flow through the (potentially overridden) `conn`.
+  const db = conn;
   if (input.sourceId) {
     const existing = await db.select({ id: metrics.id })
       .from(metrics)
@@ -44,7 +61,7 @@ export async function upsertMetric(input: MetricInput): Promise<"accepted" | "sk
 
     if (existing.length > 0) {
       await db.update(metrics)
-        .set({ value: input.value, recordedAt: input.recordedAt })
+        .set({ value: input.value, recordedAt: input.recordedAt, alias: input.alias })
         .where(eq(metrics.sourceId, input.sourceId));
       return "skipped";
     }
@@ -56,9 +73,10 @@ export async function upsertMetric(input: MetricInput): Promise<"accepted" | "sk
     recordedAt: input.recordedAt,
     source: input.source,
     sourceId: input.sourceId,
+    alias: input.alias,
   });
 
-  await invalidateDailySummary(input.metricTypeId, input.recordedAt);
+  await invalidateDailySummary(input.metricTypeId, input.recordedAt, db);
   return "accepted";
 }
 
@@ -233,7 +251,12 @@ export async function batchUpsertMetrics(inputs: MetricInput[]): Promise<IngestR
   return result;
 }
 
-async function invalidateDailySummary(metricTypeId: number, recordedAt: string) {
+async function invalidateDailySummary(
+  metricTypeId: number,
+  recordedAt: string,
+  conn: DbLike = db,
+) {
+  const db = conn;
   const date = recordedAt.slice(0, 10);
   const now = new Date().toISOString();
 

@@ -290,7 +290,7 @@ async function importMetrics(text: string): Promise<TableResult> {
 
       if (!sourceId) sourceId = `csv_import-${metricName}-${recordedAt}`;
 
-      const metricTypeId = await resolveMetricTypeId({
+      const { id: metricTypeId, alias: metricAlias } = await resolveMetricTypeId({
         rawName: metricName,
         map: { [metricName]: metricName },
         sourceSystem: "csv_import",
@@ -304,6 +304,7 @@ async function importMetrics(text: string): Promise<TableResult> {
         recordedAt,
         source,
         sourceId,
+        alias: metricAlias,
       });
       return status === "accepted" ? "accepted" : "skipped";
     },
@@ -423,7 +424,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
         parentId = eventId;
       }
 
-      const metricTypeId = await resolveMetricTypeId({
+      const { id: metricTypeId } = await resolveMetricTypeId({
         rawName: metricName,
         map: { [metricName]: metricName },
         sourceSystem: "csv_import",
@@ -489,7 +490,7 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
       // Identity map routes raw name → existing canonical via resolver step 1.
       // Same pattern the metrics CSV importer uses so a re-import doesn't
       // orphan a `csv_import:<name>` duplicate when a bare-name row exists.
-      const exerciseMetricTypeId = await resolveMetricTypeId({
+      const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
         rawName: exerciseName,
         map: { [exerciseName]: exerciseName },
         sourceSystem: "csv_import",

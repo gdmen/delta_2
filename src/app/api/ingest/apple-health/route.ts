@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
         const pushSleep = async (canonicalName: string, value: number | undefined) => {
           if (typeof value !== "number") return;
-          const typeId = await resolveMetricTypeId({
+          const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
             rawName: canonicalName,
             map: { [canonicalName]: canonicalName },
             sourceSystem: "apple_health",
@@ -139,6 +139,7 @@ export async function POST(request: NextRequest) {
             recordedAt: iso,
             source: "apple_health",
             sourceId: `hae-${canonicalName}-${iso}`,
+            alias: typeAlias,
           });
         };
 
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     // Standard path: resolver consults the alias table and falls back to
     // `apple_health:<rawName>` for anything still unmapped.
-    const typeId = await resolveMetricTypeId({
+    const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
       rawName: m.name,
       map: {},
       sourceSystem: "apple_health",
@@ -175,6 +176,7 @@ export async function POST(request: NextRequest) {
         recordedAt: iso,
         source: "apple_health",
         sourceId: `hae-${m.name}-${iso}`,
+        alias: typeAlias,
       });
     }
   }

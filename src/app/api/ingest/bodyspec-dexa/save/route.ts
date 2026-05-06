@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
       // auto-create paths respectively. Unit lands on auto-created rows
       // so a later merge into a unit-bearing canonical doesn't trip the
       // unit-mismatch guard.
-      const typeId = await resolveMetricTypeId({
+      const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
         rawName,
         map: { [rawName]: `${SOURCE_SYSTEM}:${rawName}` },
         sourceSystem: SOURCE_SYSTEM,
@@ -228,6 +228,7 @@ export async function POST(request: NextRequest) {
         recordedAt,
         source: SOURCE_SYSTEM,
         sourceId,
+        alias: typeAlias,
       });
       tracker.recordMetric(typeId, sourceId, recordedAt);
       saved.push(rawName);

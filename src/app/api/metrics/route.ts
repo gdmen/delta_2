@@ -30,6 +30,10 @@ export async function POST(request: NextRequest) {
     recordedAt: body.recordedAt,
     source: body.source ?? "manual",
     sourceId: body.sourceId ?? null,
+    // Manual entries didn't go through the resolver, so there's no
+    // alias to record. Chain-undo of merges leaves these rows alone
+    // (NULL alias doesn't match any aliasesRepointed list).
+    alias: null,
   });
   return NextResponse.json({ status });
 }

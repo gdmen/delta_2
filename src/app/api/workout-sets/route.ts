@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   // (canonical or previously-aliased) route to their existing id; unknown
   // ones auto-create under `manual:<rawName>` for user review later.
   const cache = await buildMetricTypeCache();
-  const exerciseMetricTypeId = await resolveMetricTypeId({
+  const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
     rawName: body.exerciseName,
     map: { [body.exerciseName]: body.exerciseName },
     sourceSystem: "manual",

@@ -54,9 +54,17 @@ export const metrics = sqliteTable("metrics", {
   source: text("source").notNull(),
   sourceId: text("source_id"),
   createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  // Alias key the resolver matched at ingest time (e.g.
+  // "fitnotes_bt:weight"). Powers chain-undo of merges: when a merge is
+  // reversed, the applier moves metrics whose `alias` matches the
+  // pre-merge resolution back to the merged_id. NULL for rows ingested
+  // before this column existed — those are reversed via the captured
+  // metricsMovedIds path only.
+  alias: text("alias"),
 }, (table) => [
   index("idx_metrics_type_recorded").on(table.metricTypeId, table.recordedAt),
   uniqueIndex("idx_metrics_source_id").on(table.sourceId),
+  index("idx_metrics_type_alias").on(table.metricTypeId, table.alias),
 ]);
 
 export const events = sqliteTable("events", {

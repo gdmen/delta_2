@@ -176,6 +176,13 @@
       "when": 1778363200000,
       "tag": "0024_add_merge_log",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1778449600000,
+      "tag": "0025_add_metrics_alias",
+      "breakpoints": true
     }
   ]
 }
