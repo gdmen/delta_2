@@ -18,6 +18,7 @@ import {
   sourceSettings,
   dashboards,
   dashboardWidgets,
+  mergeLog,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -69,6 +70,10 @@ export async function POST() {
     { name: "sports", obj: sports },
     { name: "daily_summaries", obj: dailySummaries },
     { name: "reconcile_log", obj: reconcileLog },
+    // merge_log: no FK to other tables (canonical_id is by-value, not
+    // by-FK, so a deleted metric_type doesn't cascade-delete the audit
+    // row). Wipe just clears the audit history.
+    { name: "merge_log", obj: mergeLog },
     { name: "source_settings", obj: sourceSettings },
     { name: "import_sources", obj: importSources },
     // Dashboards: widgets first so the FK from dashboard_widgets ->

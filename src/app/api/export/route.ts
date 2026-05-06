@@ -19,6 +19,7 @@ import {
   coachCalls,
   reconcileLog,
   dailySummaries,
+  mergeLog,
 } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -580,6 +581,53 @@ export async function GET() {
     ]),
   );
 
+  // --- merge_log.csv -------------------------------------------------------
+  // Audit trail of past merges. The `payload` column is an opaque JSON
+  // blob carrying integer row ids that are valid against THIS database's
+  // autoincrement sequences — after a wipe + re-import, those embedded
+  // ids point at rows that no longer exist by id. The merge_log row
+  // itself (kind, names, dates, undone_at) survives as audit history;
+  // attempting to undo such a re-imported row will 409 at the canonical-
+  // id pre-check, which is the correct failure mode.
+  const mergeLogRows = await db
+    .select({
+      id: mergeLog.id,
+      kind: mergeLog.kind,
+      createdAt: mergeLog.createdAt,
+      canonicalId: mergeLog.canonicalId,
+      canonicalName: mergeLog.canonicalName,
+      mergedNames: mergeLog.mergedNames,
+      payload: mergeLog.payload,
+      undoneAt: mergeLog.undoneAt,
+      userId: mergeLog.userId,
+    })
+    .from(mergeLog)
+    .orderBy(asc(mergeLog.id));
+  const mergeLogCsv = serializeCsv(
+    [
+      "id",
+      "kind",
+      "created_at",
+      "canonical_id",
+      "canonical_name",
+      "merged_names",
+      "payload",
+      "undone_at",
+      "user_id",
+    ],
+    mergeLogRows.map((r) => [
+      r.id,
+      r.kind,
+      r.createdAt,
+      r.canonicalId,
+      r.canonicalName,
+      r.mergedNames,
+      r.payload,
+      r.undoneAt ?? "",
+      r.userId == null ? "" : String(r.userId),
+    ]),
+  );
+
   // --- bundle ---------------------------------------------------------------
   const zipped = zipSync({
     "sports.csv": strToU8(sportsCsv),
@@ -599,6 +647,7 @@ export async function GET() {
     "coach_calls.csv": strToU8(coachCallsCsv),
     "reconcile_log.csv": strToU8(reconcileLogCsv),
     "daily_summaries.csv": strToU8(dailySummariesCsv),
+    "merge_log.csv": strToU8(mergeLogCsv),
   });
 
   const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

@@ -16,6 +16,7 @@ import {
   coachCalls,
   reconcileLog,
   dailySummaries,
+  mergeLog,
 } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
@@ -128,6 +129,7 @@ export async function POST(request: NextRequest) {
     "coach_calls.csv",
     "reconcile_log.csv",
     "daily_summaries.csv",
+    "merge_log.csv",
   ];
   const matched = recognized.filter((n) => n in csvs);
   if (matched.length === 0) {
@@ -247,6 +249,16 @@ export async function POST(request: NextRequest) {
   // metrics, so importing this is purely a recovery-time-saver.
   if (csvs["daily_summaries.csv"]) {
     out.daily_summaries = await importDailySummaries(csvs["daily_summaries.csv"]);
+  }
+
+  // --- merge_log.csv -------------------------------------------------------
+  // Audit history of past merges. Re-imports as audit-only — the
+  // payload's embedded row ids point at the EXPORTED database's
+  // autoincrement sequences, so undoing a re-imported merge will 409 at
+  // the canonical-id pre-check (correct failure mode). canonical_id is
+  // re-resolved by canonical_name when possible.
+  if (csvs["merge_log.csv"]) {
+    out.merge_log = await importMergeLog(csvs["merge_log.csv"]);
   }
 
   return NextResponse.json(out);
@@ -1266,6 +1278,101 @@ async function importDailySummaries(text: string): Promise<TableResult> {
         })
         .returning({ id: dailySummaries.id });
       return inserted.length > 0 ? "accepted" : "skipped";
+    },
+  );
+}
+
+/**
+ * merge_log.csv (audit-only round-trip).
+ *
+ * Each row carries kind, created_at, the canonical id+name from the
+ * exported DB, the merged_names (display string), the JSON payload, and
+ * undone_at + user_id. We DON'T trust the canonical_id integer — the
+ * exporting DB's autoincrement sequence may not match the importing
+ * DB's. We re-resolve canonical_id by canonical_name when the
+ * referenced row exists; otherwise we keep the exported integer
+ * (purely for display) and the undo endpoint's pre-check will 409 if
+ * the user later tries to undo it. This is the correct failure mode:
+ * exported merges are an audit log, not a redo log.
+ *
+ * Dedup natural key: (kind, created_at, canonical_name, merged_names).
+ * Re-running import on the same bundle is a no-op.
+ */
+async function importMergeLog(text: string): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache();
+  // Build a sport-name → id cache once for the same purpose.
+  const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
+  const sportCache = new Map(sportRows.map((r) => [r.name, r.id]));
+
+  return processCsv(
+    "merge_log.csv",
+    text,
+    [
+      "kind",
+      "created_at",
+      "canonical_id",
+      "canonical_name",
+      "merged_names",
+      "payload",
+    ],
+    async (row, idx) => {
+      const kindRaw = row[idx.get("kind")!];
+      const createdAt = row[idx.get("created_at")!];
+      const canonicalIdRaw = row[idx.get("canonical_id")!];
+      const canonicalName = row[idx.get("canonical_name")!];
+      const mergedNames = row[idx.get("merged_names")!];
+      const payload = row[idx.get("payload")!];
+      const undoneAt = idx.has("undone_at") ? row[idx.get("undone_at")!] : "";
+      const userIdRaw = idx.has("user_id") ? row[idx.get("user_id")!] : "";
+
+      if (!kindRaw || !createdAt || !canonicalName || !payload) {
+        throw new Error("missing required field");
+      }
+      if (kindRaw !== "metric_type" && kindRaw !== "sport") {
+        throw new Error(`invalid kind "${kindRaw}"`);
+      }
+
+      // Re-resolve canonical_id by canonical_name. If the row exists
+      // here, use the local id; otherwise fall back to the exported
+      // integer (display-only — the undo endpoint catches stale ids).
+      let canonicalId: number;
+      if (kindRaw === "metric_type") {
+        const id = typeCache.byName.get(canonicalName);
+        canonicalId = id ?? (Number(canonicalIdRaw) || 0);
+      } else {
+        const id = sportCache.get(canonicalName);
+        canonicalId = id ?? (Number(canonicalIdRaw) || 0);
+      }
+
+      const userId =
+        userIdRaw === "" ? null : Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : null;
+
+      // Dedup on (kind, created_at, canonical_name, merged_names).
+      const existing = await db
+        .select({ id: mergeLog.id })
+        .from(mergeLog)
+        .where(
+          and(
+            eq(mergeLog.kind, kindRaw),
+            eq(mergeLog.createdAt, createdAt),
+            eq(mergeLog.canonicalName, canonicalName),
+            eq(mergeLog.mergedNames, mergedNames),
+          ),
+        )
+        .limit(1);
+      if (existing.length > 0) return "skipped";
+
+      await db.insert(mergeLog).values({
+        kind: kindRaw,
+        createdAt,
+        canonicalId,
+        canonicalName,
+        mergedNames,
+        payload,
+        undoneAt: undoneAt || null,
+        userId,
+      });
+      return "accepted";
     },
   );
 }
