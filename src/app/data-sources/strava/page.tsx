@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
+import { WipeSourceButton } from "@/components/wipe-source-button";
 import StravaSetupClient from "./setup-client";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,8 @@ export default function StravaPage() {
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
         <SourceDataBrowser source="strava" />
       </section>
+
+      <WipeSourceButton source="strava" />
     </div>
   );
 }

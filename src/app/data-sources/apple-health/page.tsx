@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CopyButton } from "@/components/copy-button";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
+import { WipeSourceButton } from "@/components/wipe-source-button";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,8 @@ export default function AppleHealthPage() {
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
         <SourceDataBrowser source="apple_health" />
       </section>
+
+      <WipeSourceButton source="apple_health" />
     </div>
   );
 }

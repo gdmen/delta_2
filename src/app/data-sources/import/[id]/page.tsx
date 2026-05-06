@@ -5,6 +5,7 @@ import { importSources } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
+import { WipeSourceButton } from "@/components/wipe-source-button";
 import { ImportClient } from "./import-client";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +60,8 @@ export default async function ImportSourcePage({
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
         <SourceDataBrowser source={sourceTag} />
       </section>
+
+      <WipeSourceButton source={sourceTag} />
     </div>
   );
 }

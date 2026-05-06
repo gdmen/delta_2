@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
+import { WipeSourceButton } from "@/components/wipe-source-button";
 import { Wordmark } from "@/components/wordmark";
 import BodySpecUploadClient from "./upload-client";
 
@@ -39,6 +40,10 @@ export default function BodySpecPage() {
         <h2 className="text-[1rem] font-semibold mb-4">Imported data</h2>
         <SourceDataBrowser source="bodyspec_dexa" />
       </section>
+
+      <div className="max-w-[820px]">
+        <WipeSourceButton source="bodyspec_dexa" />
+      </div>
     </>
   );
 }
