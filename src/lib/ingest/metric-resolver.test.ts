@@ -123,4 +123,30 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     );
     expect(result.alias).toBe("fitnotes_bt:weight");
   });
+
+  it("R4 with empty map: shadowing canonical does NOT auto-route — orphan wins", async () => {
+    // A canonical "weight" exists. With CSV's old identity-map behavior,
+    // a "weight" column would have routed there. Without the map (the
+    // policy this commit standardizes on), it auto-creates a
+    // `${source}:weight` orphan instead — user merges explicitly.
+    db.insert(metricTypes)
+      .values({ name: "weight", unit: "lb", frequencyHint: "daily" })
+      .run();
+    const cache = await buildMetricTypeCache(db);
+    const result = await resolveMetricTypeId(
+      {
+        rawName: "weight",
+        map: {},
+        sourceSystem: "sleepbotv2",
+        cache,
+      },
+      db,
+    );
+    expect(result.alias).toBe("sleepbotv2:weight");
+    // The new orphan exists and is distinct from the pre-existing
+    // canonical "weight".
+    const types = db.select().from(metricTypes).all();
+    expect(types.find((t) => t.name === "weight")?.id).not.toBe(result.id);
+    expect(types.find((t) => t.name === "sleepbotv2:weight")?.id).toBe(result.id);
+  });
 });

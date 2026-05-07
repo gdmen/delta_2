@@ -290,9 +290,13 @@ async function importMetrics(text: string): Promise<TableResult> {
 
       if (!sourceId) sourceId = `csv_import-${metricName}-${recordedAt}`;
 
+      // Orphan-first: drop identity map so unknown columns auto-create
+      // as `csv_import:${name}` instead of silently routing to whatever
+      // canonical happens to share the name. Matches the per-source
+      // import route's behavior.
       const { id: metricTypeId, alias: metricAlias } = await resolveMetricTypeId({
         rawName: metricName,
-        map: { [metricName]: metricName },
+        map: {},
         sourceSystem: "csv_import",
         unit: unit || undefined,
         cache: typeCache,
@@ -426,7 +430,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 
       const { id: metricTypeId } = await resolveMetricTypeId({
         rawName: metricName,
-        map: { [metricName]: metricName },
+        map: {},
         sourceSystem: "csv_import",
         unit: unit || undefined,
         cache: typeCache,
@@ -487,12 +491,11 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
         parentId = eventId;
       }
 
-      // Identity map routes raw name → existing canonical via resolver step 1.
-      // Same pattern the metrics CSV importer uses so a re-import doesn't
-      // orphan a `csv_import:<name>` duplicate when a bare-name row exists.
+      // Orphan-first: exercise names land under `csv_import:${name}`
+      // unless an alias routes them. Matches the per-source import path.
       const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
         rawName: exerciseName,
-        map: { [exerciseName]: exerciseName },
+        map: {},
         sourceSystem: "csv_import",
         cache: typeCache,
       });

@@ -126,9 +126,15 @@ async function writeOutRow(
   tracker: ReconcileTracker
 ): Promise<void> {
   if (item.kind === "metric") {
+    // No identity map — let unknown columns auto-create as
+    // `${sourceTag}:${rawName}` orphans (resolver path R4). Identity
+    // mapping would silently route a "weight" column to whatever
+    // existing canonical happens to be named "weight", which is
+    // surprising for a freshly-defined source. The alias table picks
+    // up explicit user-created mappings via merges instead.
     const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
       rawName: item.metric,
-      map: { [item.metric]: item.metric },
+      map: {},
       sourceSystem: sourceTag,
       unit: item.unit ?? undefined,
       cache: typeCache,
@@ -179,10 +185,11 @@ async function writeOutRow(
     else result.skipped++;
 
     // Attach per-event dimensions (distance, calories, avg HR, etc.).
+    // Same orphan-first policy as the standalone-metric branch above.
     for (const m of item.metrics ?? []) {
       const { id: typeId } = await resolveMetricTypeId({
         rawName: m.metric,
-        map: { [m.metric]: m.metric },
+        map: {},
         sourceSystem: sourceTag,
         unit: m.unit ?? undefined,
         cache: typeCache,
@@ -256,11 +263,13 @@ async function writeOutRow(
     }
     if (parentSourceId) tracker.recordEvent(parentSourceId, item.startedAt);
 
-    // Identity map routes the raw name to an existing canonical when one
-    // exists, before falling through to the source-prefixed orphan path.
+    // Orphan-first: exercise names land under `${sourceTag}:${name}`
+    // unless an alias already routes them. The user merges the orphan
+    // into the seeded canonical ("Squat", "Bench Press", etc.) once so
+    // future imports flow through the alias path automatically.
     const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
       rawName: item.exerciseName,
-      map: { [item.exerciseName]: item.exerciseName },
+      map: {},
       sourceSystem: sourceTag,
       cache: typeCache,
     });
