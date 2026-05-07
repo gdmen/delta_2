@@ -98,6 +98,13 @@ export function ImportExportBar() {
         >
           Export all data (ZIP)
         </a>
+        <a
+          href="/api/export?manual=true"
+          className="px-4 py-2 border border-border rounded text-[0.8125rem] font-medium hover:bg-surface"
+          title="Metrics + events you typed in by hand, plus goals, focuses, dashboards. Re-importable after a wipe to restore the manually-entered slice."
+        >
+          Export manual only (ZIP)
+        </a>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}

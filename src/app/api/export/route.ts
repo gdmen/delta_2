@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { zipSync, strToU8 } from "fflate";
 import { db } from "@/db";
 import {
@@ -21,15 +21,24 @@ import {
   dailySummaries,
   mergeLog,
 } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { serializeCsv } from "@/lib/csv";
 
 /**
  * GET /api/export
+ * GET /api/export?manual=true
  *
  * Returns a ZIP of all foundational data — everything needed to wipe the
  * DB and restore the app to the same functional state.
+ *
+ * `?manual=true` narrows the bundle to data the user typed in by hand
+ * (metrics + events with source="manual", manual-source focuses, plus
+ * goals + journal entries + dashboards which are always manual). The
+ * supporting catalog (sports, metric_types, aliases, import_sources)
+ * still ships in full so re-import has FK targets to land on.
+ * Operational rows (coach_calls, reconcile_log, daily_summaries,
+ * merge_log) are skipped — they regenerate or no longer apply.
  *
  * Foundational catalog:
  *   - sports.csv                 - name, color
@@ -68,7 +77,21 @@ import { serializeCsv } from "@/lib/csv";
  * instead of DB IDs so the CSVs are self-describing and round-trip through
  * the matching import endpoint (or any other SQL/spreadsheet tool).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const manualOnly = request.nextUrl.searchParams.get("manual") === "true";
+
+  // Pre-compute the set of manual event ids so the per-event children
+  // (event_metrics, workout_sets) can be filtered by FK without a join.
+  // Empty array when manualOnly is false — never used in that path.
+  const manualEventIds = manualOnly
+    ? (
+        await db
+          .select({ id: events.id })
+          .from(events)
+          .where(eq(events.source, "manual"))
+      ).map((r) => r.id)
+    : [];
+
   // --- sports.csv ----------------------------------------------------------
   const sportRows = await db.select().from(sports).orderBy(asc(sports.name));
   const sportsCsv = serializeCsv(
@@ -166,7 +189,7 @@ export async function GET() {
   // Focuses now belong to goals; sport reaches the focus via the goal. Natural
   // key for round-trip: (goal_sport, goal_metric, goal_deadline, name, start_date).
   // The importer resolves the goal first, then attaches the focus.
-  const focusRows = await db
+  const focusBase = db
     .select({
       name: focuses.name,
       source: focuses.source,
@@ -184,7 +207,11 @@ export async function GET() {
     .innerJoin(goals, eq(focuses.goalId, goals.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .orderBy(asc(focuses.startDate));
+    .$dynamic();
+  const focusRows = await (manualOnly
+    ? focusBase.where(eq(focuses.source, "manual"))
+    : focusBase
+  ).orderBy(asc(focuses.startDate));
 
   const focusesCsv = serializeCsv(
     [
@@ -264,7 +291,7 @@ export async function GET() {
   );
 
   // --- metrics.csv ---------------------------------------------------------
-  const metricRows = await db
+  const metricsBase = db
     .select({
       recordedAt: metrics.recordedAt,
       metric: metricTypes.name,
@@ -275,7 +302,11 @@ export async function GET() {
     })
     .from(metrics)
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .orderBy(asc(metrics.recordedAt));
+    .$dynamic();
+  const metricRows = await (manualOnly
+    ? metricsBase.where(eq(metrics.source, "manual"))
+    : metricsBase
+  ).orderBy(asc(metrics.recordedAt));
   const metricsCsv = serializeCsv(
     ["recorded_at", "metric", "unit", "value", "source", "source_id"],
     metricRows.map((r) => [
@@ -292,7 +323,7 @@ export async function GET() {
   );
 
   // --- events.csv ----------------------------------------------------------
-  const eventRows = await db
+  const eventsBase = db
     .select({
       id: events.id,
       startedAt: events.startedAt,
@@ -305,7 +336,11 @@ export async function GET() {
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .orderBy(asc(events.startedAt));
+    .$dynamic();
+  const eventRows = await (manualOnly
+    ? eventsBase.where(eq(events.source, "manual"))
+    : eventsBase
+  ).orderBy(asc(events.startedAt));
   const eventsCsv = serializeCsv(
     ["started_at", "sport", "type", "duration_minutes", "notes", "source", "source_id"],
     eventRows.map((r) => [
@@ -320,7 +355,7 @@ export async function GET() {
   );
 
   // --- event_metrics.csv ---------------------------------------------------
-  const emRows = await db
+  const emBase = db
     .select({
       eventStartedAt: events.startedAt,
       sport: sports.name,
@@ -334,7 +369,15 @@ export async function GET() {
     .innerJoin(events, eq(eventMetrics.eventId, events.id))
     .innerJoin(sports, eq(events.sportId, sports.id))
     .innerJoin(metricTypes, eq(eventMetrics.metricTypeId, metricTypes.id))
-    .orderBy(asc(events.startedAt), asc(metricTypes.name));
+    .$dynamic();
+  const emRows = await (manualOnly
+    ? emBase.where(
+        manualEventIds.length > 0
+          ? inArray(eventMetrics.eventId, manualEventIds)
+          : eq(eventMetrics.eventId, -1),
+      )
+    : emBase
+  ).orderBy(asc(events.startedAt), asc(metricTypes.name));
   const eventMetricsCsv = serializeCsv(
     [
       "event_started_at",
@@ -359,7 +402,7 @@ export async function GET() {
   // --- workout_sets.csv ----------------------------------------------------
   // Inner-join metric_types to turn exercise_metric_type_id back into the
   // canonical exercise_name, preserving the CSV schema for round-trip.
-  const setRows = await db
+  const setsBase = db
     .select({
       eventStartedAt: events.startedAt,
       sport: sports.name,
@@ -376,7 +419,15 @@ export async function GET() {
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(sports, eq(events.sportId, sports.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
-    .orderBy(asc(events.startedAt), asc(metricTypes.name), asc(workoutSets.setNumber));
+    .$dynamic();
+  const setRows = await (manualOnly
+    ? setsBase.where(
+        manualEventIds.length > 0
+          ? inArray(workoutSets.eventId, manualEventIds)
+          : eq(workoutSets.eventId, -1),
+      )
+    : setsBase
+  ).orderBy(asc(events.startedAt), asc(metricTypes.name), asc(workoutSets.setNumber));
   const workoutSetsCsv = serializeCsv(
     [
       "event_started_at",
@@ -629,7 +680,8 @@ export async function GET() {
   );
 
   // --- bundle ---------------------------------------------------------------
-  const zipped = zipSync({
+  // Foundational catalog + user-typed data ship in both modes.
+  const bundle: Record<string, Uint8Array> = {
     "sports.csv": strToU8(sportsCsv),
     "metric_types.csv": strToU8(metricTypesCsv),
     "metric_type_aliases.csv": strToU8(metricTypeAliasesCsv),
@@ -644,19 +696,31 @@ export async function GET() {
     "events.csv": strToU8(eventsCsv),
     "event_metrics.csv": strToU8(eventMetricsCsv),
     "workout_sets.csv": strToU8(workoutSetsCsv),
-    "coach_calls.csv": strToU8(coachCallsCsv),
-    "reconcile_log.csv": strToU8(reconcileLogCsv),
-    "daily_summaries.csv": strToU8(dailySummariesCsv),
-    "merge_log.csv": strToU8(mergeLogCsv),
-  });
+  };
+
+  // Operational rows only ship in the full export — they regenerate
+  // (daily_summaries) or no longer apply (merge_log refers to wiped
+  // metric_type ids; coach_calls + reconcile_log are operational
+  // history that doesn't restore meaningfully).
+  if (!manualOnly) {
+    bundle["coach_calls.csv"] = strToU8(coachCallsCsv);
+    bundle["reconcile_log.csv"] = strToU8(reconcileLogCsv);
+    bundle["daily_summaries.csv"] = strToU8(dailySummariesCsv);
+    bundle["merge_log.csv"] = strToU8(mergeLogCsv);
+  }
+
+  const zipped = zipSync(bundle);
 
   const stamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const filename = manualOnly
+    ? `delta-manual-export-${stamp}.zip`
+    : `delta-export-${stamp}.zip`;
   const body = new Uint8Array(zipped);
 
   return new NextResponse(body, {
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="delta-export-${stamp}.zip"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 }
