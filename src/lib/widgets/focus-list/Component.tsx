@@ -33,7 +33,6 @@ export function FocusListComponent({
           <FocusCard
             key={f.id}
             name={f.name}
-            sport={f.sportName}
             sportColor={f.sportColor}
             weekNumber={f.weekNumber}
             sparklineData={[]}

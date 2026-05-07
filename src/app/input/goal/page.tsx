@@ -54,9 +54,28 @@ export default function GoalInputPage() {
     setGoalList(goalsData);
   }
 
+  // Initial load: do the fetches inside the effect (async work is fine
+  // — what react-hooks/set-state-in-effect dislikes is the *synchronous*
+  // setState that calling loadData() would do up-front).
   useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    (async () => {
+      const [sportsRes, metricsRes, goalsRes] = await Promise.all([
+        fetch("/api/sports"),
+        fetch("/api/metric-types"),
+        fetch("/api/goals"),
+      ]);
+      const sportsData = await sportsRes.json();
+      const metricsData = await metricsRes.json();
+      const goalsData = await goalsRes.json();
+      if (cancelled) return;
+      setSportList(sportsData);
+      setMetricList(metricsData);
+      setGoalList(goalsData);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // When sport changes, restrict metric options to that sport or cross-sport.
@@ -64,18 +83,19 @@ export default function GoalInputPage() {
     (m) => m.sportId === null || m.sportId === sportId
   );
 
-  useEffect(() => {
-    // If current metric selection isn't valid for the new sport, clear it.
-    if (metricTypeId && !availableMetrics.find((m) => m.id === metricTypeId)) {
-      setMetricTypeId(null);
-    }
-  }, [sportId, metricTypeId, availableMetrics]);
+  // Clear invalid metric selection when sport changes — derived during
+  // render rather than reset via useEffect+setState, per React 19's
+  // "you might not need an effect" guidance.
+  const effectiveMetricTypeId =
+    metricTypeId && availableMetrics.find((m) => m.id === metricTypeId)
+      ? metricTypeId
+      : null;
 
-  const selectedMetric = metricList.find((m) => m.id === metricTypeId);
+  const selectedMetric = metricList.find((m) => m.id === effectiveMetricTypeId);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!sportId || !metricTypeId || !targetValue || !deadline) return;
+    if (!sportId || !effectiveMetricTypeId || !targetValue || !deadline) return;
     setSubmitting(true);
 
     const res = await fetch("/api/goals", {
@@ -83,7 +103,7 @@ export default function GoalInputPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sportId,
-        metricTypeId,
+        metricTypeId: effectiveMetricTypeId,
         targetValue: parseFloat(targetValue),
         deadline,
       }),
@@ -128,7 +148,7 @@ export default function GoalInputPage() {
         <div>
           <label className="block text-[0.75rem] text-muted mb-1">Metric</label>
           <select
-            value={metricTypeId ?? ""}
+            value={effectiveMetricTypeId ?? ""}
             onChange={(e) => setMetricTypeId(parseInt(e.target.value, 10))}
             className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground"
             required
@@ -185,6 +205,12 @@ export default function GoalInputPage() {
 }
 
 function GoalList({ title, items, dim = false, emptyMessage }: { title: string; items: Goal[]; dim?: boolean; emptyMessage?: string }) {
+  // Pin "now" once at mount via useState's lazy initializer so render
+  // stays pure (Date.now() during render trips react-hooks/purity).
+  // Days-left only matters at the day granularity, so a single anchor
+  // per page render is fine — refresh the page after midnight to roll.
+  const [nowMs] = useState(() => Date.now());
+
   if (items.length === 0 && !emptyMessage) return null;
 
   return (
@@ -199,7 +225,7 @@ function GoalList({ title, items, dim = false, emptyMessage }: { title: string; 
         items.map((g) => {
           const daysLeft = Math.max(
             0,
-            Math.ceil((new Date(g.deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+            Math.ceil((new Date(g.deadline).getTime() - nowMs) / (24 * 60 * 60 * 1000))
           );
           return (
             <Link

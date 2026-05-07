@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Code worktree copies — not part of the checked-in tree,
+    // only present locally. CI doesn't see them; local lint shouldn't
+    // either (otherwise we get duplicate diagnostics for the same code).
+    ".claude/**",
   ]),
 ]);
 

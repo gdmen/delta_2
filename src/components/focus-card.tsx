@@ -3,7 +3,6 @@ import { Sparkline } from "./sparkline";
 
 interface FocusCardProps {
   name: string;
-  sport: string;
   sportColor: string;
   weekNumber: number;
   sparklineData: number[];
@@ -11,7 +10,7 @@ interface FocusCardProps {
   href?: string;
 }
 
-export function FocusCard({ name, sport, sportColor, weekNumber, sparklineData, valueLabel, href }: FocusCardProps) {
+export function FocusCard({ name, sportColor, weekNumber, sparklineData, valueLabel, href }: FocusCardProps) {
   const inner = (
     <>
       <div className="flex items-center gap-3 min-w-0">

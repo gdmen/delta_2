@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { Wordmark } from "@/components/wordmark";
 import { FileDropZone } from "@/components/file-drop-zone";
 

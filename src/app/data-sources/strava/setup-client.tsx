@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 
 interface Status {
@@ -40,6 +39,10 @@ function StravaSetupInner() {
   const callbackReason = params.get("reason");
   const callbackDetail = params.get("detail");
 
+  // loadStatus is exposed for the post-action refresh (sync, disconnect).
+  // The synchronous setLoading(true) at the top is fine when called from
+  // an event handler — only inside a useEffect would it trigger the
+  // react-hooks/set-state-in-effect lint warning.
   const loadStatus = useCallback(async () => {
     setLoading(true);
     try {
@@ -52,9 +55,25 @@ function StravaSetupInner() {
     setLoading(false);
   }, []);
 
+  // Initial fetch on mount. Inline so the synchronous setLoading happens
+  // from initial useState (`loading: true`) rather than a setState call
+  // inside the effect body.
   useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ingest/strava/sync");
+        const json = await res.json();
+        if (!cancelled) setStatus(json);
+      } catch {
+        if (!cancelled) setStatus({ connected: false });
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSync(mode: "incremental" | "backfill") {
     setSyncing(true);

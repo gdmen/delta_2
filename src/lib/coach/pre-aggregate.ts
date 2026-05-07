@@ -104,7 +104,6 @@ const RECOVERY_BASELINE_DAYS = 90;
 const ROLLING_SHORT_DAYS = 7;
 const ROLLING_LONG_DAYS = 28;
 const ROLLING_MIN_READINGS = 14; // require this many in the long window
-const PLATEAU_WEEKS = 4;
 const RECENT_PR_WINDOW_DAYS = 84; // 12 weeks — current capacity, not lifetime peak
 
 const RECOVERY_METRICS_WEIGHTS: Record<string, number> = {
@@ -156,8 +155,8 @@ export interface VolumeTrendSignal {
 }
 
 /**
- * Plateau detection per Big-3 lift. A lift is in plateau if its last e1RM PR
- * is older than `PLATEAU_WEEKS` weeks. Returns one signal per lift, ordered
+ * Plateau detection per Big-3 lift. Returns weeks-since-last-PR per lift
+ * so the caller can apply its own threshold. One signal per lift, ordered
  * squat → bench → deadlift. Lifts with zero historical sets return
  * `lastPrDate: null` so the LLM knows to ignore them rather than reporting
  * a fake plateau.
