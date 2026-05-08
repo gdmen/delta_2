@@ -44,8 +44,10 @@ export function DeleteSourceButton({
       </button>
       <p className="text-[0.75rem] text-muted mt-2 leading-[1.5]">
         Removes the import mapping AND every metric/event/reconcile-log row
-        attached to this source. Metric_types created by this source stay
-        (delete them individually if you want).
+        attached to this source. Source-prefixed metric types
+        (<code className="font-mono">{sourceTag}:*</code>) get cleaned up too,
+        unless something else still references them (goals, foreign-source
+        aliases) — those get listed for manual cleanup.
       </p>
 
       {/* Modal lives in its own component so its state resets via the
@@ -121,6 +123,15 @@ function DeleteModal({
         setBusy(false);
         return;
       }
+      // If any metric_types were kept (because other rows still reference
+      // them), surface the list so the user can clean up manually.
+      const kept = (json.keptMetricTypes ?? []) as { name: string; reason: string }[];
+      if (kept.length > 0) {
+        const lines = kept.map((k) => `• ${k.name} — kept (${k.reason})`).join("\n");
+        alert(
+          `Source deleted, but ${kept.length} metric type${kept.length === 1 ? "" : "s"} couldn't be removed:\n\n${lines}\n\nDelete them individually from /data if you want them gone.`,
+        );
+      }
       // Source is gone — kick the user back to the list.
       router.push("/data-sources");
     } catch (err) {
@@ -170,9 +181,10 @@ function DeleteModal({
               <li>{counts.reconcileLog.toLocaleString()} reconcile-log entries</li>
             </ul>
             <p className="text-[0.8125rem] text-text-secondary leading-[1.55]">
-              Metric types created by this source (e.g.{" "}
-              <code className="font-mono">{sourceTag}:foo</code>) stay — delete
-              them individually if you want.
+              Plus any{" "}
+              <code className="font-mono">{sourceTag}:*</code> metric types
+              that are now unreferenced. Anything still pinned by a goal or
+              cross-source alias is kept and listed after the delete.
             </p>
             <p className="text-[0.8125rem] text-text-secondary leading-[1.55]">
               This cannot be undone. Type{" "}

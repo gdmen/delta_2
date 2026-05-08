@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
+  dailySummaries,
+  eventMetrics,
   events,
+  goals,
   importSources,
   metrics,
+  metricTypeAliases,
+  metricTypes,
   reconcileLog,
   sourceSettings,
+  workoutSets,
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, like, ne, not, sql } from "drizzle-orm";
 import type { ImportMapping } from "@/lib/import-mapping";
 
 export async function GET(
@@ -67,17 +73,23 @@ export async function PATCH(
 /**
  * DELETE /api/import-sources/:id
  *
- * Tear the source down completely: every metrics + events row tagged
- * with this source, the cascading event_metrics + workout_sets + the
- * reconcile_log audit trail, the source_settings row, and finally the
- * import_sources config row itself.
+ * Tear the source down completely:
+ *  - every metrics + events row tagged with this source (event children
+ *    cascade via FK ON DELETE CASCADE)
+ *  - reconcile_log audit trail
+ *  - source_settings row
+ *  - any `${sourceTag}:%` metric_types that are now unreferenced
+ *    (per-row check; a metric_type is kept if it's still pinned by a
+ *    goal, workout_set, event_metric, or by a foreign-prefix alias
+ *    pointing at it as canonical — meaning some merge made it the home
+ *    for another source's data, and dropping it would orphan that)
+ *  - the import_sources config row itself
  *
- * NOT touched: metric_types whose names start with `${sourceTag}:`. The
- * orphan rows can be reused by other paths or kept for history; deleting
- * the source isn't an instruction to nuke the catalog. Use
- * /api/metric-types/:id (or the UI) if you want them gone.
- *
- * Returns the per-table delete counts so the UI can confirm what went.
+ * Skipped metric_types are returned in the response so the UI can list
+ * them ("kept these because X still references them; delete them
+ * manually if you want them gone"). Stays away from cross-source
+ * surprises like silently nuking an alias that another source's ingest
+ * routes through.
  */
 export async function DELETE(
   _request: NextRequest,
@@ -98,6 +110,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const sourceTag = rows[0].name.toLowerCase().replace(/\s+/g, "_");
+  const namePrefix = `${sourceTag}:`;
+  const namePrefixSql = `${sourceTag}:%`;
 
   // Pre-count for the response payload.
   const [m] = await db
@@ -115,7 +129,7 @@ export async function DELETE(
 
   // Delete metrics first (no children). Then events — workout_sets and
   // event_metrics cascade via FK ON DELETE CASCADE on event_id. Then
-  // the operational + config rows. Each statement is its own implicit
+  // operational + settings rows. Each statement is its own implicit
   // txn (better-sqlite3-drizzle rejects async tx callbacks); a partial
   // failure leaves the source half-deleted, which the user can fix by
   // retrying — the operations are idempotent.
@@ -123,15 +137,89 @@ export async function DELETE(
   await db.delete(events).where(eq(events.source, sourceTag));
   await db.delete(reconcileLog).where(eq(reconcileLog.source, sourceTag));
   await db.delete(sourceSettings).where(eq(sourceSettings.source, sourceTag));
+
+  // Now sweep `${sourceTag}:%` metric_types. After the deletes above,
+  // most should be unreferenced — but a foreign-prefixed alias OR a
+  // surviving goal/workout_set/event_metric/metric pin keeps them.
+  const candidateTypes = await db
+    .select({ id: metricTypes.id, name: metricTypes.name })
+    .from(metricTypes)
+    .where(like(metricTypes.name, namePrefixSql));
+
+  const deletedTypes: string[] = [];
+  const keptTypes: { name: string; reason: string }[] = [];
+
+  for (const t of candidateTypes) {
+    // Refs that would either FK-block the delete or silently break
+    // other surfaces (goals, dashboards, foreign aliases).
+    const [goalRef] = await db
+      .select({ c: sql<number>`count(*)` })
+      .from(goals)
+      .where(eq(goals.metricTypeId, t.id));
+    const [setRef] = await db
+      .select({ c: sql<number>`count(*)` })
+      .from(workoutSets)
+      .where(eq(workoutSets.exerciseMetricTypeId, t.id));
+    const [emRef] = await db
+      .select({ c: sql<number>`count(*)` })
+      .from(eventMetrics)
+      .where(eq(eventMetrics.metricTypeId, t.id));
+    // Stray metrics rows from OTHER sources (manual entries against
+    // this metric_type, ingest from a different source that aliased to
+    // it). Pre-delete pass already cleared the ones tagged with this
+    // source.
+    const [metricRef] = await db
+      .select({ c: sql<number>`count(*)` })
+      .from(metrics)
+      .where(eq(metrics.metricTypeId, t.id));
+    // Foreign-prefix aliases pointing at this metric_type as canonical
+    // — those came from a merge ("apple_health:body_mass" → this).
+    // Cascade-deleting them would silently break HAE routing.
+    const [foreignAlias] = await db
+      .select({ c: sql<number>`count(*)` })
+      .from(metricTypeAliases)
+      .where(
+        and(
+          eq(metricTypeAliases.canonicalMetricTypeId, t.id),
+          not(like(metricTypeAliases.alias, namePrefixSql)),
+          ne(metricTypeAliases.alias, t.name),
+        ),
+      );
+
+    const reasons: string[] = [];
+    if (Number(goalRef?.c ?? 0) > 0) reasons.push(`${goalRef!.c} goal(s)`);
+    if (Number(setRef?.c ?? 0) > 0) reasons.push(`${setRef!.c} workout set(s)`);
+    if (Number(emRef?.c ?? 0) > 0) reasons.push(`${emRef!.c} event metric(s)`);
+    if (Number(metricRef?.c ?? 0) > 0) reasons.push(`${metricRef!.c} metric(s) from other sources`);
+    if (Number(foreignAlias?.c ?? 0) > 0) reasons.push(`${foreignAlias!.c} alias(es) from other sources`);
+
+    if (reasons.length > 0) {
+      keptTypes.push({ name: t.name, reason: reasons.join(", ") });
+      continue;
+    }
+
+    // Safe to delete. daily_summaries has a NOT NULL FK without cascade
+    // — wipe its rows first or the metric_types delete will FK-fail.
+    // Self-prefix aliases (e.g. `${sourceTag}:foo` aliased to itself)
+    // CASCADE-delete via the alias FK; that's fine.
+    await db.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, t.id));
+    await db.delete(metricTypes).where(eq(metricTypes.id, t.id));
+    deletedTypes.push(t.name);
+  }
+
   await db.delete(importSources).where(eq(importSources.id, id));
 
   return NextResponse.json({
     ok: true,
     sourceTag,
+    sourcePrefix: namePrefix,
     deleted: {
       metrics: Number(m?.c ?? 0),
       events: Number(e?.c ?? 0),
       reconcileLog: Number(r?.c ?? 0),
+      metricTypes: deletedTypes.length,
     },
+    deletedMetricTypes: deletedTypes,
+    keptMetricTypes: keptTypes,
   });
 }
