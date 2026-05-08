@@ -25,9 +25,13 @@ export function DashboardSettingsForm({ dashboard, sports }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const slugLocked = dashboard.isSystem;
+  // Compare trimmed values for `dirty` so a trailing space alone doesn't
+  // enable Save. The server trims `name` on PATCH, so untrimmed input
+  // would PATCH to the same value, the server would return success, and
+  // the form would re-arm itself indefinitely against the unchanged prop.
   const dirty =
-    name !== dashboard.name ||
-    slug !== dashboard.slug ||
+    name.trim() !== dashboard.name ||
+    slug.trim() !== dashboard.slug ||
     (sportId === "" ? null : sportId) !== dashboard.sportId;
 
   async function onSave(e: React.FormEvent) {
@@ -53,12 +57,28 @@ export function DashboardSettingsForm({ dashboard, sports }: Props) {
         setSaving(false);
         return;
       }
-      // If the slug changed, the URL we're on is now stale.
+      // Sync local state from the saved row. The server may have
+      // normalized values (trimming `name`); without this resync the
+      // local state holds the un-normalized input and `dirty` stays
+      // true on the same content, re-enabling Save against a no-op.
+      setName(json.dashboard.name);
+      setSlug(json.dashboard.slug);
+      setSportId(json.dashboard.sportId ?? "");
+      // If the slug changed, the URL we're on is now stale; navigate
+      // there. Otherwise router.refresh re-runs the server component
+      // so the next dirty-check sees the updated dashboard prop.
       const newSlug = json.dashboard.slug;
-      router.push(`/dashboards/${newSlug}/settings`);
-      router.refresh();
+      if (newSlug !== dashboard.slug) {
+        router.push(`/dashboards/${newSlug}/settings`);
+      } else {
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      // Always release the save lock — the success branch above used
+      // to forget this and the button got stuck on "Saving…" until
+      // the user reloaded.
       setSaving(false);
     }
   }
