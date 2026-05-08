@@ -1,6 +1,6 @@
 import { BigThree } from "@/components/big-three";
 import { isDataDepError, type WidgetData } from "../types";
-import { DATA_KEY, type BigThreeData } from "./keys";
+import { dataKey, type BigThreeData } from "./keys";
 import type { BigThreeConfig } from "./schema";
 
 /**
@@ -10,12 +10,13 @@ import type { BigThreeConfig } from "./schema";
  * back to a neutral gray when no powerlifting row exists.
  */
 export function BigThreeComponent({
+  config,
   data,
 }: {
   config: BigThreeConfig;
   data: WidgetData;
 }) {
-  const raw = data.get(DATA_KEY);
+  const raw = data.get(dataKey(config));
   if (isDataDepError(raw) || raw === undefined) {
     return (
       <p className="text-[0.875rem] text-muted py-2">No lift data yet.</p>

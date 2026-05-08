@@ -1,7 +1,18 @@
 import { getBigThreeStats } from "@/lib/strength-metrics";
 import type { DataDep } from "../types";
-import { DATA_KEY, type BigThreeData } from "./keys";
+import { dataKey, type BigThreeData } from "./keys";
+import type { BigThreeConfig } from "./schema";
 
-export function bigThreeDataDeps(): DataDep[] {
-  return [{ key: DATA_KEY, fetch: () => getBigThreeStats() as Promise<BigThreeData> }];
+export function bigThreeDataDeps(config: BigThreeConfig): DataDep[] {
+  return [
+    {
+      key: dataKey(config),
+      fetch: () =>
+        getBigThreeStats({
+          squat: config.squat,
+          bench: config.bench,
+          deadlift: config.deadlift,
+        }) as Promise<BigThreeData>,
+    },
+  ];
 }

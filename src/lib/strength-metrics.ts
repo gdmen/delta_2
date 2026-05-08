@@ -40,59 +40,42 @@ export interface LiftStats {
 // Lift classification
 // -----------------------------------------------------------------------------
 
-const LIFT_PATTERNS: Record<Lift, { exact: string[]; includes: string[]; excludes: string[] }> = {
-  squat: {
-    exact: [
-      "Barbell Back Squat",
-      "Back Squat",
-      "High Bar Squat",
-      "Low Bar Squat",
-      "Barbell Squat",
-      "Squat",
-    ],
-    includes: ["squat"],
-    // Don't match front squat, squat thruster, goblet squat, split squat.
-    excludes: ["front", "thruster", "goblet", "split", "jump", "bulgarian"],
-  },
-  bench: {
-    exact: [
-      "Flat Barbell Bench Press",
-      "Bench Press",
-      "Barbell Bench Press",
-      "Bench",
-    ],
-    includes: ["bench press"],
-    // Exclude close-grip / incline / decline only if the user wants the
-    // canonical flat bench. Keep simple - the page assumes you're lumping
-    // all bench variants as "bench" is uncommon. Customize later.
-    excludes: ["incline", "decline", "close-grip", "close grip", "dumbbell"],
-  },
-  deadlift: {
-    exact: [
-      "Conventional Barbell Deadlift",
-      "Conventional Deadlift",
-      "Barbell Deadlift",
-      "Deadlift",
-    ],
-    includes: ["deadlift"],
-    // Stiff-leg / Romanian / sumo / trap-bar are different movements; user
-    // can rename via import-source aliases if they want them lumped.
-    excludes: ["romanian", "rdl", "stiff", "sumo", "trap bar", "trap-bar", "deficit", "snatch"],
-  },
+/**
+ * Per-lift exercise name. The classifier matches by exact (case-insensitive)
+ * name, no substring/excludes guessing. The user picks the canonical name
+ * for each slot via the Big-3 widget settings; the coach path uses
+ * `BIG_THREE_DEFAULT_NAMES` when it doesn't have a widget config to read.
+ */
+export interface LiftNames {
+  squat: string;
+  bench: string;
+  deadlift: string;
+}
+
+export const BIG_THREE_DEFAULT_NAMES: LiftNames = {
+  squat: "Barbell Back Squat",
+  bench: "Flat Barbell Bench Press",
+  deadlift: "Barbell Deadlift",
 };
 
-export function classifyLift(exerciseName: string): Lift | null {
-  const raw = exerciseName.trim();
-  if (!raw) return null;
-  const lower = raw.toLowerCase();
-
-  for (const [lift, patterns] of Object.entries(LIFT_PATTERNS) as [Lift, typeof LIFT_PATTERNS[Lift]][]) {
-    if (patterns.exact.some((e) => e.toLowerCase() === lower)) return lift;
-  }
-  for (const [lift, patterns] of Object.entries(LIFT_PATTERNS) as [Lift, typeof LIFT_PATTERNS[Lift]][]) {
-    if (patterns.excludes.some((x) => lower.includes(x))) continue;
-    if (patterns.includes.some((i) => lower.includes(i))) return lift;
-  }
+/**
+ * Returns the lift slot whose configured exercise name matches
+ * `exerciseName` exactly (case-insensitive, trimmed). Returns null when
+ * the name doesn't match any of the three configured lifts — the
+ * caller's job is to drop that row from big-3 stats. Substring fuzzing
+ * was removed so users get exactly the lift they pick: no surprise
+ * inclusion of `Barbell Front Squat` in the squat slot, no exclusion
+ * list to maintain.
+ */
+export function classifyLift(
+  exerciseName: string,
+  names: LiftNames = BIG_THREE_DEFAULT_NAMES,
+): Lift | null {
+  const lower = exerciseName.trim().toLowerCase();
+  if (!lower) return null;
+  if (lower === names.squat.trim().toLowerCase()) return "squat";
+  if (lower === names.bench.trim().toLowerCase()) return "bench";
+  if (lower === names.deadlift.trim().toLowerCase()) return "deadlift";
   return null;
 }
 
@@ -123,8 +106,13 @@ const FALLBACK_COLOR = "#737373"; // neutral-500 — used when sport row missing
 /**
  * Returns stats for all three lifts plus the sport color. Reads workout_sets
  * joined to events filtered to the powerlifting sport. Safe when empty.
+ *
+ * `names` lets callers override the default canonical exercise names per
+ * slot (squat/bench/deadlift). Defaults to BIG_THREE_DEFAULT_NAMES.
  */
-export async function getBigThreeStats(): Promise<BigThreeStats> {
+export async function getBigThreeStats(
+  names: LiftNames = BIG_THREE_DEFAULT_NAMES,
+): Promise<BigThreeStats> {
   // Find the powerlifting sport. Return empty stats if it isn't present —
   // can happen on a fresh DB before any merge has produced a canonical
   // "powerlifting" row.
@@ -155,7 +143,7 @@ export async function getBigThreeStats(): Promise<BigThreeStats> {
 
   const byLift: Record<Lift, typeof rows> = { squat: [], bench: [], deadlift: [] };
   for (const r of rows) {
-    const lift = classifyLift(r.exerciseName);
+    const lift = classifyLift(r.exerciseName, names);
     if (lift) byLift[lift].push(r);
   }
 
