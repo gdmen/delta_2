@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { events, sports, workoutSets, eventMetrics, metricTypes } from "@/db/schema";
@@ -75,10 +74,7 @@ export default async function EventDetailPage({
 
   return (
     <div className="max-w-[940px]">
-      <Link href="/data" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data
-      </Link>
-      <h1 className="text-2xl font-semibold mt-3 mb-2">
+      <h1 className="text-2xl font-semibold mb-2">
         Event #{event.id}{" "}
         <span className="text-muted text-[0.875rem] font-mono">
           {event.sportName} · {event.type}

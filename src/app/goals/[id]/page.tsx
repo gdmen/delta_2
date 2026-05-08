@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { goals, metricTypes, sports, metrics, focuses, goalJournalEntries } from "@/db/schema";
@@ -149,11 +148,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
   return (
     <div className="max-w-[720px]">
       {/* HEADER */}
-      <Link href="/goals" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← All Goals
-      </Link>
-
-      <div className="flex items-start justify-between gap-4 mt-3 mb-6">
+      <div className="flex items-start justify-between gap-4 mb-6">
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <span
             className="w-3 h-3 rounded-full flex-shrink-0 mt-2"

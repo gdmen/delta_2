@@ -64,13 +64,7 @@ export default function NewMetricPage() {
 
   return (
     <div className="max-w-[560px]">
-      <Link
-        href="/data"
-        className="text-[0.8125rem] text-muted hover:text-foreground"
-      >
-        ← Data
-      </Link>
-      <h1 className="text-2xl font-semibold mt-3 mb-2">New metric</h1>
+      <h1 className="text-2xl font-semibold mb-2">New metric</h1>
       <p className="text-[0.875rem] text-text-secondary mb-6">
         Define a new primitive numeric metric. Examples: <span className="font-mono">overhead_1rm</span>,{" "}
         <span className="font-mono">resting_hr</span>,{" "}

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import {
@@ -184,10 +183,7 @@ export default async function MetricHistoryPage({
 
   return (
     <div className="max-w-[940px]">
-      <Link href="/data" className="text-[0.8125rem] text-muted hover:text-foreground">
-        ← Data
-      </Link>
-      <div className="flex items-baseline justify-between mt-3 mb-2 gap-3">
+      <div className="flex items-baseline justify-between mb-2 gap-3">
         <h1 className="text-2xl font-semibold font-mono">{type.name}</h1>
         <span className="font-mono text-[0.6875rem] text-muted">
           {computed ? (
