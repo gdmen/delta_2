@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { workoutSets, events, sports, metricTypes } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import {
   BIG_THREE_DEFAULT_NAMES,
   type Lift,
@@ -95,31 +95,31 @@ export interface BigThreeStats {
 const FALLBACK_COLOR = "#737373"; // neutral-500 — used when sport row missing
 
 /**
- * Returns stats for all three lifts plus the sport color. Reads workout_sets
- * joined to events filtered to the powerlifting sport. Safe when empty.
+ * Returns stats for all three lifts plus a display color. Reads
+ * workout_sets via the configured metric_type names — sport-agnostic,
+ * so a bench press done in a BJJ session (or any other sport) still
+ * counts. Safe when no matching workout_sets exist.
  *
- * `names` lets callers override the default canonical exercise names per
- * slot (squat/bench/deadlift). Defaults to BIG_THREE_DEFAULT_NAMES.
+ * `names` lets callers override the canonical exercise name per slot
+ * (squat/bench/deadlift). Defaults to BIG_THREE_DEFAULT_NAMES.
+ *
+ * Color picks up `sports.color` from the first matched metric_type's
+ * sport_id; falls back to neutral when no match has a sport linked.
  */
 export async function getBigThreeStats(
   names: LiftNames = BIG_THREE_DEFAULT_NAMES,
 ): Promise<BigThreeStats> {
-  // Find the powerlifting sport. Return empty stats if it isn't present —
-  // can happen on a fresh DB before any merge has produced a canonical
-  // "powerlifting" row.
-  const sportRow = await db
-    .select({ id: sports.id, color: sports.color })
-    .from(sports)
-    .where(eq(sports.name, "powerlifting"))
-    .limit(1);
-  if (sportRow.length === 0) {
+  const targetNames = [names.squat, names.bench, names.deadlift]
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (targetNames.length === 0) {
     return { color: FALLBACK_COLOR, lifts: emptyStats() };
   }
-  const { id: powerliftingId, color } = sportRow[0];
 
   const rows = await db
     .select({
       exerciseName: metricTypes.name,
+      sportId: metricTypes.sportId,
       setNumber: workoutSets.setNumber,
       reps: workoutSets.reps,
       weight: workoutSets.weight,
@@ -129,13 +129,34 @@ export async function getBigThreeStats(
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
-    .where(eq(events.sportId, powerliftingId))
+    // Case-insensitive match on the configured exercise names. SQLite's
+    // built-in NOCASE collation matches lower-cased input regardless of
+    // the stored row's case.
+    .where(sql`LOWER(${metricTypes.name}) IN (${sql.join(
+      targetNames.map((n) => sql`${n.toLowerCase()}`),
+      sql`, `,
+    )})`)
     .orderBy(desc(events.startedAt), desc(workoutSets.setNumber));
 
   const byLift: Record<Lift, typeof rows> = { squat: [], bench: [], deadlift: [] };
   for (const r of rows) {
     const lift = classifyLift(r.exerciseName, names);
     if (lift) byLift[lift].push(r);
+  }
+
+  // Color: pick up the sport_id of the first matched metric_type that
+  // has one, look up its color. Lets a single-sport setup still get a
+  // sport-tinted widget; a cross-sport setup gracefully falls back to
+  // neutral.
+  let color = FALLBACK_COLOR;
+  const firstSportId = rows.find((r) => r.sportId !== null)?.sportId;
+  if (firstSportId != null) {
+    const sportRow = await db
+      .select({ color: sports.color })
+      .from(sports)
+      .where(eq(sports.id, firstSportId))
+      .limit(1);
+    if (sportRow[0]) color = sportRow[0].color;
   }
 
   return {
