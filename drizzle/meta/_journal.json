@@ -183,6 +183,13 @@
       "when": 1778449600000,
       "tag": "0025_add_metrics_alias",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1778536000000,
+      "tag": "0026_rename_csv_import_to_custom",
+      "breakpoints": true
     }
   ]
 }

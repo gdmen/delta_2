@@ -22,6 +22,7 @@ import {
   type MetricInput,
   type EventInput,
 } from "@/lib/ingest-service";
+import { loadUserTimezone } from "@/lib/app-settings";
 
 /**
  * POST /api/import-sources/[id]/import
@@ -88,9 +89,13 @@ export async function POST(
   const typeCache = await buildMetricTypeCache();
   const sportCache = await buildSportCache();
   const tracker = new ReconcileTracker();
+  // User timezone anchors naive dates ("2026-05-07" or
+  // "2026-05-07 23:00") to wall-clock time in `tz`. Without this a
+  // late-evening sleep entry in PT lands on the wrong calendar day.
+  const tz = await loadUserTimezone();
 
   for (let i = 0; i < rows.length; i++) {
-    const { out, error } = applyMapping(mapping, headers, rows[i], i);
+    const { out, error } = applyMapping(mapping, headers, rows[i], i, tz);
     if (error) {
       result.errors.push(`row ${i + 2}: ${error}`);
       continue;

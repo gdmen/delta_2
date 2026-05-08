@@ -249,19 +249,52 @@ const MONTHS: Record<string, number> = {
 };
 
 /**
- * Parse a date string per the selected format. Returns ISO 8601 at
- * midnight UTC when the input has no time; returns the raw ISO when the
- * input already carries a time.
+ * Parse a date string per the selected format. Returns ISO 8601 in UTC.
+ *
+ * The `tz` argument controls how naive inputs (a date without time, or a
+ * date+time without explicit offset) are anchored: midnight or the
+ * stated wall-clock time is interpreted in `tz`, then converted to UTC.
+ * Without this, a "2026-05-07" sleep entry from a PT user landed as
+ * 00:00Z, which is 17:00 the previous day in PT — a one-day misfile on
+ * every date-only row. Pass the user's IANA timezone (from
+ * `loadUserTimezone()`); when undefined the function falls back to UTC
+ * for backwards-compat.
  */
-export function parseDate(raw: string, format: DateFormat): string | null {
+export function parseDate(
+  raw: string,
+  format: DateFormat,
+  tz?: string,
+): string | null {
   const s = raw.trim();
   if (!s) return null;
 
   let y: number, m: number, d: number;
 
   if (format === "auto") {
+    // If the input already carries an explicit offset (Z or ±HH:MM),
+    // honor it — Date.parse pins the instant correctly. Otherwise
+    // treat the parsed wall clock as `tz`-local.
+    const hasExplicitOffset = /Z$|[+-]\d{2}:?\d{2}$/.test(s);
     const t = Date.parse(s);
     if (Number.isNaN(t)) return null;
+    if (hasExplicitOffset || !tz) {
+      return new Date(t).toISOString();
+    }
+    // Re-parse the components and rebuild as `tz`-local. Date.parse on
+    // a naive string treats it as UTC for ISO-8601 dates, so we extract
+    // the wall-clock parts from the input string instead of the parsed
+    // Date (which would be UTC-shifted already).
+    const isoMatch = s.match(
+      /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/,
+    );
+    if (isoMatch) {
+      const [, ys, ms, ds, hs, mins, ss] = isoMatch;
+      return zonedWallClockToUtcIso(
+        +ys, +ms, +ds, +(hs ?? 0), +(mins ?? 0), +(ss ?? 0), tz,
+      );
+    }
+    // Slash / dash formats with auto fall through to default behavior;
+    // ECMA Date.parse on these is implementation-defined.
     return new Date(t).toISOString();
   }
 
@@ -296,8 +329,55 @@ export function parseDate(raw: string, format: DateFormat): string | null {
   }
 
   if (!y || !m || !d) return null;
+  if (tz) {
+    return zonedWallClockToUtcIso(y, m, d, 0, 0, 0, tz);
+  }
   const iso = `${y.toString().padStart(4, "0")}-${m.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}T00:00:00.000Z`;
   return iso;
+}
+
+/**
+ * Convert a wall-clock time in IANA `tz` to a UTC ISO-8601 string.
+ *
+ * JS Date constructors only know "UTC" and "system local"; to express
+ * "2026-05-07 00:00 in America/Los_Angeles" we anchor against UTC,
+ * format that anchor in `tz` to recover its wall-clock representation
+ * there, and use the difference as the offset. Standard one-step trick;
+ * survives DST since the offset is computed for the specific instant.
+ */
+function zonedWallClockToUtcIso(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  tz: string,
+): string {
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = Object.fromEntries(
+    dtf.formatToParts(new Date(naiveUtc))
+      .filter((p) => p.type !== "literal")
+      .map((p) => [p.type, p.value]),
+  );
+  // Some locales render midnight as "24" — normalize.
+  const h = parts.hour === "24" ? 0 : +parts.hour;
+  const wallClockAsUtc = Date.UTC(
+    +parts.year, +parts.month - 1, +parts.day,
+    h, +parts.minute, +parts.second,
+  );
+  const offsetMs = wallClockAsUtc - naiveUtc;
+  return new Date(naiveUtc - offsetMs).toISOString();
 }
 
 /**
@@ -355,7 +435,21 @@ export function normalizeWeightToLb(
 ): number {
   if (!cfg) return raw;
   const lower = exerciseName.trim().toLowerCase();
-  const isOverride = (cfg.overrides ?? []).some((e) => e.trim().toLowerCase() === lower);
+  // Match the raw exercise name against each override entry, accepting
+  // both the raw form ("21s") and the source-prefixed form
+  // ("teambuildr:21s") that lands in metric_types after the orphan-first
+  // resolver path. Stripping a leading `<word>:` from the override
+  // covers UI-populated lists that pulled the canonical metric_type
+  // names — without it, a row tagged "21s" in the CSV silently fell
+  // through to the default unit and got converted (kg→lb), turning
+  // 25 lb into ~55 lb.
+  const isOverride = (cfg.overrides ?? []).some((e) => {
+    const o = e.trim().toLowerCase();
+    if (o === lower) return true;
+    const colonIdx = o.indexOf(":");
+    if (colonIdx > 0 && o.slice(colonIdx + 1) === lower) return true;
+    return false;
+  });
   const unit = isOverride ? (cfg.default === "lb" ? "kg" : "lb") : cfg.default;
   if (unit === "kg") return raw * LB_PER_KG;
   return raw;
@@ -396,15 +490,18 @@ export function applyMapping(
   headers: string[],
   row: string[],
   /** 0-based row index; used as a stable set-number fallback. */
-  rowIdx: number
+  rowIdx: number,
+  /** User's IANA timezone for naive-date interpretation. Optional;
+   * undefined falls back to UTC midnight (legacy behavior). */
+  tz?: string,
 ): { out: OutRow[]; error?: string } {
   if (!rowPasses(headers, row, mapping.rowFilter)) return { out: [] };
 
   try {
     switch (mapping.kind) {
-      case "metrics": return applyMetrics(mapping, headers, row);
-      case "events":  return applyEvent(mapping, headers, row);
-      case "workout_sets": return applyWorkoutSet(mapping, headers, row, rowIdx);
+      case "metrics": return applyMetrics(mapping, headers, row, tz);
+      case "events":  return applyEvent(mapping, headers, row, tz);
+      case "workout_sets": return applyWorkoutSet(mapping, headers, row, rowIdx, tz);
     }
   } catch (err) {
     return { out: [], error: err instanceof Error ? err.message : String(err) };
@@ -414,10 +511,11 @@ export function applyMapping(
 function applyMetrics(
   m: MetricsMapping,
   headers: string[],
-  row: string[]
+  row: string[],
+  tz?: string,
 ): { out: OutRow[]; error?: string } {
   if (!m.recordedAt?.ref) return { out: [], error: "mapping missing recordedAt column" };
-  const recordedAt = parseDate(lookup(headers, row, m.recordedAt.ref), m.recordedAt.format ?? "auto");
+  const recordedAt = parseDate(lookup(headers, row, m.recordedAt.ref), m.recordedAt.format ?? "auto", tz);
   if (!recordedAt) return { out: [], error: "could not parse date" };
 
   const sourceIdBase = readSlot(headers, row, m.sourceId);
@@ -449,10 +547,11 @@ function applyMetrics(
 function applyEvent(
   m: EventsMapping,
   headers: string[],
-  row: string[]
+  row: string[],
+  tz?: string,
 ): { out: OutRow[]; error?: string } {
   if (!m.startedAt?.ref) return { out: [], error: "mapping missing startedAt column" };
-  const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto");
+  const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto", tz);
   if (!startedAt) return { out: [], error: "could not parse date" };
 
   const sport = readSlot(headers, row, m.sport);
@@ -499,10 +598,11 @@ function applyWorkoutSet(
   m: WorkoutSetsMapping,
   headers: string[],
   row: string[],
-  rowIdx: number
+  rowIdx: number,
+  tz?: string,
 ): { out: OutRow[]; error?: string } {
   if (!m.startedAt?.ref) return { out: [], error: "mapping missing startedAt column" };
-  const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto");
+  const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto", tz);
   if (!startedAt) return { out: [], error: "could not parse date" };
 
   const sport = readSlot(headers, row, m.sport);

@@ -318,7 +318,7 @@ export async function GET(request: NextRequest) {
       // Synthesize a stable id for rows that don't have one so the import
       // endpoint can dedupe on re-upload. Matches the same formula the
       // importer uses when source_id is blank.
-      r.sourceId ?? `csv_import-${r.metric}-${r.recordedAt}`,
+      r.sourceId ?? `custom-${r.metric}-${r.recordedAt}`,
     ]),
   );
 
@@ -350,7 +350,7 @@ export async function GET(request: NextRequest) {
       r.durationMinutes ?? "",
       r.notes ?? "",
       r.source,
-      r.sourceId ?? `csv_import-${r.sport}-${r.type}-${r.startedAt}`,
+      r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`,
     ]),
   );
 

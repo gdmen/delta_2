@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCsv } from "@/lib/csv";
 import { applyMapping, autoMatchHeaders, type ImportMapping } from "@/lib/import-mapping";
+import { loadUserTimezone } from "@/lib/app-settings";
 
 /**
  * POST /api/import-sources/preview
@@ -49,11 +50,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (mapping) {
+    const tz = await loadUserTimezone();
     const parsed: unknown[] = [];
     const errors: string[] = [];
     let taken = 0;
     for (let i = 0; i < rows.length && taken < 5; i++) {
-      const { out: rowsOut, error } = applyMapping(mapping, headers, rows[i], i);
+      const { out: rowsOut, error } = applyMapping(mapping, headers, rows[i], i, tz);
       if (error) errors.push(`row ${i + 2}: ${error}`);
       if (rowsOut.length > 0) {
         parsed.push(...rowsOut);

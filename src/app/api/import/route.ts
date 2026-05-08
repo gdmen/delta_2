@@ -63,7 +63,7 @@ import { isStatus } from "@/lib/enums";
  *
  * All handlers are idempotent: re-importing the same file is a no-op.
  * Unknown metric names auto-register via the metric-resolver under
- * `csv_import:<rawName>` so they're visible but don't collide with canonicals.
+ * `custom:<rawName>` so they're visible but don't collide with canonicals.
  */
 
 interface TableResult {
@@ -279,7 +279,7 @@ async function importMetrics(text: string): Promise<TableResult> {
       const metricName = row[idx.get("metric")!];
       const valueStr = row[idx.get("value")!];
       const unit = idx.has("unit") ? row[idx.get("unit")!] : "";
-      const source = (idx.has("source") ? row[idx.get("source")!] : "") || "csv_import";
+      const source = (idx.has("source") ? row[idx.get("source")!] : "") || "custom";
       let sourceId = idx.has("source_id") ? row[idx.get("source_id")!] : "";
 
       if (!recordedAt || !metricName || valueStr === "") {
@@ -288,16 +288,16 @@ async function importMetrics(text: string): Promise<TableResult> {
       const value = Number(valueStr);
       if (!Number.isFinite(value)) throw new Error(`non-numeric value "${valueStr}"`);
 
-      if (!sourceId) sourceId = `csv_import-${metricName}-${recordedAt}`;
+      if (!sourceId) sourceId = `custom-${metricName}-${recordedAt}`;
 
       // Orphan-first: drop identity map so unknown columns auto-create
-      // as `csv_import:${name}` instead of silently routing to whatever
+      // as `custom:${name}` instead of silently routing to whatever
       // canonical happens to share the name. Matches the per-source
       // import route's behavior.
       const { id: metricTypeId, alias: metricAlias } = await resolveMetricTypeId({
         rawName: metricName,
         map: {},
-        sourceSystem: "csv_import",
+        sourceSystem: "custom",
         unit: unit || undefined,
         cache: typeCache,
       });
@@ -331,7 +331,7 @@ async function importEvents(text: string): Promise<TableResult> {
       const type = row[idx.get("type")!];
       const durStr = idx.has("duration_minutes") ? row[idx.get("duration_minutes")!] : "";
       const notes = idx.has("notes") ? row[idx.get("notes")!] : "";
-      const source = (idx.has("source") ? row[idx.get("source")!] : "") || "csv_import";
+      const source = (idx.has("source") ? row[idx.get("source")!] : "") || "custom";
       let sourceId = idx.has("source_id") ? row[idx.get("source_id")!] : "";
 
       if (!startedAt || !sportName || !type) throw new Error("missing required field");
@@ -346,7 +346,7 @@ async function importEvents(text: string): Promise<TableResult> {
         throw new Error(`non-numeric duration "${durStr}"`);
       }
 
-      if (!sourceId) sourceId = `csv_import-${sportName}-${type}-${startedAt}`;
+      if (!sourceId) sourceId = `custom-${sportName}-${type}-${startedAt}`;
 
       // If an existing row matches on the natural key but has no source_id,
       // adopt the synthesized one so future imports all dedupe against it.
@@ -415,14 +415,14 @@ async function importEventMetrics(text: string): Promise<TableResult> {
         type: eventType,
       });
       if (parentId === null) {
-        const synthId = eventSourceId || `csv_import-${sportName}-${eventType}-${startedAt}`;
+        const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
           sportId,
           type: eventType,
           durationMinutes: null,
           notes: null,
           startedAt,
-          source: "csv_import",
+          source: "custom",
           sourceId: synthId,
         });
         parentId = eventId;
@@ -431,7 +431,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
       const { id: metricTypeId } = await resolveMetricTypeId({
         rawName: metricName,
         map: {},
-        sourceSystem: "csv_import",
+        sourceSystem: "custom",
         unit: unit || undefined,
         cache: typeCache,
       });
@@ -478,25 +478,25 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
         type: eventType,
       });
       if (parentId === null) {
-        const synthId = eventSourceId || `csv_import-${sportName}-${eventType}-${startedAt}`;
+        const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
           sportId,
           type: eventType,
           durationMinutes: null,
           notes: null,
           startedAt,
-          source: "csv_import",
+          source: "custom",
           sourceId: synthId,
         });
         parentId = eventId;
       }
 
-      // Orphan-first: exercise names land under `csv_import:${name}`
+      // Orphan-first: exercise names land under `custom:${name}`
       // unless an alias routes them. Matches the per-source import path.
       const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
         rawName: exerciseName,
         map: {},
-        sourceSystem: "csv_import",
+        sourceSystem: "custom",
         cache: typeCache,
       });
 
