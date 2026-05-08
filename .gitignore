@@ -48,3 +48,9 @@ next-env.d.ts
 # local tooling
 .claude/worktrees/
 .gstack/
+
+# Local SQLite DB + WAL/SHM sidecars + adhoc backups
+/delta2.db
+/delta2.db-wal
+/delta2.db-shm
+/delta2.db.bak*
