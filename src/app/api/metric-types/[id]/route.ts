@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
+  dailySummaries,
   eventMetrics,
   goals,
   metricTypes,
@@ -110,6 +111,12 @@ export async function DELETE(
       { status: 409 },
     );
   }
+
+  // daily_summaries also has a NOT NULL FK to metric_types but isn't
+  // checked above — those rows are derived/regenerable. Clean them up
+  // as part of the delete so the FK doesn't 500 us when the user
+  // deletes a metric_type that has summaries but no live metrics.
+  await db.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, id));
 
   const result = await db
     .delete(metricTypes)
