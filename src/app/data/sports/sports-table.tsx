@@ -3,6 +3,7 @@
 import { SportsMergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
 import { SelectableDataTable } from "@/components/selectable-data-table";
+import { deleteSportsBulk } from "@/lib/data-table/bulk-delete";
 
 interface SportRow {
   id: number;
@@ -105,6 +106,9 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           onClose={onClose}
         />
       )}
+      onBulkDelete={(selectedRows) =>
+        deleteSportsBulk(selectedRows, (r) => r.id, (r) => r.name)
+      }
     />
   );
 }

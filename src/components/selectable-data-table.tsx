@@ -2,8 +2,18 @@
 
 import { ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useTableSelection } from "@/components/use-table-selection";
 import { cn } from "@/lib/cn";
+
+/** Per-row outcome from a bulk delete pass. Caller returns one entry per
+ * input row so the table can refresh, surface skips, and show errors. */
+export interface BulkDeleteResult<T> {
+  /** Rows that were successfully deleted. */
+  deleted: T[];
+  /** Rows the caller skipped or that the server rejected. */
+  errors: { row: T; message: string }[];
+}
 
 export interface Column<T> {
   header: string;
@@ -35,6 +45,7 @@ export function SelectableDataTable<T, K>({
   rowHref,
   rowHrefAriaLabel,
   renderMergeModal,
+  onBulkDelete,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -49,14 +60,49 @@ export function SelectableDataTable<T, K>({
     selectedRows: T[];
     onClose: () => void;
   }) => ReactNode;
+  /** Called when the user confirms a bulk delete. Caller fans out to the
+   * per-row delete endpoint and returns aggregate results so the table
+   * can show successes / errors. The table refreshes the route on
+   * success so the deleted rows drop out. */
+  onBulkDelete?: (selectedRows: T[]) => Promise<BulkDeleteResult<T>>;
 }) {
+  const router = useRouter();
   const s = useTableSelection(rows, getKey, filterTextFn);
   const colCount = columns.length + 1; // +1 for checkbox column
 
+  async function handleBulkDelete() {
+    if (!onBulkDelete || s.selectedRows.length === 0 || s.busy) return;
+    const n = s.selectedRows.length;
+    const label = n === 1 ? itemLabel.one : itemLabel.many;
+    if (!confirm(`Delete ${n} ${label}? This cannot be undone.`)) return;
+    s.setBusy(true);
+    s.setErrorMsg(null);
+    try {
+      const result = await onBulkDelete(s.selectedRows);
+      s.clearSelection();
+      if (result.errors.length > 0) {
+        const lines = result.errors
+          .slice(0, 8)
+          .map((e) => `• ${e.message}`)
+          .join("\n");
+        const more =
+          result.errors.length > 8 ? `\n…and ${result.errors.length - 8} more` : "";
+        s.setErrorMsg(
+          `Deleted ${result.deleted.length}; ${result.errors.length} failed:\n${lines}${more}`,
+        );
+      }
+      router.refresh();
+    } catch (err) {
+      s.setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      s.setBusy(false);
+    }
+  }
+
   return (
     <div>
-      {(filterTextFn || renderMergeModal) && (
-        <div className="mb-3 flex items-center gap-3">
+      {(filterTextFn || renderMergeModal || onBulkDelete) && (
+        <div className="mb-3 flex items-center gap-3 flex-wrap">
           {filterTextFn && (
             <input
               type="search"
@@ -66,25 +112,46 @@ export function SelectableDataTable<T, K>({
               className="w-full max-w-xs px-3 py-1.5 border border-border rounded text-[0.875rem]"
             />
           )}
-          {renderMergeModal && s.selected.size > 0 && (
+          {(renderMergeModal || onBulkDelete) && s.selected.size > 0 && (
             <>
-              <button
-                type="button"
-                onClick={s.openMerge}
-                disabled={s.selected.size < 2}
-                className="px-3 py-1.5 bg-foreground text-background text-[0.8125rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
-              >
-                Merge {s.selected.size} selected…
-              </button>
+              {renderMergeModal && (
+                <button
+                  type="button"
+                  onClick={s.openMerge}
+                  disabled={s.selected.size < 2 || s.busy}
+                  className="px-3 py-1.5 bg-foreground text-background text-[0.8125rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
+                >
+                  Merge {s.selected.size} selected…
+                </button>
+              )}
+              {onBulkDelete && (
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={s.busy}
+                  className="px-3 py-1.5 border border-accent-red/40 text-accent-red text-[0.8125rem] font-medium rounded hover:bg-accent-red/10 disabled:opacity-50"
+                >
+                  {s.busy
+                    ? "Deleting…"
+                    : `Delete ${s.selected.size} selected`}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={s.clearSelection}
-                className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground"
+                disabled={s.busy}
+                className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground disabled:opacity-50"
               >
                 Clear
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {s.errorMsg && (
+        <div className="mb-3 p-3 border border-accent-red/40 bg-accent-red/10 rounded text-[0.8125rem] text-accent-red whitespace-pre-wrap">
+          {s.errorMsg}
         </div>
       )}
 

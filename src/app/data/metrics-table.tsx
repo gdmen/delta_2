@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { MergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
-import { SelectableDataTable } from "@/components/selectable-data-table";
+import {
+  SelectableDataTable,
+  type BulkDeleteResult,
+} from "@/components/selectable-data-table";
+import { deleteMetricTypesBulk } from "@/lib/data-table/bulk-delete";
 
 interface MetricTypeRow {
   id: number;
@@ -70,6 +74,9 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
           onClose={onClose}
         />
       )}
+      onBulkDelete={async (selectedRows): Promise<BulkDeleteResult<MetricTypeRow>> =>
+        deleteMetricTypesBulk(selectedRows, (r) => r.id, (r) => r.name)
+      }
     />
     </div>
   );

@@ -225,6 +225,13 @@
       "when": 1778968000000,
       "tag": "0031_drop_unused_seeded_canonicals",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1779054400000,
+      "tag": "0032_reroute_bare_canonicals_to_source_prefixed",
+      "breakpoints": true
     }
   ]
 }

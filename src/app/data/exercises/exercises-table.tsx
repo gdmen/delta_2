@@ -3,6 +3,7 @@
 import { MergeModal } from "@/app/data/merge-modal";
 import { formatShort } from "@/lib/format";
 import { SelectableDataTable } from "@/components/selectable-data-table";
+import { deleteMetricTypesBulk } from "@/lib/data-table/bulk-delete";
 
 interface ExerciseRow {
   id: number;
@@ -73,6 +74,9 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           onClose={onClose}
         />
       )}
+      onBulkDelete={(selectedRows) =>
+        deleteMetricTypesBulk(selectedRows, (r) => r.id, (r) => r.name)
+      }
     />
   );
 }

@@ -46,6 +46,12 @@ export function useTableSelection<T, K>(
     setSelected(new Set());
   }
 
+  // Bulk-delete progress state. `busy` blocks repeated clicks.
+  // `errorMsg` surfaces a one-line summary for the user; per-row errors
+  // are returned by the caller via the result object.
+  const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   return {
     filter,
     setFilter,
@@ -61,5 +67,9 @@ export function useTableSelection<T, K>(
       setMergeOpen(false);
       clearSelection();
     },
+    busy,
+    setBusy,
+    errorMsg,
+    setErrorMsg,
   };
 }
