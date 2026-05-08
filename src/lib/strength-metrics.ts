@@ -1,6 +1,17 @@
 import { db } from "@/db";
 import { workoutSets, events, sports, metricTypes } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
+import {
+  BIG_THREE_DEFAULT_NAMES,
+  type Lift,
+  type LiftNames,
+} from "./strength-metrics-defaults";
+
+export {
+  BIG_THREE_DEFAULT_NAMES,
+  type Lift,
+  type LiftNames,
+} from "./strength-metrics-defaults";
 
 /**
  * Big-3 stats for the powerlifting page. Derives everything from
@@ -8,8 +19,6 @@ import { eq, desc } from "drizzle-orm";
  * O'Conner: e1RM = weight * (1 + 0.025 * reps). Reps > 10 skipped (formula
  * degrades). All-time PR is the heaviest actual 1-rep set, not e1RM.
  */
-
-export type Lift = "squat" | "bench" | "deadlift";
 
 export interface LiftTopSet {
   date: string;        // ISO
@@ -39,24 +48,6 @@ export interface LiftStats {
 // -----------------------------------------------------------------------------
 // Lift classification
 // -----------------------------------------------------------------------------
-
-/**
- * Per-lift exercise name. The classifier matches by exact (case-insensitive)
- * name, no substring/excludes guessing. The user picks the canonical name
- * for each slot via the Big-3 widget settings; the coach path uses
- * `BIG_THREE_DEFAULT_NAMES` when it doesn't have a widget config to read.
- */
-export interface LiftNames {
-  squat: string;
-  bench: string;
-  deadlift: string;
-}
-
-export const BIG_THREE_DEFAULT_NAMES: LiftNames = {
-  squat: "Barbell Back Squat",
-  bench: "Flat Barbell Bench Press",
-  deadlift: "Barbell Deadlift",
-};
 
 /**
  * Returns the lift slot whose configured exercise name matches

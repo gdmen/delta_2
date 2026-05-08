@@ -1,5 +1,5 @@
 import { defineWidget } from "../types";
-import { BIG_THREE_DEFAULT_NAMES } from "@/lib/strength-metrics";
+import { BIG_THREE_DEFAULT_NAMES } from "@/lib/strength-metrics-defaults";
 import { bigThreeSchema, type BigThreeConfig } from "./schema";
 import { BigThreeComponent } from "./Component";
 

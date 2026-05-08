@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { BIG_THREE_DEFAULT_NAMES } from "@/lib/strength-metrics";
+// Import from the pure-constants module, NOT from `strength-metrics.ts`
+// — that one pulls `import { db } from "@/db"` into the bundle, and
+// the widget registry loads schema.ts in the editor's client component.
+import { BIG_THREE_DEFAULT_NAMES } from "@/lib/strength-metrics-defaults";
 
 /**
  * Per-slot exercise names. Each is an exact (case-insensitive) match
