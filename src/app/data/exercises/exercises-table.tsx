@@ -33,6 +33,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           header: "Exercise",
           className: "font-mono",
           render: (r) => r.name,
+          sortBy: (r) => r.name.toLowerCase(),
         },
         {
           header: "Sets",
@@ -40,6 +41,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           align: "right",
           className: "font-mono tabular-nums",
           render: (r) => r.sets.toLocaleString(),
+          sortBy: (r) => r.sets,
         },
         {
           header: "Events",
@@ -47,6 +49,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => r.eventCount.toLocaleString(),
+          sortBy: (r) => r.eventCount,
         },
         {
           header: "First",
@@ -54,6 +57,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => (r.firstAt ? formatShort(r.firstAt) : "-"),
+          sortBy: (r) => r.firstAt,
         },
         {
           header: "Last",
@@ -61,6 +65,7 @@ export function ExercisesTable({ rows }: { rows: ExerciseRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => (r.lastAt ? formatShort(r.lastAt) : "-"),
+          sortBy: (r) => r.lastAt,
         },
       ]}
       renderMergeModal={({ selectedRows, onClose }) => (

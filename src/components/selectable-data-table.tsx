@@ -21,6 +21,10 @@ export interface Column<T> {
   align?: "left" | "right";
   className?: string; // extra td classes (font, tabular-nums, etc.)
   render: (row: T) => ReactNode;
+  /** Declares this column as sortable + extracts the comparison key.
+   * Returning null sinks the row to the bottom regardless of direction
+   * (useful for "Last" columns where lastAt may be missing). */
+  sortBy?: (row: T) => string | number | null;
 }
 
 /**
@@ -67,7 +71,8 @@ export function SelectableDataTable<T, K>({
   onBulkDelete?: (selectedRows: T[]) => Promise<BulkDeleteResult<T>>;
 }) {
   const router = useRouter();
-  const s = useTableSelection(rows, getKey, filterTextFn);
+  const sortBys = columns.map((c) => c.sortBy);
+  const s = useTableSelection(rows, getKey, filterTextFn, sortBys);
   const colCount = columns.length + 1; // +1 for checkbox column
 
   async function handleBulkDelete() {
@@ -160,18 +165,37 @@ export function SelectableDataTable<T, K>({
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
             <tr>
               <th className="w-8 px-2 py-2" />
-              {columns.map((col, i) => (
-                <th
-                  key={i}
-                  className={cn(
-                    "font-mono font-semibold px-3 py-2",
-                    col.align === "right" ? "text-right" : "text-left",
-                    col.width,
-                  )}
-                >
-                  {col.header}
-                </th>
-              ))}
+              {columns.map((col, i) => {
+                const sortable = !!col.sortBy;
+                const active = s.sort?.colIdx === i;
+                const indicator = active ? (s.sort!.dir === "asc" ? " ▲" : " ▼") : "";
+                return (
+                  <th
+                    key={i}
+                    className={cn(
+                      "font-mono font-semibold px-3 py-2",
+                      col.align === "right" ? "text-right" : "text-left",
+                      col.width,
+                    )}
+                  >
+                    {sortable ? (
+                      <button
+                        type="button"
+                        onClick={() => s.toggleSort(i)}
+                        className={cn(
+                          "uppercase tracking-wider hover:text-muted",
+                          active && "text-muted",
+                        )}
+                      >
+                        {col.header}
+                        {indicator}
+                      </button>
+                    ) : (
+                      col.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

@@ -47,6 +47,7 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
               {t.unit && <span className="text-muted"> ({t.unit})</span>}
             </>
           ),
+          sortBy: (t) => t.name.toLowerCase(),
         },
         {
           header: "Rows",
@@ -54,6 +55,7 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
           align: "right",
           className: "font-mono tabular-nums",
           render: (t) => t.count.toLocaleString(),
+          sortBy: (t) => t.count,
         },
         {
           header: "Last",
@@ -61,6 +63,7 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (t) => (t.lastAt ? formatShort(t.lastAt) : "-"),
+          sortBy: (t) => t.lastAt,
         },
       ]}
       renderMergeModal={({ selectedRows, onClose }) => (

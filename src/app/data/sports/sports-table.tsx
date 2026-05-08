@@ -63,6 +63,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
               )}
             </div>
           ),
+          sortBy: (r) => r.name.toLowerCase(),
         },
         {
           header: "Events",
@@ -70,6 +71,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           align: "right",
           className: "font-mono tabular-nums",
           render: (r) => r.eventCount.toLocaleString(),
+          sortBy: (r) => r.eventCount,
         },
         {
           header: "Focuses",
@@ -77,6 +79,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => r.focusCount.toLocaleString(),
+          sortBy: (r) => r.focusCount,
         },
         {
           header: "Goals",
@@ -84,6 +87,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => r.goalCount.toLocaleString(),
+          sortBy: (r) => r.goalCount,
         },
         {
           header: "Last event",
@@ -91,6 +95,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
           align: "right",
           className: "font-mono tabular-nums text-muted",
           render: (r) => (r.lastEventAt ? formatShort(r.lastEventAt) : "-"),
+          sortBy: (r) => r.lastEventAt,
         },
       ]}
       renderMergeModal={({ selectedRows, onClose }) => (
