@@ -290,13 +290,19 @@ async function importMetrics(text: string): Promise<TableResult> {
 
       if (!sourceId) sourceId = `custom-${metricName}-${recordedAt}`;
 
-      // Orphan-first: drop identity map so unknown columns auto-create
-      // as `custom:${name}` instead of silently routing to whatever
-      // canonical happens to share the name. Matches the per-source
-      // import route's behavior.
+      // Identity map: this endpoint is the round-trip restore path —
+      // names in metrics.csv are exactly the canonical metric_type
+      // names that came out of /api/export. We WANT them to look up
+      // by name and hit the existing canonical (or, if missing in a
+      // partial restore, auto-create under that exact name). Without
+      // the identity map, a column like `bodyspec_dexa:bodyweight`
+      // falls through to the orphan path and gets re-created as
+      // `custom:bodyspec_dexa:bodyweight` — doubly-prefixed garbage.
+      // The per-source wizard route is different: it uses orphan-first
+      // because the user is mapping arbitrary column names there.
       const { id: metricTypeId, alias: metricAlias } = await resolveMetricTypeId({
         rawName: metricName,
-        map: {},
+        map: { [metricName]: metricName },
         sourceSystem: "custom",
         unit: unit || undefined,
         cache: typeCache,
@@ -428,9 +434,12 @@ async function importEventMetrics(text: string): Promise<TableResult> {
         parentId = eventId;
       }
 
+      // Identity map for round-trip restore — see the comment on the
+      // matching block in importMetrics() above for why this differs
+      // from the per-source wizard route.
       const { id: metricTypeId } = await resolveMetricTypeId({
         rawName: metricName,
-        map: {},
+        map: { [metricName]: metricName },
         sourceSystem: "custom",
         unit: unit || undefined,
         cache: typeCache,
@@ -491,11 +500,14 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
         parentId = eventId;
       }
 
-      // Orphan-first: exercise names land under `custom:${name}`
-      // unless an alias routes them. Matches the per-source import path.
+      // Identity map for round-trip restore — see comment on
+      // importMetrics() above. workout_sets.csv carries the canonical
+      // exercise name (e.g. "Barbell Deadlift" or "teambuildr:21s")
+      // and we want it to find the existing metric_type or auto-create
+      // under that exact name, not orphan-prefix on top.
       const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
         rawName: exerciseName,
-        map: {},
+        map: { [exerciseName]: exerciseName },
         sourceSystem: "custom",
         cache: typeCache,
       });
