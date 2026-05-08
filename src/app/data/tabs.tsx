@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-export type DataTab = "metrics" | "events" | "sports" | "exercises" | "merges";
+export type DataTab = "metrics" | "events" | "sports" | "exercises" | "aliases" | "merges";
 
 /**
  * Tab-style navigation for the Data section. The active tab is derived
@@ -13,6 +13,7 @@ export function DataTabs({ active }: { active: DataTab }) {
       <TabLink href="/data/events" label="Events" active={active === "events"} />
       <TabLink href="/data/sports" label="Sports" active={active === "sports"} />
       <TabLink href="/data/exercises" label="Exercises" active={active === "exercises"} />
+      <TabLink href="/data/aliases" label="Aliases" active={active === "aliases"} />
       <TabLink href="/data/merges" label="Merges" active={active === "merges"} />
     </div>
   );
