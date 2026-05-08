@@ -211,6 +211,13 @@
       "when": 1778795200000,
       "tag": "0029_merge_single_prefix_custom_into_canonical",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1778881600000,
+      "tag": "0030_dedupe_dashboard_widgets",
+      "breakpoints": true
     }
   ]
 }

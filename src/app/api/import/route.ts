@@ -1018,15 +1018,36 @@ async function importDashboards(text: string): Promise<TableResult> {
 }
 
 /**
- * dashboard_widgets.csv: parent dashboard resolved by slug. No natural unique
- * key on widgets (config blobs differ row-to-row), so this handler always
- * inserts. The documented round-trip is wipe + import, not import-on-top-of —
- * doing the latter without a wipe will produce duplicate widget rows.
+ * dashboard_widgets.csv: parent dashboard resolved by slug. Idempotent
+ * on (dashboard_id, widget_type, position) — that triple uniquely
+ * identifies a widget within a dashboard since `position` is the
+ * render-order key the editor maintains. Re-importing the same bundle
+ * is now a no-op instead of duplicating every widget.
+ *
+ * The dedupe is application-side rather than a UNIQUE index because
+ * widget_type isn't a stable user identity: a user could legitimately
+ * have two metric_block widgets at different positions, and they
+ * differ only by config. The (dashboard, type, position) key lines
+ * up exactly with what the export emits, which is the round-trip we
+ * care about.
  */
 async function importDashboardWidgets(text: string): Promise<TableResult> {
   // Build a slug -> id cache so we don't roundtrip per row.
   const dashRows = await db.select({ id: dashboards.id, slug: dashboards.slug }).from(dashboards);
   const dashCache = new Map(dashRows.map((r) => [r.slug, r.id]));
+
+  // Pre-load existing widgets keyed by (dashboard_id, widget_type, position)
+  // so per-row checks are in-memory.
+  const existing = await db
+    .select({
+      dashboardId: dashboardWidgets.dashboardId,
+      widgetType: dashboardWidgets.widgetType,
+      position: dashboardWidgets.position,
+    })
+    .from(dashboardWidgets);
+  const existingKeys = new Set(
+    existing.map((r) => `${r.dashboardId}|${r.widgetType}|${r.position}`),
+  );
 
   return processCsv(
     "dashboard_widgets.csv",
@@ -1060,6 +1081,9 @@ async function importDashboardWidgets(text: string): Promise<TableResult> {
         throw new Error(`config is not valid JSON`);
       }
 
+      const key = `${dashboardId}|${widgetType}|${position}`;
+      if (existingKeys.has(key)) return "skipped";
+
       await db.insert(dashboardWidgets).values({
         dashboardId,
         widgetType,
@@ -1071,6 +1095,9 @@ async function importDashboardWidgets(text: string): Promise<TableResult> {
         gridH,
         position,
       });
+      // Add to the set so within-batch duplicates also get caught (e.g.
+      // a malformed bundle with two rows for the same key).
+      existingKeys.add(key);
       return "accepted";
     },
   );
