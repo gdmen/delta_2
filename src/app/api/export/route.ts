@@ -35,10 +35,14 @@ import { serializeCsv } from "@/lib/csv";
  * `?manual=true` narrows the bundle to data the user typed in by hand
  * (metrics + events with source="manual", manual-source focuses, plus
  * goals + journal entries + dashboards which are always manual). The
- * supporting catalog (sports, metric_types, aliases, import_sources)
- * still ships in full so re-import has FK targets to land on.
- * Operational rows (coach_calls, reconcile_log, daily_summaries,
- * merge_log) are skipped — they regenerate or no longer apply.
+ * supporting catalog (sports, metric_types, aliases) is also narrowed
+ * to ONLY the rows actually referenced by the exported slice — so a
+ * manual export doesn't bloat the bundle with every sport and metric
+ * in the DB. import_sources + source_settings still ship in full
+ * because they're tiny and configuration-shaped (no rows reference
+ * them by id, so no narrowing is meaningful). Operational rows
+ * (coach_calls, reconcile_log, daily_summaries, merge_log) are
+ * skipped — they regenerate or no longer apply.
  *
  * Foundational catalog:
  *   - sports.csv                 - name, color
@@ -92,8 +96,19 @@ export async function GET(request: NextRequest) {
       ).map((r) => r.id)
     : [];
 
+  // In manual mode, narrow the supporting catalog (sports, metric_types,
+  // metric_type_aliases) to only what's actually referenced by the
+  // exported slice plus the always-included tables (goals, dashboards,
+  // journal entries). Without this, a manual export ships every sport
+  // and metric_type in the DB even though most aren't reachable from
+  // the exported rows — bloats the bundle and clutters the re-import.
+  const { neededMetricTypeNames, neededSportNames } = manualOnly
+    ? await collectManualNeededRefs(manualEventIds)
+    : { neededMetricTypeNames: null, neededSportNames: null };
+
   // --- sports.csv ----------------------------------------------------------
-  const sportRows = await db.select().from(sports).orderBy(asc(sports.name));
+  const sportRows = (await db.select().from(sports).orderBy(asc(sports.name)))
+    .filter((r) => !neededSportNames || neededSportNames.has(r.name));
   const sportsCsv = serializeCsv(
     ["name", "color"],
     sportRows.map((r) => [r.name, r.color]),
@@ -104,7 +119,7 @@ export async function GET(request: NextRequest) {
   // target + higher_is_better drive widget headline color coding (see
   // src/lib/metric-history.ts); re-importing a CSV without them would
   // silently reset every metric's target to NULL.
-  const mtRows = await db
+  const mtRows = (await db
     .select({
       name: metricTypes.name,
       unit: metricTypes.unit,
@@ -115,7 +130,8 @@ export async function GET(request: NextRequest) {
     })
     .from(metricTypes)
     .leftJoin(sports, eq(metricTypes.sportId, sports.id))
-    .orderBy(asc(metricTypes.name));
+    .orderBy(asc(metricTypes.name)))
+    .filter((r) => !neededMetricTypeNames || neededMetricTypeNames.has(r.name));
   const metricTypesCsv = serializeCsv(
     ["name", "unit", "frequency_hint", "target", "higher_is_better", "sport"],
     mtRows.map((r) => [
@@ -129,7 +145,7 @@ export async function GET(request: NextRequest) {
   );
 
   // --- metric_type_aliases.csv ---------------------------------------------
-  const aliasRows = await db
+  const aliasRows = (await db
     .select({
       alias: metricTypeAliases.alias,
       canonical: metricTypes.name,
@@ -139,7 +155,8 @@ export async function GET(request: NextRequest) {
       metricTypes,
       eq(metricTypeAliases.canonicalMetricTypeId, metricTypes.id),
     )
-    .orderBy(asc(metricTypeAliases.alias));
+    .orderBy(asc(metricTypeAliases.alias)))
+    .filter((r) => !neededMetricTypeNames || neededMetricTypeNames.has(r.canonical));
   const metricTypeAliasesCsv = serializeCsv(
     ["alias", "canonical"],
     aliasRows.map((r) => [r.alias, r.canonical]),
@@ -723,4 +740,154 @@ export async function GET(request: NextRequest) {
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
+}
+
+/**
+ * Walk a parsed widget config (or any JSON value) and collect every
+ * string at a `metric` key. Covers the metric-strip / metric-block /
+ * metrics-grid shapes (`{metric: "name"}`, `{metrics: [{metric: "name"}]}`)
+ * without hard-coding the per-widget schema. Forward-compatible with
+ * any new widget that uses the same key naming.
+ */
+function collectMetricNamesFromConfig(value: unknown, out: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const v of value) collectMetricNamesFromConfig(v, out);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "metric" && typeof v === "string" && v.length > 0) {
+        out.add(v);
+      } else {
+        collectMetricNamesFromConfig(v, out);
+      }
+    }
+  }
+}
+
+/**
+ * Compute the metric_type + sport names actually referenced by the
+ * manual-export slice. Includes:
+ *   - metric_types referenced by manual metrics
+ *   - metric_types referenced by event_metrics on manual events
+ *   - metric_types referenced by workout_sets on manual events
+ *   - metric_types referenced by every goal (always included)
+ *   - metric_types referenced by every journal entry (always included)
+ *   - metric_types referenced inside every dashboard widget config
+ *   - sports referenced by manual events, every goal, every dashboard,
+ *     and any metric_type we're including
+ */
+async function collectManualNeededRefs(manualEventIds: number[]): Promise<{
+  neededMetricTypeNames: Set<string>;
+  neededSportNames: Set<string>;
+}> {
+  const neededTypeIds = new Set<number>();
+
+  // metrics tagged with source=manual
+  for (const r of await db
+    .selectDistinct({ id: metrics.metricTypeId })
+    .from(metrics)
+    .where(eq(metrics.source, "manual"))) {
+    neededTypeIds.add(r.id);
+  }
+
+  if (manualEventIds.length > 0) {
+    for (const r of await db
+      .selectDistinct({ id: eventMetrics.metricTypeId })
+      .from(eventMetrics)
+      .where(inArray(eventMetrics.eventId, manualEventIds))) {
+      neededTypeIds.add(r.id);
+    }
+    for (const r of await db
+      .selectDistinct({ id: workoutSets.exerciseMetricTypeId })
+      .from(workoutSets)
+      .where(inArray(workoutSets.eventId, manualEventIds))) {
+      neededTypeIds.add(r.id);
+    }
+  }
+
+  for (const r of await db.selectDistinct({ id: goals.metricTypeId }).from(goals)) {
+    neededTypeIds.add(r.id);
+  }
+  for (const r of await db
+    .select({ id: goalJournalEntries.linkedMetricTypeId })
+    .from(goalJournalEntries)) {
+    if (r.id != null) neededTypeIds.add(r.id);
+  }
+
+  // Widget configs reference metric_types by NAME inside JSON. Walk
+  // each parsed config for every `metric` key, then translate names
+  // to ids once we resolve them against metric_types.
+  const widgetConfigRows = await db
+    .select({ config: dashboardWidgets.config })
+    .from(dashboardWidgets);
+  const namesFromWidgets = new Set<string>();
+  for (const row of widgetConfigRows) {
+    try {
+      collectMetricNamesFromConfig(JSON.parse(row.config), namesFromWidgets);
+    } catch {
+      // Unparseable config — already broken, just skip it.
+    }
+  }
+
+  // Resolve widget metric names + collect existing names for the
+  // already-by-id set so the final Set returned is name-keyed (which
+  // is what the export filters on).
+  const idsArray = [...neededTypeIds];
+  const byIdRows = idsArray.length > 0
+    ? await db
+        .select({
+          id: metricTypes.id,
+          name: metricTypes.name,
+          sportId: metricTypes.sportId,
+        })
+        .from(metricTypes)
+        .where(inArray(metricTypes.id, idsArray))
+    : [];
+  const neededTypeNames = new Set<string>();
+  const sportIdsFromTypes = new Set<number>();
+  for (const r of byIdRows) {
+    neededTypeNames.add(r.name);
+    if (r.sportId != null) sportIdsFromTypes.add(r.sportId);
+  }
+  for (const name of namesFromWidgets) neededTypeNames.add(name);
+  // Sport-link follow-up for widget-named metric_types we hadn't
+  // already loaded by id.
+  if (namesFromWidgets.size > 0) {
+    const widgetTypeRows = await db
+      .select({ name: metricTypes.name, sportId: metricTypes.sportId })
+      .from(metricTypes)
+      .where(inArray(metricTypes.name, [...namesFromWidgets]));
+    for (const r of widgetTypeRows) {
+      if (r.sportId != null) sportIdsFromTypes.add(r.sportId);
+    }
+  }
+
+  // sport_ids referenced by exported events + always-included goals + dashboards
+  const neededSportIds = new Set<number>(sportIdsFromTypes);
+  if (manualEventIds.length > 0) {
+    for (const r of await db
+      .selectDistinct({ id: events.sportId })
+      .from(events)
+      .where(inArray(events.id, manualEventIds))) {
+      neededSportIds.add(r.id);
+    }
+  }
+  for (const r of await db.selectDistinct({ id: goals.sportId }).from(goals)) {
+    neededSportIds.add(r.id);
+  }
+  for (const r of await db.select({ id: dashboards.sportId }).from(dashboards)) {
+    if (r.id != null) neededSportIds.add(r.id);
+  }
+
+  const neededSportNames = new Set<string>();
+  if (neededSportIds.size > 0) {
+    const sportRows2 = await db
+      .select({ name: sports.name })
+      .from(sports)
+      .where(inArray(sports.id, [...neededSportIds]));
+    for (const r of sportRows2) neededSportNames.add(r.name);
+  }
+
+  return { neededMetricTypeNames: neededTypeNames, neededSportNames };
 }
