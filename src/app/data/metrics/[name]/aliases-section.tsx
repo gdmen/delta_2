@@ -50,7 +50,7 @@ export function AliasesSection({ initialAliases }: Props) {
           >
             <code className="font-mono text-[0.8125rem] truncate">{alias}</code>
             <Link
-              href={`/data/merges?alias=${encodeURIComponent(alias)}`}
+              href={`/data/merges?q=${encodeURIComponent(alias)}`}
               className="text-[0.75rem] text-muted hover:text-foreground"
             >
               Find merge →

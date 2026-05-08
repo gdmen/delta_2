@@ -62,7 +62,7 @@ export default async function AliasesPage() {
                 >
                   <td className="px-3 py-2 font-mono">
                     <Link
-                      href={`/data/merges?alias=${encodeURIComponent(r.alias)}`}
+                      href={`/data/merges?q=${encodeURIComponent(r.alias)}`}
                       className="hover:underline"
                       title="Find the merge that created this alias"
                     >
