@@ -236,10 +236,7 @@ export default async function MetricHistoryPage({
         initialHigherIsBetter={type.higherIsBetter}
       />
       {!computed && (
-        <AliasesSection
-          metricTypeId={type.id}
-          initialAliases={aliases.map((a) => a.alias)}
-        />
+        <AliasesSection initialAliases={aliases.map((a) => a.alias)} />
       )}
       {!computed && (
         <PaginationControls

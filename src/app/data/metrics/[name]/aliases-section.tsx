@@ -1,24 +1,25 @@
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface Props {
-  metricTypeId: number;
   initialAliases: string[];
 }
 
 /**
- * "Aliases" section on the metric detail page. Lists every alias that routes
- * incoming ingest to this metric_type, with a per-alias remove button.
+ * "Aliases" section on the metric detail page. Lists every alias that
+ * routes incoming ingest to this metric_type. Each alias links to the
+ * merges page filtered to the merge that produced it — the alias was
+ * born of a merge, so the merge entry is also where you go to undo
+ * the routing.
+ *
+ * Server component now (was a client component when it had a Remove
+ * button calling DELETE /api/metric-types/:id/aliases/:alias). The
+ * delete endpoint was removed in favor of "undo the merge instead":
+ * direct alias removal is a footgun (you can re-create an unmerged
+ * orphan with no audit trail), and every alias is born of a merge
+ * anyway.
  */
-export function AliasesSection({ metricTypeId, initialAliases }: Props) {
-  const router = useRouter();
-  const [aliases, setAliases] = useState(initialAliases);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  if (aliases.length === 0) {
+export function AliasesSection({ initialAliases }: Props) {
+  if (initialAliases.length === 0) {
     return (
       <section className="mb-8">
         <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-2">
@@ -32,57 +33,31 @@ export function AliasesSection({ metricTypeId, initialAliases }: Props) {
     );
   }
 
-  async function remove(alias: string) {
-    setRemoving(alias);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/metric-types/${metricTypeId}/aliases/${encodeURIComponent(alias)}`,
-        { method: "DELETE" }
-      );
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error ?? `HTTP ${res.status}`);
-      }
-      setAliases((a) => a.filter((x) => x !== alias));
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRemoving(null);
-    }
-  }
-
   return (
     <section className="mb-8">
       <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-2">
         Aliases
       </h2>
       <p className="text-[0.8125rem] text-text-secondary mb-3">
-        Raw import names that route incoming data here. Remove to stop routing —
-        future imports under the removed name will auto-create a new metric type.
+        Raw import names that route incoming data here. To stop routing,
+        undo the merge that created the alias.
       </p>
       <ul className="border border-border rounded divide-y divide-border">
-        {aliases.map((alias) => (
+        {initialAliases.map((alias) => (
           <li
             key={alias}
             className="flex items-center justify-between px-3 py-2 gap-3"
           >
             <code className="font-mono text-[0.8125rem] truncate">{alias}</code>
-            <button
-              type="button"
-              onClick={() => remove(alias)}
-              disabled={removing === alias}
-              className="text-[0.75rem] text-muted hover:text-red-400 disabled:opacity-50"
+            <Link
+              href={`/data/merges?alias=${encodeURIComponent(alias)}`}
+              className="text-[0.75rem] text-muted hover:text-foreground"
             >
-              {removing === alias ? "Removing…" : "Remove"}
-            </button>
+              Find merge →
+            </Link>
           </li>
         ))}
       </ul>
-      {error && (
-        <div className="mt-2 text-[0.75rem] text-red-400">{error}</div>
-      )}
     </section>
   );
 }

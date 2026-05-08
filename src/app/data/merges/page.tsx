@@ -4,6 +4,7 @@ import { mergeLog } from "@/db/schema";
 import { desc } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { MergesUndoButton } from "./undo-button";
+import { MergesFilterInput } from "./filter-input";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +49,16 @@ function dayLabel(key: string): string {
   return key;
 }
 
-export default async function MergesPage() {
-  const rows = (await db
+export default async function MergesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ alias?: string; q?: string }>;
+}) {
+  const sp = await searchParams;
+  const aliasParam = sp.alias?.trim() ?? "";
+  const qParam = sp.q?.trim() ?? "";
+
+  const allRows = (await db
     .select({
       id: mergeLog.id,
       kind: mergeLog.kind,
@@ -60,7 +69,30 @@ export default async function MergesPage() {
     })
     .from(mergeLog)
     .orderBy(desc(mergeLog.createdAt))
-    .limit(50)) as MergeRow[];
+    .limit(200)) as MergeRow[];
+
+  // Apply filters in-memory. The `mergedNames` column is comma-joined
+  // names — a metric_type merge's merged-away name is what becomes the
+  // alias on the canonical, so an alias deep-link matches against
+  // `mergedNames` (split on comma + trim) rather than the whole string.
+  // Free-text `q` matches anywhere in either column.
+  let rows = allRows;
+  if (aliasParam) {
+    const needle = aliasParam.toLowerCase();
+    rows = rows.filter((r) =>
+      r.mergedNames
+        .split(",")
+        .map((n) => n.trim().toLowerCase())
+        .includes(needle),
+    );
+  } else if (qParam) {
+    const needle = qParam.toLowerCase();
+    rows = rows.filter(
+      (r) =>
+        r.mergedNames.toLowerCase().includes(needle) ||
+        r.canonicalName.toLowerCase().includes(needle),
+    );
+  }
 
   // Group by day key. Insertion order preserves desc-by-date order
   // because rows are already sorted.
@@ -81,20 +113,41 @@ export default async function MergesPage() {
       }}
       description="Recent metric_type and sport merges. Click Undo to reverse one — restores the merged rows + re-points everything that pointed at the canonical back to the original. Chain merges (you merged A→B then B→C) require undoing the more-recent one first."
     >
+      <MergesFilterInput initial={qParam} />
+      {aliasParam && (
+        <div className="mb-3 text-[0.8125rem] text-text-secondary">
+          Showing merges that produced alias{" "}
+          <code className="font-mono bg-surface px-1.5 py-0.5 rounded">
+            {aliasParam}
+          </code>
+          .{" "}
+          <Link href="/data/merges" className="text-muted hover:text-foreground underline">
+            Clear
+          </Link>
+        </div>
+      )}
       {rows.length === 0 ? (
         <div className="border border-border rounded p-8 text-center">
-          <p className="text-[0.875rem] text-text-secondary mb-2">
-            No merges yet.
-          </p>
-          <p className="text-[0.8125rem] text-muted">
-            When you combine duplicate metric types or sports, they&apos;ll appear here for undo.
-          </p>
-          <Link
-            href="/data/metrics"
-            className="inline-block mt-4 text-[0.8125rem] text-foreground underline"
-          >
-            Go to metric types →
-          </Link>
+          {aliasParam || qParam ? (
+            <p className="text-[0.875rem] text-text-secondary mb-2">
+              No merges match the current filter.
+            </p>
+          ) : (
+            <>
+              <p className="text-[0.875rem] text-text-secondary mb-2">
+                No merges yet.
+              </p>
+              <p className="text-[0.8125rem] text-muted">
+                When you combine duplicate metric types or sports, they&apos;ll appear here for undo.
+              </p>
+              <Link
+                href="/data/metrics"
+                className="inline-block mt-4 text-[0.8125rem] text-foreground underline"
+              >
+                Go to metric types →
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-6">
