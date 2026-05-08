@@ -3,53 +3,23 @@ import { metricTypes, sports, workoutSets } from "./schema";
 import { eq, sql } from "drizzle-orm";
 import { slugifyExercise } from "../lib/computed-metrics";
 
-// NOTE: Delta's canonical metric_types are also seeded by migration
-// 0006_redundant_bullseye.sql so every DB has them regardless of whether
-// this script is run. Keep the two lists in sync when adding canonicals.
+// Built-in metric_types are no longer seeded. Importers (Strava, Apple
+// Health, BodySpec, CSV) all auto-create source-prefixed orphans on
+// first ingest (`apple_health:sleep_hours`, `strava:distance_km`,
+// `bodyspec_dexa:bodyweight`, etc.). The user merges them into their
+// preferred canonical names via /data/metrics. This keeps the catalog
+// driven entirely by what the user actually uses, instead of starting
+// every DB with 21 rows that may or may not match the user's intent.
 //
-// Sports are NOT seeded. They auto-create on first import via
-// src/lib/ingest/sport-resolver.ts as `<source>:<rawName>` (e.g.
-// `strava:Ride`, `apple_health:Hiking`); the user merges them into
-// canonical names via /data/sports. Migration 0021 deletes any
-// previously-seeded canonicals that no rows reference.
-
-const METRIC_TYPES = [
-  // Note: bench_1rm / squat_1rm / deadlift_1rm were seeded primitives in
-  // earlier versions. Removed 2026-05-04 — equivalent computed metrics
-  // (e.g. flat_barbell_bench_press_e1rm, barbell_back_squat_max) are
-  // auto-seeded from workout_sets in seedComputedMetricTypes() and carry
-  // strictly more information (per-day max e1RM, lifetime PR step graph,
-  // etc.). Migration 0020 deletes them from existing DBs and re-points
-  // any goal that targeted them.
-  { name: "bodyweight", unit: "lb", frequencyHint: "daily" as const },
-  { name: "body_fat_pct", unit: "%", frequencyHint: "occasional" as const },
-  { name: "lean_mass", unit: "lb", frequencyHint: "occasional" as const },
-  { name: "fat_mass", unit: "lb", frequencyHint: "occasional" as const },
-  { name: "bone_mineral_density", unit: "g/cm²", frequencyHint: "occasional" as const },
-  { name: "visceral_fat_mass", unit: "lb", frequencyHint: "occasional" as const },
-  { name: "sleep_hours", unit: "h", frequencyHint: "daily" as const },
-  { name: "sleep_deep_hours", unit: "h", frequencyHint: "daily" as const },
-  { name: "sleep_rem_hours", unit: "h", frequencyHint: "daily" as const },
-  { name: "hrv_ms", unit: "ms", frequencyHint: "daily" as const },
-  { name: "resting_hr", unit: "bpm", frequencyHint: "daily" as const },
-  { name: "protein_g", unit: "g", frequencyHint: "daily" as const },
-  { name: "water_oz", unit: "oz", frequencyHint: "daily" as const },
-  { name: "fiber_g", unit: "g", frequencyHint: "daily" as const },
-  { name: "active_energy_kcal", unit: "kcal", frequencyHint: "daily" as const },
-  { name: "steps", unit: "steps", frequencyHint: "daily" as const },
-  { name: "vo2_max", unit: "mL/kg/min", frequencyHint: "weekly" as const },
-  { name: "distance_km", unit: "km", frequencyHint: "occasional" as const },
-  { name: "elevation_gain_m", unit: "m", frequencyHint: "occasional" as const },
-  { name: "avg_hr", unit: "bpm", frequencyHint: "occasional" as const },
-  { name: "max_hr", unit: "bpm", frequencyHint: "occasional" as const },
-];
+// Sports follow the same model: they auto-create on first import via
+// src/lib/ingest/sport-resolver.ts as `<source>:<rawName>`; user merges
+// into canonical names via /data/sports.
+//
+// Computed metric_types are still seeded — those are synthesized at
+// read time from workout_sets and need a metric_types row to exist for
+// the picker UI + goal FKs to work.
 
 async function seed() {
-  console.log("Seeding metric types...");
-  for (const mt of METRIC_TYPES) {
-    await db.insert(metricTypes).values(mt).onConflictDoNothing();
-  }
-
   await seedComputedMetricTypes();
 
   console.log("Seed complete.");

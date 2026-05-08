@@ -207,15 +207,14 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Resolver: direct → alias → auto-create. The map points the raw
-      // name at the prefixed canonical so a populated catalog hits
-      // directly; merges + cold runs route through the alias and
-      // auto-create paths respectively. Unit lands on auto-created rows
-      // so a later merge into a unit-bearing canonical doesn't trip the
-      // unit-mismatch guard.
+      // Resolver: alias → auto-create as `${SOURCE_SYSTEM}:${rawName}`.
+      // First scan auto-creates the orphan; subsequent merges + future
+      // ingests route through the alias table. Unit lands on the
+      // auto-created row so a later merge into a unit-bearing canonical
+      // doesn't trip the unit-mismatch guard.
       const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
         rawName,
-        map: { [rawName]: `${SOURCE_SYSTEM}:${rawName}` },
+        map: {},
         sourceSystem: SOURCE_SYSTEM,
         unit,
         cache,

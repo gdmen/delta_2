@@ -218,6 +218,13 @@
       "when": 1778881600000,
       "tag": "0030_dedupe_dashboard_widgets",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1778968000000,
+      "tag": "0031_drop_unused_seeded_canonicals",
+      "breakpoints": true
     }
   ]
 }

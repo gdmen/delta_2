@@ -118,17 +118,22 @@ export async function POST(request: NextRequest) {
 
   for (const m of metricsIn) {
     // Special-case sleep_analysis: HAE ships one object per night with
-    // totalSleep/deep/rem/... fields. Explode into multiple canonical rows.
+    // totalSleep/deep/rem/... fields. Explode into multiple rows, one
+    // per facet. Each facet routes through the orphan-first resolver
+    // like every other ingest path — first run lands them as
+    // `apple_health:sleep_hours`, `apple_health:sleep_deep_hours`,
+    // `apple_health:sleep_rem_hours`. The user merges them into their
+    // preferred canonical names via /data/metrics if they want.
     if (m.name === "sleep_analysis") {
       for (const p of m.data) {
         const iso = normalizeDate(p.date);
         const total = p.asleep ?? p.totalSleep;
 
-        const pushSleep = async (canonicalName: string, value: number | undefined) => {
+        const pushSleep = async (rawName: string, value: number | undefined) => {
           if (typeof value !== "number") return;
           const { id: typeId, alias: typeAlias } = await resolveMetricTypeId({
-            rawName: canonicalName,
-            map: { [canonicalName]: canonicalName },
+            rawName,
+            map: {},
             sourceSystem: "apple_health",
             unit: "h",
             cache: typeCache,
@@ -138,7 +143,7 @@ export async function POST(request: NextRequest) {
             value,
             recordedAt: iso,
             source: "apple_health",
-            sourceId: `hae-${canonicalName}-${iso}`,
+            sourceId: `hae-${rawName}-${iso}`,
             alias: typeAlias,
           });
         };

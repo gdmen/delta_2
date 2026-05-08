@@ -4,7 +4,11 @@ import { ingestConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
 import { upsertEvent, upsertEventMetric } from "@/lib/ingest-service";
-import { buildMetricTypeCache, MetricTypeCache } from "@/lib/ingest/metric-resolver";
+import {
+  buildMetricTypeCache,
+  resolveMetricTypeId,
+  MetricTypeCache,
+} from "@/lib/ingest/metric-resolver";
 import { buildSportCache, resolveSportId, SportCache } from "@/lib/ingest/sport-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
@@ -161,32 +165,34 @@ async function ingestOne(
     });
     tracker.recordEvent(sourceId, activity.start_date);
 
-    // Attach per-event metrics. Upsert is keyed on (eventId, metricTypeId)
-    // so re-syncs refresh values rather than duplicating. Canonical metric
-    // types are migration-seeded; the undefined guard is defense-in-depth.
-    const attach: Array<[canonical: string, value: number]> = [];
+    // Attach per-event metrics. Routes through the orphan-first
+    // resolver so first sync auto-creates `strava:distance_km` etc.
+    // and the user merges into preferred canonical names via
+    // /data/metrics. Upsert is keyed on (eventId, metricTypeId) so
+    // re-syncs refresh values rather than duplicating.
+    const attach: Array<[rawName: string, unit: string, value: number]> = [];
     if (Number.isFinite(activity.distance)) {
-      attach.push(["distance_km", Number((activity.distance * METERS_TO_KM).toFixed(3))]);
+      attach.push(["distance_km", "km", Number((activity.distance * METERS_TO_KM).toFixed(3))]);
     }
     if (typeof activity.total_elevation_gain === "number") {
-      attach.push(["elevation_gain_m", Math.round(activity.total_elevation_gain)]);
+      attach.push(["elevation_gain_m", "m", Math.round(activity.total_elevation_gain)]);
     }
     if (typeof activity.average_heartrate === "number") {
-      attach.push(["avg_hr", Math.round(activity.average_heartrate)]);
+      attach.push(["avg_hr", "bpm", Math.round(activity.average_heartrate)]);
     }
     if (typeof activity.max_heartrate === "number") {
-      attach.push(["max_hr", Math.round(activity.max_heartrate)]);
+      attach.push(["max_hr", "bpm", Math.round(activity.max_heartrate)]);
     }
-    // Alias-aware lookup: byName covers the seeded canonical; aliasToId
-    // covers the case where the user merged the canonical (e.g.
-    // `distance_km` → `distance_total_km`). Without the fallback the
-    // attachment would silently drop on every future sync after a merge.
-    await Promise.all(
-      attach.map(([name, value]) => {
-        const id = typeCache.byName.get(name) ?? typeCache.aliasToId.get(name);
-        return id === undefined ? undefined : upsertEventMetric(eventId, id, value);
-      }),
-    );
+    for (const [rawName, unit, value] of attach) {
+      const { id } = await resolveMetricTypeId({
+        rawName,
+        map: {},
+        sourceSystem: "strava",
+        unit,
+        cache: typeCache,
+      });
+      await upsertEventMetric(eventId, id, value);
+    }
 
     if (status === "accepted") result.accepted++;
     else result.skipped++; // already existed - deduped
