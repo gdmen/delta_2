@@ -1,1 +1,0 @@
-ALTER TABLE `focuses` ADD `goal_id` integer REFERENCES goals(id);

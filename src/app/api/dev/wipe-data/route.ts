@@ -21,7 +21,7 @@ import {
   mergeLog,
 } from "@/db/schema";
 import { sql } from "drizzle-orm";
-import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { PgTable } from "drizzle-orm/pg-core";
 
 /**
  * POST /api/dev/wipe-data
@@ -56,7 +56,7 @@ export async function POST() {
   // wipe is also correct if someone flips FKs back on inside the txn.
   // Imports stay on the schema objects so a deleted table breaks the
   // build instead of the runtime.
-  const tables: Array<{ name: string; obj: SQLiteTable }> = [
+  const tables: Array<{ name: string; obj: PgTable }> = [
     { name: "workout_sets", obj: workoutSets },
     { name: "event_metrics", obj: eventMetrics },
     { name: "goal_journal_entries", obj: goalJournalEntries },
@@ -82,34 +82,25 @@ export async function POST() {
     { name: "dashboards", obj: dashboards },
   ];
 
+  // Count rows per table BEFORE wiping for the response payload.
   const counts: Record<string, number> = {};
-
-  // No transaction wrapper — better-sqlite3's drizzle binding requires a
-  // SYNC callback and rejects async functions. We also can't toggle
-  // PRAGMA foreign_keys inside a transaction (SQLite spec). Sequential
-  // deletes in autocommit mode work fine here: each statement is its
-  // own implicit txn, the PRAGMA OFF persists across them, and a power
-  // loss mid-wipe only matters for a dev tool that's about to be
-  // followed by a full re-import anyway.
-  await db.run(sql`PRAGMA foreign_keys = OFF`);
-  try {
-    for (const t of tables) {
-      const result = await db.delete(t.obj).run();
-      counts[t.name] =
-        typeof result === "object" && result !== null && "changes" in result
-          ? Number((result as { changes?: unknown }).changes ?? 0)
-          : 0;
-    }
-    // Reset AUTOINCREMENT so imported rows land with their original
-    // ids (or restart at 1 if the source didn't have ids).
-    // sqlite_sequence is auto-managed; deleting rows from it is the
-    // supported reset.
-    await db.run(sql`DELETE FROM sqlite_sequence`);
-  } finally {
-    // Always restore FK enforcement for downstream requests on this
-    // connection, even if a delete threw mid-loop.
-    await db.run(sql`PRAGMA foreign_keys = ON`);
+  for (const t of tables) {
+    const r = await db.execute(
+      sql`SELECT count(*)::int AS n FROM ${sql.raw(`"${t.name}"`)}`,
+    );
+    counts[t.name] = (r[0] as { n: number }).n;
   }
+
+  // ONE TRUNCATE statement covering every table at once, with
+  // `RESTART IDENTITY CASCADE`. Critical: a per-table loop deadlocks
+  // because each CASCADE acquires AccessExclusive locks on dependent
+  // tables in different orders across iterations. Single-statement
+  // TRUNCATE acquires every lock atomically, no deadlock window.
+  // Mirrors what scripts/wipe-data.sh does with one TRUNCATE.
+  const tableList = sql.raw(tables.map((t) => `"${t.name}"`).join(", "));
+  await db.execute(
+    sql`TRUNCATE TABLE ${tableList} RESTART IDENTITY CASCADE`,
+  );
 
   return NextResponse.json({
     ok: true,

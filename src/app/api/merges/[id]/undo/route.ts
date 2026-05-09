@@ -45,7 +45,7 @@ export async function POST(
   // not found.
   const claimed = await db
     .update(mergeLog)
-    .set({ undoneAt: sql`(datetime('now'))` })
+    .set({ undoneAt: new Date().toISOString() })
     .where(sql`${mergeLog.id} = ${id} AND ${mergeLog.undoneAt} IS NULL`)
     .returning({
       id: mergeLog.id,
@@ -80,7 +80,7 @@ export async function POST(
     payload = JSON.parse(row.payload) as MergeLogPayloadV1;
   } catch (err) {
     // Roll back the claim — the row is corrupted, can't undo.
-    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
     return NextResponse.json(
       { error: `merge payload corrupted: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 },
@@ -88,7 +88,7 @@ export async function POST(
   }
 
   if (payload.v !== 1) {
-    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
     return NextResponse.json(
       { error: `unsupported merge_log payload version: ${payload.v}` },
       { status: 500 },
@@ -106,7 +106,7 @@ export async function POST(
       .where(eq(metricTypes.id, payload.canonicalId))
       .limit(1);
     if (canonicalRow.length === 0) {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
       return NextResponse.json(
         {
           error:
@@ -122,7 +122,7 @@ export async function POST(
         .from(metricTypes)
         .where(inArray(metricTypes.id, mergedIds));
       if (colliding.length > 0) {
-        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
         return NextResponse.json(
           {
             error:
@@ -139,7 +139,7 @@ export async function POST(
       .where(eq(sports.id, payload.canonicalId))
       .limit(1);
     if (canonicalRow.length === 0) {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
       return NextResponse.json(
         {
           error:
@@ -155,7 +155,7 @@ export async function POST(
         .from(sports)
         .where(inArray(sports.id, mergedIds));
       if (colliding.length > 0) {
-        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
         return NextResponse.json(
           {
             error:
@@ -167,11 +167,13 @@ export async function POST(
     }
   }
 
-  // Step 3: apply undo inside a transaction. Sync recompute of
-  // daily_summaries happens here; dashboard is immediately correct.
+  // Step 3: apply undo inside a transaction. The recompute of
+  // daily_summaries happens here; dashboard is immediately correct on
+  // the response. postgres-js transactions are async — the callback
+  // returns a promise and any throw rolls back.
   try {
-    db.transaction((tx) => {
-      applyMergeUndo(tx, payload);
+    await db.transaction(async (tx) => {
+      await applyMergeUndo(tx, payload);
     });
   } catch (err) {
     // Try to roll back the claim. Best-effort — if this fails too,
@@ -179,7 +181,7 @@ export async function POST(
     // The user can re-run undo and it'll 409 cleanly; manual SQL fix
     // is the recovery path for that rare failure.
     try {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id)).run();
+      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
     } catch {
       // swallow — already in error path
     }

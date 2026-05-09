@@ -1,6 +1,7 @@
 import { db as defaultDb } from "@/db";
 import { metricTypes, metricTypeAliases } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import type { AnyPgDb } from "@/db/types";
 
 /**
  * Resolve a source-specific metric name to a metric_types.id, auto-creating
@@ -23,7 +24,7 @@ import { eq } from "drizzle-orm";
  * on the metrics row so merge undo can chain-unwind by alias.
  */
 
-type DbLike = typeof defaultDb;
+type DbLike = AnyPgDb;
 
 export interface MetricTypeCache {
   byName: Map<string, number>;

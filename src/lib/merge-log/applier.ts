@@ -12,14 +12,24 @@ import {
   dashboards,
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { PgTransaction } from "drizzle-orm/pg-core";
 import type {
   MergeLogPayloadV1,
   MetricTypeMergePayloadV1,
   SportMergePayloadV1,
 } from "./types";
-import type { db as Db } from "@/db";
+import type * as schema from "@/db/schema";
+import type { ExtractTablesWithRelations } from "drizzle-orm";
 
-type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
+// PgQueryResultHKT is the base HKT that both postgres-js and pglite extend.
+// Using it here lets this file be called from both production (postgres-js)
+// and tests (pglite) without the HKT mismatch error.
+type Tx = PgTransaction<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  any,
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
 
 /**
  * Reverse a metric_type merge inside an existing transaction. Caller
@@ -37,13 +47,24 @@ type Tx = Parameters<Parameters<typeof Db.transaction>[0]>[0];
  *   5. RECOMPUTE daily_summaries from `metrics` for both canonical_id
  *      and merged_id (no snapshot — post-merge ingest survives).
  *   6. DELETE the alias row (metric_type_aliases.alias = merged.row.name).
+ *
+ * Async — postgres-js transactions can't have sync callbacks, and
+ * every drizzle query inside is awaited.
  */
-export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): void {
+export async function applyMetricTypeUndo(
+  tx: Tx,
+  payload: MetricTypeMergePayloadV1,
+): Promise<void> {
   const canonicalId = payload.canonicalId;
 
   // 1. Re-INSERT each merged metric_type row with its original id.
+  // Postgres identity columns reject explicit values by default; we
+  // generate them with `BY DEFAULT` in the schema so a manual id is
+  // accepted. After the inserts we reset the sequence's next value to
+  // MAX(id)+1 so future auto-generated ids don't collide.
   for (const m of payload.merged) {
-    tx.insert(metricTypes)
+    await tx
+      .insert(metricTypes)
       .values({
         id: m.row.id,
         name: m.row.name,
@@ -53,22 +74,22 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
         target: m.row.target,
         higherIsBetter: m.row.higherIsBetter,
       })
-      .run();
+      ;
   }
 
   // 2. Re-point FKs by id. Bulk update per merged entry.
   for (const m of payload.merged) {
     if (m.metricsMovedIds.length > 0) {
-      tx.update(metrics)
+      await tx
+        .update(metrics)
         .set({ metricTypeId: m.row.id })
-        .where(inArray(metrics.id, m.metricsMovedIds))
-        .run();
+        .where(inArray(metrics.id, m.metricsMovedIds));
       // 3a. Un-rescale metrics.value if scale != 1.
       if (m.scale !== 1) {
-        tx.update(metrics)
+        await tx
+          .update(metrics)
           .set({ value: sql`${metrics.value} / ${m.scale}` })
-          .where(inArray(metrics.id, m.metricsMovedIds))
-          .run();
+          .where(inArray(metrics.id, m.metricsMovedIds));
       }
     }
 
@@ -78,59 +99,57 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
     // reverse by setting metric_type_id back, scoped to the same
     // event_ids we captured.
     if (m.eventMetricsMovedIds.length > 0) {
-      tx.update(eventMetrics)
+      await tx
+        .update(eventMetrics)
         .set({ metricTypeId: m.row.id })
         .where(
-          sql`${eventMetrics.metricTypeId} = ${canonicalId} AND ${eventMetrics.eventId} IN (${sql.join(
-            m.eventMetricsMovedIds.map((id) => sql`${id}`),
-            sql`, `,
-          )})`,
-        )
-        .run();
+          and(
+            eq(eventMetrics.metricTypeId, canonicalId),
+            inArray(eventMetrics.eventId, m.eventMetricsMovedIds),
+          ),
+        );
       // 3b. Un-rescale event_metrics.value if scale != 1.
       if (m.scale !== 1) {
-        tx.update(eventMetrics)
+        await tx
+          .update(eventMetrics)
           .set({ value: sql`${eventMetrics.value} / ${m.scale}` })
           .where(
-            sql`${eventMetrics.metricTypeId} = ${m.row.id} AND ${eventMetrics.eventId} IN (${sql.join(
-              m.eventMetricsMovedIds.map((id) => sql`${id}`),
-              sql`, `,
-            )})`,
-          )
-          .run();
+            and(
+              eq(eventMetrics.metricTypeId, m.row.id),
+              inArray(eventMetrics.eventId, m.eventMetricsMovedIds),
+            ),
+          );
       }
     }
 
     // 4. Re-INSERT dedupe-deleted event_metrics.
     for (const r of m.eventMetricsDeleted) {
-      tx.insert(eventMetrics)
-        .values({
-          eventId: r.eventId,
-          metricTypeId: r.metricTypeId,
-          value: r.value,
-        })
-        .run();
+      await tx.insert(eventMetrics).values({
+        eventId: r.eventId,
+        metricTypeId: r.metricTypeId,
+        value: r.value,
+      });
     }
 
     if (m.goalsMovedIds.length > 0) {
-      tx.update(goals)
+      await tx
+        .update(goals)
         .set({ metricTypeId: m.row.id })
-        .where(inArray(goals.id, m.goalsMovedIds))
-        .run();
+        .where(inArray(goals.id, m.goalsMovedIds));
     }
 
     if (m.journalEntriesMovedIds.length > 0) {
-      tx.update(goalJournalEntries)
+      await tx
+        .update(goalJournalEntries)
         .set({ linkedMetricTypeId: m.row.id })
-        .where(inArray(goalJournalEntries.id, m.journalEntriesMovedIds))
-        .run();
+        .where(inArray(goalJournalEntries.id, m.journalEntriesMovedIds));
     }
 
     if (m.workoutSetsMovedIds.length > 0) {
-      tx.update(workoutSets)
+      await tx
+        .update(workoutSets)
         .set({ exerciseMetricTypeId: m.row.id })
-        .where(inArray(workoutSets.id, m.workoutSetsMovedIds))
-        .run();
+        .where(inArray(workoutSets.id, m.workoutSetsMovedIds));
     }
   }
 
@@ -143,27 +162,27 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
   for (const m of payload.merged) {
     const aliasKeys = [m.row.name, ...(m.aliasesRepointed ?? [])];
     if (aliasKeys.length === 0) continue;
-    tx.update(metrics)
+    await tx
+      .update(metrics)
       .set({ metricTypeId: m.row.id })
       .where(
         and(
           eq(metrics.metricTypeId, canonicalId),
           inArray(metrics.alias, aliasKeys),
         ),
-      )
-      .run();
+      );
   }
 
   // 5. RECOMPUTE daily_summaries from current `metrics` for all touched
   // metric_type ids. Post-merge ingest survives because it's already in
   // `metrics`. We delete + re-aggregate so historical rows don't drift.
+  // `substr(text, 1, 10)` works identically in Postgres and SQLite on a
+  // text column — no port needed.
   const touchedIds = [canonicalId, ...payload.merged.map((m) => m.row.id)];
-  tx.delete(dailySummaries)
-    .where(inArray(dailySummaries.metricTypeId, touchedIds))
-    .run();
-  // Aggregate from metrics. recordedAt is an ISO timestamp; date is the
-  // YYYY-MM-DD prefix. last_ingest_at is the max recordedAt per group.
-  tx.run(sql`
+  await tx
+    .delete(dailySummaries)
+    .where(inArray(dailySummaries.metricTypeId, touchedIds));
+  await tx.execute(sql`
     INSERT INTO daily_summaries (date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
     SELECT
       substr(recorded_at, 1, 10) AS date,
@@ -188,17 +207,24 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
   for (const m of payload.merged) {
     const repointed = m.aliasesRepointed ?? [];
     if (repointed.length > 0) {
-      tx.update(metricTypeAliases)
+      await tx
+        .update(metricTypeAliases)
         .set({ canonicalMetricTypeId: m.row.id })
-        .where(inArray(metricTypeAliases.alias, repointed))
-        .run();
+        .where(inArray(metricTypeAliases.alias, repointed));
     }
     if (!repointed.includes(m.row.name)) {
-      tx.delete(metricTypeAliases)
-        .where(eq(metricTypeAliases.alias, m.row.name))
-        .run();
+      await tx
+        .delete(metricTypeAliases)
+        .where(eq(metricTypeAliases.alias, m.row.name));
     }
   }
+
+  // After re-inserting metric_types rows with explicit ids, bump the
+  // identity sequence past the highest id so the next INSERT without
+  // an explicit id doesn't collide.
+  await tx.execute(
+    sql`SELECT setval(pg_get_serial_sequence('metric_types', 'id'), GREATEST((SELECT MAX(id) FROM metric_types), 1))`,
+  );
 }
 
 /**
@@ -210,44 +236,56 @@ export function applyMetricTypeUndo(tx: Tx, payload: MetricTypeMergePayloadV1): 
  *   3. UPDATE dashboards.sport_id (dashboards were NULL'd via ON DELETE
  *      SET NULL when the sport was deleted).
  */
-export function applySportUndo(tx: Tx, payload: SportMergePayloadV1): void {
+export async function applySportUndo(
+  tx: Tx,
+  payload: SportMergePayloadV1,
+): Promise<void> {
   for (const m of payload.merged) {
-    tx.insert(sports)
+    await tx
+      .insert(sports)
       .values({ id: m.row.id, name: m.row.name, color: m.row.color })
-      .run();
+      ;
 
     if (m.eventsMovedIds.length > 0) {
-      tx.update(events)
+      await tx
+        .update(events)
         .set({ sportId: m.row.id })
-        .where(inArray(events.id, m.eventsMovedIds))
-        .run();
+        .where(inArray(events.id, m.eventsMovedIds));
     }
     if (m.goalsMovedIds.length > 0) {
-      tx.update(goals)
+      await tx
+        .update(goals)
         .set({ sportId: m.row.id })
-        .where(inArray(goals.id, m.goalsMovedIds))
-        .run();
+        .where(inArray(goals.id, m.goalsMovedIds));
     }
     if (m.metricTypesMovedIds.length > 0) {
-      tx.update(metricTypes)
+      await tx
+        .update(metricTypes)
         .set({ sportId: m.row.id })
-        .where(inArray(metricTypes.id, m.metricTypesMovedIds))
-        .run();
+        .where(inArray(metricTypes.id, m.metricTypesMovedIds));
     }
     if (m.dashboardsNulledIds.length > 0) {
-      tx.update(dashboards)
+      await tx
+        .update(dashboards)
         .set({ sportId: m.row.id })
-        .where(inArray(dashboards.id, m.dashboardsNulledIds))
-        .run();
+        .where(inArray(dashboards.id, m.dashboardsNulledIds));
     }
   }
+
+  // Bump identity sequence past any explicit ids we re-inserted.
+  await tx.execute(
+    sql`SELECT setval(pg_get_serial_sequence('sports', 'id'), GREATEST((SELECT MAX(id) FROM sports), 1))`,
+  );
 }
 
 /** Discriminator dispatch. */
-export function applyMergeUndo(tx: Tx, payload: MergeLogPayloadV1): void {
+export async function applyMergeUndo(
+  tx: Tx,
+  payload: MergeLogPayloadV1,
+): Promise<void> {
   if (payload.kind === "metric_type") {
-    applyMetricTypeUndo(tx, payload);
+    await applyMetricTypeUndo(tx, payload);
   } else {
-    applySportUndo(tx, payload);
+    await applySportUndo(tx, payload);
   }
 }

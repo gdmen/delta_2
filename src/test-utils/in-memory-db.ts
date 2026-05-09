@@ -1,23 +1,41 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
+import { PGlite } from "@electric-sql/pglite";
 import * as schema from "@/db/schema";
+import { sql } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Build a fresh in-memory SQLite database with all migrations applied,
- * keyed by the drizzle journal so tests run against the same schema as
- * production. The instance is isolated per call — call this in `beforeEach`
- * if you want a clean slate every test.
+ * Build a fresh in-memory pglite (WASM Postgres) database with all
+ * migrations applied. Production runs against a real Postgres via
+ * `postgres-js`; tests use pglite so they don't need Docker or a
+ * running Postgres daemon. The query surface is identical (Drizzle
+ * abstracts the driver), so test behavior matches prod.
  *
- * Returns the drizzle handle (typed identical to the prod `db` import) and
- * the underlying better-sqlite3 instance for raw SQL when needed.
+ * The instance is isolated per call — call this in `beforeEach` if you
+ * want a clean slate every test. pglite startup is async (loads the
+ * WASM blob), so this function returns a Promise.
+ *
+ * Returns the drizzle handle (typed identical to the prod `db` import)
+ * and a `clearSeedData` helper for tests that want to wipe rows but
+ * keep the schema between cases.
  */
-export function createTestDb() {
-  const sqlite = new Database(":memory:");
-  sqlite.pragma("journal_mode = MEMORY");
-  sqlite.pragma("foreign_keys = ON");
+export async function createTestDb(): Promise<{
+  db: PgliteDatabase<typeof schema>;
+  pg: PGlite;
+  clearSeedData: () => Promise<void>;
+}> {
+  const pg = new PGlite();
+  // pglite resolves immediately but the underlying engine is lazy;
+  // forcing a trivial query waits until it's ready.
+  await pg.query("SELECT 1");
 
+  const db = drizzle(pg, { schema });
+
+  // Apply migrations by reading the journal and exec'ing each .sql file
+  // verbatim. We don't use drizzle's programmatic migrate() here because
+  // it expects to manage its own migrations table and we want raw control
+  // over what's applied (e.g. could add per-test schema fixtures later).
   const journalPath = path.join(process.cwd(), "drizzle", "meta", "_journal.json");
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf-8")) as {
     entries: { tag: string }[];
@@ -25,19 +43,17 @@ export function createTestDb() {
 
   for (const entry of journal.entries) {
     const sqlPath = path.join(process.cwd(), "drizzle", `${entry.tag}.sql`);
-    const sql = fs.readFileSync(sqlPath, "utf-8");
+    const sqlText = fs.readFileSync(sqlPath, "utf-8");
     // Drizzle SQL files use `--> statement-breakpoint` between statements.
-    // better-sqlite3.exec() handles multiple statements; the breakpoint
-    // comments are SQL comments and are ignored, but splitting and
-    // running each segment separately makes failures point at the right
-    // file:statement.
-    const statements = sql
+    // pglite's exec() handles multi-statement input but splitting per
+    // statement makes failures point at the right file:statement.
+    const statements = sqlText
       .split(/--> statement-breakpoint/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     for (const stmt of statements) {
       try {
-        sqlite.exec(stmt);
+        await pg.exec(stmt);
       } catch (err) {
         throw new Error(
           `Failed to apply migration ${entry.tag}: ${(err as Error).message}\n--- statement ---\n${stmt}`,
@@ -46,18 +62,18 @@ export function createTestDb() {
     }
   }
 
-  const db = drizzle(sqlite, { schema });
-  return { db, sqlite, clearSeedData: () => clearSeedData(sqlite) };
+  return { db, pg, clearSeedData: () => clearSeedData(db) };
 }
 
 /**
  * Wipe all rows from every user-data table while keeping the schema.
  * Useful for tests that want predictable IDs without competing with
- * seed migrations (0006_redundant_bullseye and friends auto-insert
- * canonical metric_types/sports starting at id=1).
+ * fixture inserts. Uses TRUNCATE ... RESTART IDENTITY CASCADE so
+ * identity sequences restart at 1.
  */
-function clearSeedData(sqlite: Database.Database): void {
-  sqlite.pragma("foreign_keys = OFF");
+async function clearSeedData(db: PgliteDatabase<typeof schema>): Promise<void> {
+  // Order doesn't matter with CASCADE, but the explicit list documents
+  // what tests consider "wipeable user data."
   const tables = [
     "metric_type_aliases",
     "metrics",
@@ -71,16 +87,14 @@ function clearSeedData(sqlite: Database.Database): void {
     "sports",
     "daily_summaries",
     "merge_log",
-    "sqlite_sequence",
+    "reconcile_log",
+    "dashboard_widgets",
+    "dashboards",
   ];
-  for (const t of tables) {
-    try {
-      sqlite.exec(`DELETE FROM "${t}"`);
-    } catch {
-      // Table may not exist in older snapshots; ignore.
-    }
-  }
-  sqlite.pragma("foreign_keys = ON");
+  // One TRUNCATE statement covers all tables; pglite handles the
+  // dependency ordering via CASCADE.
+  const tableList = tables.map((t) => `"${t}"`).join(", ");
+  await db.execute(sql.raw(`TRUNCATE TABLE ${tableList} RESTART IDENTITY CASCADE`));
 }
 
-export type TestDb = ReturnType<typeof createTestDb>["db"];
+export type TestDb = Awaited<ReturnType<typeof createTestDb>>["db"];

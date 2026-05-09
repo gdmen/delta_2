@@ -31,13 +31,11 @@ import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
  * Rewrites every FK referencing one of mergeIds to canonicalId, aggregates
  * daily_summaries collisions, pre-dedupes event_metrics and focus_metric_links
  * collisions, inserts alias rows under each merged name, and deletes the
- * merged metric_types rows. Runs inside a single better-sqlite3 transaction
- * so partial failures roll back fully.
+ * merged metric_types rows. Runs inside a single postgres-js transaction so
+ * partial failures roll back fully.
  *
- * The transaction callback is SYNCHRONOUS — better-sqlite3 rejects async
- * callbacks ("Transaction function cannot return a promise"). Drizzle's
- * query builders are sync-dispatched when invoked via explicit `.all()` /
- * `.run()` / `.get()` / `.returning().all()` methods inside the tx.
+ * The transaction callback is async — postgres-js requires it. Every drizzle
+ * query inside is awaited.
  */
 export async function POST(request: NextRequest) {
   let body: {
@@ -121,7 +119,7 @@ export async function POST(request: NextRequest) {
   const mergedEntries: MetricTypeMergedEntry[] = [];
   let mergeLogId: number | null = null;
 
-  const report: Report[] = db.transaction((tx) => {
+  const report: Report[] = await db.transaction(async (tx) => {
     const out: Report[] = [];
     for (const mergeId of mergeIds) {
       const merged = byId.get(mergeId)!;
@@ -129,72 +127,71 @@ export async function POST(request: NextRequest) {
 
       // Snapshot BEFORE mutations for this mergeId.
       mergedEntries.push(
-        buildMetricTypeMergedEntry(tx, canonicalId, mergeId, rescale),
+        await buildMetricTypeMergedEntry(tx, canonicalId, mergeId, rescale),
       );
 
-      const metricsUpd = tx
+      const metricsUpd = await tx
         .update(metrics)
         .set({
           metricTypeId: canonicalId,
           value: rescale === 1 ? metrics.value : sql`${metrics.value} * ${rescale}`,
         })
         .where(eq(metrics.metricTypeId, mergeId))
-        .returning({ id: metrics.id })
-        .all();
+        .returning({ id: metrics.id });
 
       // event_metrics has a UNIQUE(event_id, metric_type_id); dedupe before re-pointing.
-      const canonicalEventIds = tx
-        .select({ eid: eventMetrics.eventId })
-        .from(eventMetrics)
-        .where(eq(eventMetrics.metricTypeId, canonicalId))
-        .all()
-        .map((r) => r.eid);
+      const canonicalEventIds = (
+        await tx
+          .select({ eid: eventMetrics.eventId })
+          .from(eventMetrics)
+          .where(eq(eventMetrics.metricTypeId, canonicalId))
+      ).map((r) => r.eid);
       if (canonicalEventIds.length > 0) {
-        tx
+        await tx
           .delete(eventMetrics)
           .where(
             and(
               eq(eventMetrics.metricTypeId, mergeId),
-              inArray(eventMetrics.eventId, canonicalEventIds)
-            )
-          )
-          .run();
+              inArray(eventMetrics.eventId, canonicalEventIds),
+            ),
+          );
       }
-      tx
+      await tx
         .update(eventMetrics)
         .set({
           metricTypeId: canonicalId,
           value:
             rescale === 1 ? eventMetrics.value : sql`${eventMetrics.value} * ${rescale}`,
         })
-        .where(eq(eventMetrics.metricTypeId, mergeId))
-        .run();
+        .where(eq(eventMetrics.metricTypeId, mergeId));
 
       // daily_summaries collision collapse. Raw SQL because drizzle's builder
       // doesn't ergonomically express INSERT-FROM-SELECT + ON CONFLICT with
-      // an aliased `excluded` row. Weighted avg: (avg*count + avg2*count2) / sumCount.
-      const summariesBefore = tx
+      // EXCLUDED. Weighted avg: (avg*count + avg2*count2) / sumCount.
+      // Postgres-specific: `LEAST()` / `GREATEST()` for two-argument min/max
+      // (SQLite's `MIN(a, b)` / `MAX(a, b)` are scalar; Postgres reserves
+      // `MIN`/`MAX` for aggregates only).
+      const summariesBefore = await tx
         .select({ id: dailySummaries.id })
         .from(dailySummaries)
-        .where(eq(dailySummaries.metricTypeId, mergeId))
-        .all();
+        .where(eq(dailySummaries.metricTypeId, mergeId));
       if (summariesBefore.length > 0) {
-        tx.run(sql`
+        await tx.execute(sql`
           INSERT INTO daily_summaries (date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
           SELECT date, ${canonicalId}, avg_value * ${rescale}, min_value * ${rescale}, max_value * ${rescale}, count, last_ingest_at
           FROM daily_summaries
           WHERE metric_type_id = ${mergeId}
-          ON CONFLICT(date, metric_type_id) DO UPDATE SET
+          ON CONFLICT (date, metric_type_id) DO UPDATE SET
             count = daily_summaries.count + excluded.count,
             min_value = CASE
               WHEN daily_summaries.min_value IS NULL THEN excluded.min_value
               WHEN excluded.min_value IS NULL THEN daily_summaries.min_value
-              ELSE MIN(daily_summaries.min_value, excluded.min_value)
+              ELSE LEAST(daily_summaries.min_value, excluded.min_value)
             END,
             max_value = CASE
               WHEN daily_summaries.max_value IS NULL THEN excluded.max_value
               WHEN excluded.max_value IS NULL THEN daily_summaries.max_value
-              ELSE MAX(daily_summaries.max_value, excluded.max_value)
+              ELSE GREATEST(daily_summaries.max_value, excluded.max_value)
             END,
             avg_value = CASE
               WHEN (daily_summaries.count + excluded.count) = 0 THEN NULL
@@ -206,34 +203,37 @@ export async function POST(request: NextRequest) {
             last_ingest_at = CASE
               WHEN daily_summaries.last_ingest_at IS NULL THEN excluded.last_ingest_at
               WHEN excluded.last_ingest_at IS NULL THEN daily_summaries.last_ingest_at
-              ELSE MAX(daily_summaries.last_ingest_at, excluded.last_ingest_at)
+              ELSE GREATEST(daily_summaries.last_ingest_at, excluded.last_ingest_at)
             END
         `);
-        tx.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, mergeId)).run();
+        await tx
+          .delete(dailySummaries)
+          .where(eq(dailySummaries.metricTypeId, mergeId));
       }
 
-      tx.update(goals).set({ metricTypeId: canonicalId }).where(eq(goals.metricTypeId, mergeId)).run();
+      await tx
+        .update(goals)
+        .set({ metricTypeId: canonicalId })
+        .where(eq(goals.metricTypeId, mergeId));
 
       // goal_journal_entries can pin to a metric_type; retarget any pin at the
       // merged row to the canonical. ON DELETE SET NULL on the FK already
       // protects against dangling refs if a metric_type vanishes another way.
-      tx
+      await tx
         .update(goalJournalEntries)
         .set({ linkedMetricTypeId: canonicalId })
-        .where(eq(goalJournalEntries.linkedMetricTypeId, mergeId))
-        .run();
+        .where(eq(goalJournalEntries.linkedMetricTypeId, mergeId));
 
       // workout_sets has no unique constraint on (event_id, exercise_metric_type_id,
       // set_number), so this is a straight retarget with no dedupe. Weight rescale
       // isn't applied here — workout_sets.weight is a per-set load, not a reading
       // of the exercise metric_type's nominal value; if the user wants rescale
       // they adjust the metric_type unit and the sets downstream, separately.
-      const setsUpd = tx
+      const setsUpd = await tx
         .update(workoutSets)
         .set({ exerciseMetricTypeId: canonicalId })
         .where(eq(workoutSets.exerciseMetricTypeId, mergeId))
-        .returning({ id: workoutSets.id })
-        .all();
+        .returning({ id: workoutSets.id });
 
       // Re-point any aliases that pointed AT the merged type to canonical
       // BEFORE the metric_types delete. Otherwise the alias FK's
@@ -241,26 +241,24 @@ export async function POST(request: NextRequest) {
       // chain merges: if `src1:weight` was aliased to A, and A is now
       // being merged into B, future ingests of `src1:weight` must route
       // to B — not auto-create an orphan.
-      tx
+      await tx
         .update(metricTypeAliases)
         .set({ canonicalMetricTypeId: canonicalId })
-        .where(eq(metricTypeAliases.canonicalMetricTypeId, mergeId))
-        .run();
+        .where(eq(metricTypeAliases.canonicalMetricTypeId, mergeId));
 
       // Record the alias so future ingests route here directly. Goes
       // after the re-point so a no-op ON CONFLICT path is fine if
       // `merged.name` was already in the table from a prior merge.
-      tx
+      await tx
         .insert(metricTypeAliases)
         .values({ alias: merged.name, canonicalMetricTypeId: canonicalId })
-        .onConflictDoNothing()
-        .run();
+        .onConflictDoNothing();
 
       // All FK references (metrics, event_metrics, daily_summaries, goals,
       // focus_metric_links, workout_sets) were retargeted above, and aliases
       // pointing at this row were re-pointed (not cascade-deleted), so the
       // delete has nothing holding it back.
-      tx.delete(metricTypes).where(eq(metricTypes.id, mergeId)).run();
+      await tx.delete(metricTypes).where(eq(metricTypes.id, mergeId));
 
       out.push({
         mergeId,
@@ -275,7 +273,7 @@ export async function POST(request: NextRequest) {
     // rolls back both mutations and log together.
     const payload = buildMetricTypeMergePayload(canonicalId, mergedEntries);
     const mergedNames = mergedEntries.map((m) => m.row.name).join(", ");
-    const inserted = tx
+    const inserted = await tx
       .insert(mergeLog)
       .values({
         kind: "metric_type",
@@ -284,8 +282,7 @@ export async function POST(request: NextRequest) {
         mergedNames,
         payload: JSON.stringify(payload),
       })
-      .returning({ id: mergeLog.id })
-      .all();
+      .returning({ id: mergeLog.id });
     mergeLogId = inserted[0]?.id ?? null;
 
     return out;

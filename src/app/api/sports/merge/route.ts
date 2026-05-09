@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
   const mergedEntries: SportMergedEntry[] = [];
   let mergeLogId: number | null = null;
 
-  const report: Report[] = db.transaction((tx) => {
+  const report: Report[] = await db.transaction(async (tx) => {
     const out: Report[] = [];
     for (const mergeId of mergeIds) {
       const merged = byId.get(mergeId)!;
@@ -66,32 +66,33 @@ export async function POST(request: NextRequest) {
       // Snapshot BEFORE the sport delete — dashboards.sport_id has
       // ON DELETE SET NULL, so a post-delete read would always return
       // empty. Capture mid-loop for multi-row merge correctness.
-      mergedEntries.push(buildSportMergedEntry(tx, mergeId));
+      mergedEntries.push(await buildSportMergedEntry(tx, mergeId));
 
-      const eventsUpd = tx
+      const eventsUpd = await tx
         .update(events)
         .set({ sportId: canonicalId })
         .where(eq(events.sportId, mergeId))
-        .returning({ id: events.id })
-        .all();
+        .returning({ id: events.id });
 
       // focuses no longer carry sport_id directly — they reach sport via their
       // goal, so updating goals below carries focuses along.
-      tx.update(goals).set({ sportId: canonicalId }).where(eq(goals.sportId, mergeId)).run();
-      tx
+      await tx
+        .update(goals)
+        .set({ sportId: canonicalId })
+        .where(eq(goals.sportId, mergeId));
+      await tx
         .update(metricTypes)
         .set({ sportId: canonicalId })
-        .where(eq(metricTypes.sportId, mergeId))
-        .run();
+        .where(eq(metricTypes.sportId, mergeId));
 
-      tx.delete(sports).where(eq(sports.id, mergeId)).run();
+      await tx.delete(sports).where(eq(sports.id, mergeId));
 
       out.push({ mergeId, name: merged.name, eventsMoved: eventsUpd.length });
     }
 
     const payload = buildSportMergePayload(canonicalId, mergedEntries);
     const mergedNames = mergedEntries.map((m) => m.row.name).join(", ");
-    const inserted = tx
+    const inserted = await tx
       .insert(mergeLog)
       .values({
         kind: "sport",
@@ -100,8 +101,7 @@ export async function POST(request: NextRequest) {
         mergedNames,
         payload: JSON.stringify(payload),
       })
-      .returning({ id: mergeLog.id })
-      .all();
+      .returning({ id: mergeLog.id });
     mergeLogId = inserted[0]?.id ?? null;
 
     return out;

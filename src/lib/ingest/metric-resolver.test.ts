@@ -12,24 +12,24 @@ import {
  * resolution paths.
  */
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: Awaited<ReturnType<typeof createTestDb>>;
 let db: TestDb;
 
-beforeEach(() => {
-  testDb = createTestDb();
-  testDb.clearSeedData();
+beforeEach(async () => {
+  testDb = await createTestDb();
+  await testDb.clearSeedData();
   db = testDb.db;
 });
 
-afterEach(() => {
-  testDb.sqlite.close();
+afterEach(async () => {
+  await testDb.pg.close();
 });
 
 describe("resolveMetricTypeId — alias-aware return", () => {
   it("R1: hardcoded map hit → alias is the canonical name from the map", async () => {
-    db.insert(metricTypes)
-      .values({ name: "weight_canonical", unit: "lb", frequencyHint: "daily" })
-      .run();
+    await db
+      .insert(metricTypes)
+      .values({ name: "weight_canonical", unit: "lb", frequencyHint: "daily" });
     const cache = await buildMetricTypeCache(db);
     const result = await resolveMetricTypeId(
       {
@@ -44,14 +44,13 @@ describe("resolveMetricTypeId — alias-aware return", () => {
   });
 
   it("R2a: alias-table hit on raw name → alias is the raw name", async () => {
-    const inserted = db
+    const inserted = await db
       .insert(metricTypes)
       .values({ name: "bodyweight", unit: "lb", frequencyHint: "daily" })
-      .returning({ id: metricTypes.id })
-      .all();
-    db.insert(metricTypeAliases)
-      .values({ alias: "weight", canonicalMetricTypeId: inserted[0].id })
-      .run();
+      .returning({ id: metricTypes.id });
+    await db
+      .insert(metricTypeAliases)
+      .values({ alias: "weight", canonicalMetricTypeId: inserted[0].id });
     const cache = await buildMetricTypeCache(db);
     const result = await resolveMetricTypeId(
       {
@@ -66,17 +65,16 @@ describe("resolveMetricTypeId — alias-aware return", () => {
   });
 
   it("R2b: alias-table hit on `${source}:${rawName}` → alias is the prefixed form", async () => {
-    const inserted = db
+    const inserted = await db
       .insert(metricTypes)
       .values({ name: "bodyweight", unit: "lb", frequencyHint: "daily" })
-      .returning({ id: metricTypes.id })
-      .all();
-    db.insert(metricTypeAliases)
+      .returning({ id: metricTypes.id });
+    await db
+      .insert(metricTypeAliases)
       .values({
         alias: "fitnotes_bt:weight",
         canonicalMetricTypeId: inserted[0].id,
-      })
-      .run();
+      });
     const cache = await buildMetricTypeCache(db);
     const result = await resolveMetricTypeId(
       {
@@ -102,11 +100,9 @@ describe("resolveMetricTypeId — alias-aware return", () => {
       db,
     );
     expect(result.alias).toBe("fresh_canonical");
-    const rows = db
-      .select()
-      .from(metricTypes)
-      .all()
-      .filter((r) => r.name === "fresh_canonical");
+    const rows = (await db.select().from(metricTypes)).filter(
+      (r) => r.name === "fresh_canonical",
+    );
     expect(rows).toHaveLength(1);
   });
 
@@ -129,9 +125,9 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     // a "weight" column would have routed there. Without the map (the
     // policy this commit standardizes on), it auto-creates a
     // `${source}:weight` orphan instead — user merges explicitly.
-    db.insert(metricTypes)
-      .values({ name: "weight", unit: "lb", frequencyHint: "daily" })
-      .run();
+    await db
+      .insert(metricTypes)
+      .values({ name: "weight", unit: "lb", frequencyHint: "daily" });
     const cache = await buildMetricTypeCache(db);
     const result = await resolveMetricTypeId(
       {
@@ -145,7 +141,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     expect(result.alias).toBe("sleepbotv2:weight");
     // The new orphan exists and is distinct from the pre-existing
     // canonical "weight".
-    const types = db.select().from(metricTypes).all();
+    const types = await db.select().from(metricTypes);
     expect(types.find((t) => t.name === "weight")?.id).not.toBe(result.id);
     expect(types.find((t) => t.name === "sleepbotv2:weight")?.id).toBe(result.id);
   });

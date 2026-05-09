@@ -1,13 +1,15 @@
 import { db } from "@/db";
 import { metrics, events, workoutSets, dailySummaries, eventMetrics } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import type { AnyPgDb } from "@/db/types";
 
 /**
- * Type alias for the drizzle handle. Tests pass an in-memory instance
- * via the optional last arg; production calls fall through to the
- * shared `db` import.
+ * Type alias for the drizzle handle. Tests pass an in-process pglite
+ * instance via the optional last arg; production calls fall through to
+ * the shared `db` (postgres-js) import. `AnyPgDb` widens to accept both
+ * drivers since they share the same `PgDatabase` base class.
  */
-type DbLike = typeof db;
+type DbLike = AnyPgDb;
 
 export interface IngestResult {
   accepted: number;

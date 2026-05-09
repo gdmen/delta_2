@@ -12,26 +12,25 @@ import { upsertMetric } from "./ingest-service";
  * `MetricInput` enforces all callers supply the alias at compile time.
  */
 
-let testDb: ReturnType<typeof createTestDb>;
+let testDb: Awaited<ReturnType<typeof createTestDb>>;
 let db: TestDb;
 
-beforeEach(() => {
-  testDb = createTestDb();
-  testDb.clearSeedData();
+beforeEach(async () => {
+  testDb = await createTestDb();
+  await testDb.clearSeedData();
   db = testDb.db;
 });
 
-afterEach(() => {
-  testDb.sqlite.close();
+afterEach(async () => {
+  await testDb.pg.close();
 });
 
 describe("upsertMetric persists alias", () => {
   it("I1: alias passed in is stored on the inserted row", async () => {
-    const inserted = db
+    const inserted = await db
       .insert(metricTypes)
       .values({ name: "weight", unit: "lb", frequencyHint: "daily" })
-      .returning({ id: metricTypes.id })
-      .all();
+      .returning({ id: metricTypes.id });
 
     await upsertMetric(
       {
@@ -45,11 +44,10 @@ describe("upsertMetric persists alias", () => {
       db,
     );
 
-    const rows = db
+    const rows = await db
       .select()
       .from(metrics)
-      .where(eq(metrics.metricTypeId, inserted[0].id))
-      .all();
+      .where(eq(metrics.metricTypeId, inserted[0].id));
     expect(rows).toHaveLength(1);
     expect(rows[0].alias).toBe("fitnotes_bt:weight");
   });

@@ -22,7 +22,7 @@ import {
   mergeLog,
 } from "@/db/schema";
 import { eq, asc, inArray } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { alias } from "drizzle-orm/pg-core";
 import { serializeCsv } from "@/lib/csv";
 
 /**

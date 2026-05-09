@@ -1,32 +1,53 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
-import { sql } from "drizzle-orm";
+import {
+  pgTable,
+  text,
+  integer,
+  doublePrecision,
+  boolean,
+  index,
+  uniqueIndex,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
 
-export const sports = sqliteTable("sports", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+// All ISO-8601 timestamp columns (createdAt, updatedAt, ts, at, ingestedAt, …)
+// store JS-format strings (`new Date().toISOString()`). Keeping them as `text`
+// in Postgres preserves the existing consumer API exactly — every site that
+// reads `.createdAt` and does `.slice(0, 10)` or hands it to `new Date(…)`
+// keeps working unchanged. A future PR can migrate to native `timestamptz`
+// when it's worth the consumer-side audit. Defaults are populated client-side
+// via `$defaultFn` so we never hit the SQLite-vs-Postgres `datetime('now')`
+// vs `now()::text` format mismatch the old code worked around in
+// `src/lib/sqlite-time.ts`.
+const isoNow = () => new Date().toISOString();
+
+export const sports = pgTable("sports", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   name: text("name").notNull().unique(),
   color: text("color").notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
 
-export const metricTypes = sqliteTable("metric_types", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const metricTypes = pgTable("metric_types", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   name: text("name").notNull().unique(),
   sportId: integer("sport_id").references(() => sports.id),
   unit: text("unit").notNull(),
-  frequencyHint: text("frequency_hint", { enum: ["daily", "weekly", "occasional"] }).notNull().default("daily"),
+  frequencyHint: text("frequency_hint", { enum: ["daily", "weekly", "occasional"] })
+    .notNull()
+    .default("daily"),
   /**
    * Target value for compliance dashboards. Single source of truth — widgets
    * read from here rather than carrying their own target. NULL = no target
    * line on charts, no color coding on headlines.
    */
-  target: real("target"),
+  target: doublePrecision("target"),
   /**
    * Direction of the target. true (default) = floor (sleep, protein); false =
    * ceiling (body fat %, weight). Drives the green/orange/red color buckets
    * on metric_block headlines.
    */
-  higherIsBetter: integer("higher_is_better", { mode: "boolean" }).notNull().default(true),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  higherIsBetter: boolean("higher_is_better").notNull().default(true),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -36,24 +57,24 @@ export const metricTypes = sqliteTable("metric_types", {
  * and their IDs disappear. Every ingest path checks this table before falling
  * back to auto-creating a `${source}:${rawName}` orphan.
  */
-export const metricTypeAliases = sqliteTable("metric_type_aliases", {
+export const metricTypeAliases = pgTable("metric_type_aliases", {
   alias: text("alias").primaryKey(),
   canonicalMetricTypeId: integer("canonical_metric_type_id")
     .notNull()
     .references(() => metricTypes.id, { onDelete: "cascade" }),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 }, (table) => [
   index("idx_metric_type_aliases_canonical").on(table.canonicalMetricTypeId),
 ]);
 
-export const metrics = sqliteTable("metrics", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const metrics = pgTable("metrics", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  value: real("value").notNull(),
+  value: doublePrecision("value").notNull(),
   recordedAt: text("recorded_at").notNull(),
   source: text("source").notNull(),
   sourceId: text("source_id"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
   // Alias key the resolver matched at ingest time (e.g.
   // "fitnotes_bt:weight"). Powers chain-undo of merges: when a merge is
   // reversed, the applier moves metrics whose `alias` matches the
@@ -67,8 +88,8 @@ export const metrics = sqliteTable("metrics", {
   index("idx_metrics_type_alias").on(table.metricTypeId, table.alias),
 ]);
 
-export const events = sqliteTable("events", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const events = pgTable("events", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   sportId: integer("sport_id").notNull().references(() => sports.id),
   type: text("type").notNull(),
   durationMinutes: integer("duration_minutes"),
@@ -76,7 +97,7 @@ export const events = sqliteTable("events", {
   startedAt: text("started_at").notNull(),
   source: text("source").notNull().default("manual"),
   sourceId: text("source_id"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 }, (table) => [
   index("idx_events_sport_started").on(table.sportId, table.startedAt),
   uniqueIndex("idx_events_source_id").on(table.sourceId),
@@ -88,40 +109,40 @@ export const events = sqliteTable("events", {
  * ballooning the events schema.  Keyed by (event_id, metric_type_id) so
  * imports can upsert idempotently.
  */
-export const eventMetrics = sqliteTable("event_metrics", {
+export const eventMetrics = pgTable("event_metrics", {
   eventId: integer("event_id")
     .notNull()
     .references(() => events.id, { onDelete: "cascade" }),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  value: real("value").notNull(),
+  value: doublePrecision("value").notNull(),
 }, (table) => [
   uniqueIndex("idx_event_metrics_event_type").on(table.eventId, table.metricTypeId),
 ]);
 
-export const workoutSets = sqliteTable("workout_sets", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const workoutSets = pgTable("workout_sets", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   eventId: integer("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
   exerciseMetricTypeId: integer("exercise_metric_type_id").notNull().references(() => metricTypes.id),
   setNumber: integer("set_number").notNull(),
   reps: integer("reps").notNull(),
-  weight: real("weight").notNull(),
-  rpe: real("rpe"),
+  weight: doublePrecision("weight").notNull(),
+  rpe: doublePrecision("rpe"),
   notes: text("notes"),
 }, (table) => [
   index("idx_workout_sets_event").on(table.eventId),
   index("idx_workout_sets_exercise_mt").on(table.exerciseMetricTypeId),
 ]);
 
-export const goals = sqliteTable("goals", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const goals = pgTable("goals", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
   sportId: integer("sport_id").notNull().references(() => sports.id),
-  targetValue: real("target_value").notNull(),
+  targetValue: doublePrecision("target_value").notNull(),
   deadline: text("deadline").notNull(),
   status: text("status", { enum: ["active", "completed", "abandoned"] })
     .notNull()
     .default("active"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -133,8 +154,8 @@ export const goals = sqliteTable("goals", {
  * Sport is reachable via the goal — focuses don't carry sport_id directly.
  * Promote-an-llm-focus = update source to 'manual'. Dismiss = set dismissed_at.
  */
-export const focuses = sqliteTable("focuses", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const focuses = pgTable("focuses", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   name: text("name").notNull(),
   goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
   source: text("source", { enum: ["manual", "llm"] }).notNull().default("manual"),
@@ -144,7 +165,7 @@ export const focuses = sqliteTable("focuses", {
   technicalNotes: text("technical_notes"),
   evidence: text("evidence"),
   dismissedAt: text("dismissed_at"),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 }, (table) => [
   index("idx_focuses_goal_status").on(table.goalId, table.status),
 ]);
@@ -156,12 +177,12 @@ export const focuses = sqliteTable("focuses", {
  * `linked_metric_type_id` is optional — pin an entry to a metric without resurrecting
  * a join table.
  */
-export const goalJournalEntries = sqliteTable("goal_journal_entries", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const goalJournalEntries = pgTable("goal_journal_entries", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
-  verdictFocusId: integer("verdict_focus_id").references((): AnySQLiteColumn => focuses.id, { onDelete: "set null" }),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  verdictFocusId: integer("verdict_focus_id").references((): AnyPgColumn => focuses.id, { onDelete: "set null" }),
   linkedMetricTypeId: integer("linked_metric_type_id").references(() => metricTypes.id, { onDelete: "set null" }),
 }, (table) => [
   index("idx_goal_journal_goal_created").on(table.goalId, table.createdAt),
@@ -172,9 +193,9 @@ export const goalJournalEntries = sqliteTable("goal_journal_entries", {
  * focuses.evidence or goal_journal_entries). Lets us track cost, latency, and
  * failure rates without joining to external service logs.
  */
-export const coachCalls = sqliteTable("coach_calls", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  ts: text("ts").default(sql`(datetime('now'))`).notNull(),
+export const coachCalls = pgTable("coach_calls", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+  ts: text("ts").$defaultFn(isoNow).notNull(),
   endpoint: text("endpoint").notNull(),
   goalId: integer("goal_id").references(() => goals.id, { onDelete: "set null" }),
   tokensIn: integer("tokens_in").notNull().default(0),
@@ -187,23 +208,23 @@ export const coachCalls = sqliteTable("coach_calls", {
   index("idx_coach_calls_goal").on(table.goalId),
 ]);
 
-export const ingestConfigs = sqliteTable("ingest_configs", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const ingestConfigs = pgTable("ingest_configs", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   source: text("source").notNull().unique(),
   apiKeyEncrypted: text("api_key_encrypted"),
   lastSyncAt: text("last_sync_at"),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
 });
 
-export const importSources = sqliteTable("import_sources", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const importSources = pgTable("import_sources", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   // Display name, also used as the `source` value written to metrics/events.
   name: text("name").notNull().unique(),
   kind: text("kind", { enum: ["metrics", "events", "workout_sets"] }).notNull(),
   // JSON-encoded ImportMapping (see src/lib/import-mapping.ts). Opaque to
   // the DB layer; parsed by the import runner.
   mapping: text("mapping").notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -215,10 +236,10 @@ export const importSources = sqliteTable("import_sources", {
  *   the user's "today" when filtering daily-aggregate windows — without
  *   it, a UTC server makes the wrong call for any user not on UTC.
  */
-export const appSettings = sqliteTable("app_settings", {
+export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().default(1),
   timezone: text("timezone"),
-  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -242,10 +263,10 @@ export const appSettings = sqliteTable("app_settings", {
  * - `undoneAt` flips from NULL to a timestamp via CAS at undo start
  *   (TOCTOU-safe — concurrent double-undos see only one winner).
  */
-export const mergeLog = sqliteTable("merge_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const mergeLog = pgTable("merge_log", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
   canonicalId: integer("canonical_id").notNull(),
   canonicalName: text("canonical_name").notNull(),
   mergedNames: text("merged_names").notNull(),
@@ -262,12 +283,10 @@ export const mergeLog = sqliteTable("merge_log", {
  * prefs fit here too. One row per `source` tag (matches the `source`
  * column on metrics/events).
  */
-export const sourceSettings = sqliteTable("source_settings", {
+export const sourceSettings = pgTable("source_settings", {
   source: text("source").primaryKey(),
-  reconcileEnabled: integer("reconcile_enabled", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+  reconcileEnabled: boolean("reconcile_enabled").notNull().default(false),
+  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -277,26 +296,26 @@ export const sourceSettings = sqliteTable("source_settings", {
  *
  * `metric_type_id` has no FK so rows survive a later metric_types delete.
  */
-export const reconcileLog = sqliteTable("reconcile_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const reconcileLog = pgTable("reconcile_log", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   source: text("source").notNull(),
   kind: text("kind", { enum: ["metric", "event"] }).notNull(),
   metricTypeId: integer("metric_type_id"),
   deletedCount: integer("deleted_count").notNull(),
   rangeStart: text("range_start").notNull(),
   rangeEnd: text("range_end").notNull(),
-  at: text("at").default(sql`(datetime('now'))`).notNull(),
+  at: text("at").$defaultFn(isoNow).notNull(),
 }, (table) => [
   index("idx_reconcile_log_source_at").on(table.source, table.at),
 ]);
 
-export const dailySummaries = sqliteTable("daily_summaries", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const dailySummaries = pgTable("daily_summaries", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   date: text("date").notNull(),
   metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  avgValue: real("avg_value"),
-  minValue: real("min_value"),
-  maxValue: real("max_value"),
+  avgValue: doublePrecision("avg_value"),
+  minValue: doublePrecision("min_value"),
+  maxValue: doublePrecision("max_value"),
   count: integer("count").notNull().default(0),
   lastIngestAt: text("last_ingest_at"),
 }, (table) => [
@@ -316,17 +335,17 @@ export const dailySummaries = sqliteTable("daily_summaries", {
  * `sport_id` is optional and drives the sport-color dot in the sidebar.
  * `position` orders dashboards in the sidebar.
  */
-export const dashboards = sqliteTable("dashboards", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const dashboards = pgTable("dashboards", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   icon: text("icon"),
   sportId: integer("sport_id").references(() => sports.id, { onDelete: "set null" }),
   position: integer("position").notNull().default(0),
-  isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+  isSystem: boolean("is_system").notNull().default(false),
   seededId: text("seeded_id").unique(),
-  createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
-  updatedAt: text("updated_at").default(sql`(datetime('now'))`).notNull(),
+  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
 }, (table) => [
   index("idx_dashboards_position").on(table.position),
 ]);
@@ -345,8 +364,8 @@ export const dashboards = sqliteTable("dashboards", {
  * `position` is the mobile single-column stacking order; on desktop the
  * grid_x/y dictate layout.
  */
-export const dashboardWidgets = sqliteTable("dashboard_widgets", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const dashboardWidgets = pgTable("dashboard_widgets", {
+  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   dashboardId: integer("dashboard_id")
     .notNull()
     .references(() => dashboards.id, { onDelete: "cascade" }),
