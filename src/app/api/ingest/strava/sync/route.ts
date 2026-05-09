@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { ingestConfigs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { auth } from "@/lib/auth/config";
 import { iterateActivities, loadTokens, touchLastSync, StravaActivity } from "@/lib/strava/client";
 import { upsertEvent, upsertEventMetric } from "@/lib/ingest-service";
 import {
@@ -40,8 +41,17 @@ interface SyncResult {
  * = "strava-{activity.id}" so re-runs are idempotent.
  */
 export async function POST(request: NextRequest) {
-  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
-  const tokens = await loadTokens(1);
+  // /api/ingest/* is exempt from the proxy session-cookie gate, so
+  // we ask Auth.js directly. The Strava sync is user-initiated (UI
+  // button click) so the session cookie is present.
+  const session = await auth();
+  const userIdStr = session?.user?.id;
+  const userId = userIdStr ? parseInt(userIdStr, 10) : NaN;
+  if (!Number.isFinite(userId)) {
+    return NextResponse.json({ error: "not signed in" }, { status: 401 });
+  }
+
+  const tokens = await loadTokens(userId);
   if (!tokens) {
     return NextResponse.json({ error: "Strava not connected." }, { status: 400 });
   }
@@ -75,8 +85,8 @@ export async function POST(request: NextRequest) {
   // canonical per-event metrics (distance_km, elevation_gain_m, etc.).
   // Sport names that don't already exist auto-create as `strava:<sport_type>`
   // — see src/lib/ingest/sport-resolver.ts for the rationale.
-  const sportCache = await buildSportCache(1) /* TODO(pr2-phase-4): pass user.id */;
-  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-4): pass user.id */;
+  const sportCache = await buildSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
 
   const result: SyncResult = {
     fetched: 0,
@@ -85,12 +95,12 @@ export async function POST(request: NextRequest) {
     errors: [],
   };
 
-  const tracker = new ReconcileTracker(1) /* TODO(pr2-phase-4): pass user.id */;
+  const tracker = new ReconcileTracker(userId);
 
   try {
-    for await (const activity of iterateActivities(afterUnix)) {
+    for await (const activity of iterateActivities(userId, afterUnix)) {
       result.fetched++;
-      await ingestOne(activity, sportCache, typeCache, result, tracker);
+      await ingestOne(userId, activity, sportCache, typeCache, result, tracker);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
@@ -106,18 +116,18 @@ export async function POST(request: NextRequest) {
   );
   const reconcile = await tracker.apply("strava");
 
-  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
-  await touchLastSync(1);
+  await touchLastSync(userId);
 
   return NextResponse.json({ ...result, reconcile });
 }
 
 async function ingestOne(
+  userId: number,
   activity: StravaActivity,
   sportCache: SportCache,
   typeCache: MetricTypeCache,
   result: SyncResult,
-  tracker: ReconcileTracker
+  tracker: ReconcileTracker,
 ): Promise<void> {
   // Strava's `sport_type` is newer/more specific than `type`; prefer it
   // when present. Falling back to `type` covers older activities that
@@ -155,8 +165,8 @@ async function ingestOne(
   try {
     const sourceId = `strava-${activity.id}`;
     const { status, eventId } = await upsertEvent({
-      // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
-      userId: 1,
+      
+      userId,
       sportId,
       // Raw Strava sport_type / type goes into events.type verbatim.
       // No canonical translation — events.type is a free-text label.
@@ -210,7 +220,7 @@ async function ingestOne(
  * Returns connection status + last sync time.
  */
 export async function GET() {
-  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
+  
   const tokens = await loadTokens(1);
   if (!tokens) {
     return NextResponse.json({ connected: false });

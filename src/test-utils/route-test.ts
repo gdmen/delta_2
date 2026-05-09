@@ -170,18 +170,32 @@ export function setupRouteTest() {
   beforeEach(async () => {
     if (!testDb) throw new Error("testDb not initialized");
     // Truncate everything in one statement (CASCADE handles FK order).
-    // Don't truncate ingest_configs — it preserves test-time auth tokens
-    // if any test sets them, mirroring the prod wipe behavior.
+    // Includes users + per-user secret/state tables so each test starts
+    // from a clean per-user state.
     await testDb.execute(
       sql.raw(
         `TRUNCATE TABLE
           workout_sets, event_metrics, goal_journal_entries, coach_calls,
           focuses, goals, events, metrics, metric_type_aliases, metric_types,
           sports, daily_summaries, reconcile_log, merge_log, source_settings,
-          import_sources, dashboard_widgets, dashboards
+          import_sources, dashboard_widgets, dashboards,
+          ingest_configs, invite_codes, session_denylist, oauth_states,
+          dashboard_share_tokens, users, accounts, sessions, verification_tokens
         RESTART IDENTITY CASCADE`,
       ),
     );
+    // Re-seed the bootstrap owner (id=1) so the default test user
+    // (also id=1) has a valid FK target for inserts. Tests that need
+    // additional users seed them explicitly. We override the identity
+    // sequence to land back at id=1 via OVERRIDING SYSTEM VALUE.
+    await testDb.execute(
+      sql.raw(
+        `INSERT INTO users (id, display_name, password_hash, is_owner, created_at)
+         OVERRIDING SYSTEM VALUE
+         VALUES (1, 'Owner', '!', true, '2026-01-01T00:00:00.000Z')`,
+      ),
+    );
+    await testDb.execute(sql.raw(`SELECT setval('users_id_seq', 1)`));
   });
 
   afterAll(async () => {

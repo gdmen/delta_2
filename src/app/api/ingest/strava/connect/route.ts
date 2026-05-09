@@ -1,15 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getEnv, StravaNotConfiguredError } from "@/lib/strava/client";
 import { randomBytes } from "crypto";
+import { db } from "@/db";
+import { oauthStates } from "@/db/schema";
+import { auth } from "@/lib/auth/config";
+import { getEnv, StravaNotConfiguredError } from "@/lib/strava/client";
 
 /**
  * GET /api/ingest/strava/connect
  *
- * Starts the Strava OAuth dance by redirecting the user's browser to Strava's
- * authorize page. Strava will redirect back to /api/ingest/strava/callback
- * with a code + state.
+ * Starts the Strava OAuth dance. Per the multi-user plan: the OAuth
+ * `state` is now persisted in the `oauth_states` DB table (user_id-
+ * bound) instead of a browser cookie. The previous cookie-based
+ * approach couldn't bind state-to-user across the redirect — an
+ * attacker could swap their own cookie before clicking through and
+ * connect a different Strava account into someone else's row.
+ *
+ * Flow:
+ *   1. requireUser (we need to know whose row to write tokens to).
+ *   2. Generate random `state` token.
+ *   3. INSERT INTO oauth_states (state, user_id, expires_at).
+ *      5-minute TTL — Strava's auth UI is fast.
+ *   4. Redirect to Strava's authorize endpoint with `state`.
+ *
+ * Callback verifies the state row, reads user_id from it, then
+ * deletes the row (one-shot).
+ *
+ * NOTE: this endpoint is under /api/ingest/* which the proxy exempts
+ * from cookie-gating (per the standard ingest pattern), so we have
+ * to call auth() ourselves to get the user. Without auth() this
+ * route would be reachable unauth and could spam state rows.
  */
 export async function GET(request: NextRequest) {
+  // Per-route auth. The proxy exempts /api/ingest/* from the
+  // session-cookie gate, so we have to ask Auth.js directly.
+  const session = await auth();
+  const userIdStr = session?.user?.id;
+  const userId = userIdStr ? parseInt(userIdStr, 10) : NaN;
+  if (!Number.isFinite(userId)) {
+    return NextResponse.json({ error: "not signed in" }, { status: 401 });
+  }
+
   let clientId: string;
   try {
     clientId = getEnv().clientId;
@@ -23,8 +53,13 @@ export async function GET(request: NextRequest) {
     throw err;
   }
 
-  // CSRF state: random token round-tripped through Strava and validated in the callback.
   const state = randomBytes(16).toString("hex");
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+  // Persist state -> user binding. PK on `state` so collisions are
+  // impossible (32 hex chars = 128 bits of entropy; collision odds
+  // negligible in any realistic horizon).
+  await db.insert(oauthStates).values({ state, userId, expiresAt });
 
   // The redirect URI has to match the Authorization Callback Domain in Strava's app settings.
   // Behind Nginx (our prod setup), request.nextUrl.origin resolves to the internal
@@ -46,15 +81,5 @@ export async function GET(request: NextRequest) {
   authUrl.searchParams.set("scope", "read,activity:read_all");
   authUrl.searchParams.set("state", state);
 
-  // Stash state in a short-lived cookie so the callback can verify it.
-  const response = NextResponse.redirect(authUrl.toString());
-  response.cookies.set("strava_oauth_state", state, {
-    httpOnly: true,
-    secure: request.nextUrl.protocol === "https:",
-    sameSite: "lax",
-    maxAge: 300, // 5 minutes to complete the auth flow
-    path: "/",
-  });
-
-  return response;
+  return NextResponse.redirect(authUrl.toString());
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateApiKey } from "@/lib/auth";
+import { validateUserApiKey } from "@/lib/auth/api-key";
 import { batchUpsertMetrics, upsertEvent, MetricInput } from "@/lib/ingest-service";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
 import { buildSportCache, resolveSportId } from "@/lib/ingest/sport-resolver";
@@ -98,8 +98,9 @@ function normalizeDate(s: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const authError = validateApiKey(request);
-  if (authError) return authError;
+  const auth = await validateUserApiKey(request);
+  if (auth.error) return auth.error;
+  const userId = auth.userId;
 
   let payload: HAEPayload;
   try {
@@ -111,8 +112,8 @@ export async function POST(request: NextRequest) {
   const metricsIn = payload.data?.metrics ?? [];
   const workoutsIn = payload.data?.workouts ?? [];
 
-  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-4): pass user.id */;
-  const sportCache = await buildSportCache(1) /* TODO(pr2-phase-4): pass user.id */;
+  const typeCache = await buildMetricTypeCache(userId);
+  const sportCache = await buildSportCache(userId);
 
   const inputs: MetricInput[] = [];
 
@@ -139,8 +140,8 @@ export async function POST(request: NextRequest) {
             cache: typeCache,
           });
           inputs.push({
-            // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
-            userId: 1,
+            
+            userId,
             metricTypeId: typeId,
             value,
             recordedAt: iso,
@@ -178,8 +179,8 @@ export async function POST(request: NextRequest) {
       if (typeof p.qty !== "number") continue;
       const iso = normalizeDate(p.date);
       inputs.push({
-        // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
-        userId: 1,
+        
+        userId,
         metricTypeId: typeId,
         value: p.qty,
         recordedAt: iso,
@@ -194,7 +195,7 @@ export async function POST(request: NextRequest) {
 
   // Record upserts into the reconcile tracker so reconcile (if enabled for
   // apple_health) knows the batch's per-type date range + source_ids.
-  const tracker = new ReconcileTracker(1) /* TODO(pr2-phase-4): pass user.id */;
+  const tracker = new ReconcileTracker(userId);
   for (const input of inputs) {
     tracker.recordMetric(input.metricTypeId, input.sourceId, input.recordedAt);
   }
@@ -227,8 +228,8 @@ export async function POST(request: NextRequest) {
     try {
       const sourceId = `hae-workout-${w.name}-${startIso}`;
       const { status } = await upsertEvent({
-        // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
-        userId: 1,
+        
+        userId,
         sportId,
         // events.type holds the raw HAE workout name verbatim. No
         // canonical translation — user can rename via the event editor.

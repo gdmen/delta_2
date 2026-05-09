@@ -1,10 +1,14 @@
 import { db } from "@/db";
 import { ingestConfigs } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
+import { encrypt, decrypt } from "@/lib/auth/secrets";
 
-// Strava's stored config blob, stashed JSON-encoded in ingest_configs.encrypted_value.
-// TODO(pr2-phase-4): wrap with AES-256-GCM via src/lib/auth/secrets.ts so
-// the column lives up to its name. For now still plaintext JSON.
+// Strava's stored config blob, AES-256-GCM encrypted in
+// ingest_configs.encrypted_value. saveTokens encrypts on write;
+// loadTokens decrypts on read. Decrypt failures (tag mismatch,
+// wrong key) propagate as DecryptError; the route layer surfaces
+// "Strava not connected" so the user re-runs OAuth instead of
+// trying to figure out a crypto error.
 export interface StravaTokens {
   access_token: string;
   refresh_token: string;
@@ -65,15 +69,20 @@ export async function loadTokens(userId: number): Promise<StravaTokens | null> {
   const blob = rows[0].encryptedValue;
   if (!blob) return null;
   try {
-    return JSON.parse(blob) as StravaTokens;
+    const plaintext = decrypt(blob);
+    return JSON.parse(plaintext) as StravaTokens;
   } catch {
+    // Either decrypt failed (tampered or wrong key) or JSON parse
+    // failed (legacy un-encrypted row from before this commit).
+    // Returning null surfaces as "Strava not connected" — user
+    // re-OAuths and the row gets rewritten as encrypted.
     return null;
   }
 }
 
 /** Persist tokens. Upserts on (user_id, source=strava). */
 export async function saveTokens(tokens: StravaTokens, userId: number, lastSyncAt?: string): Promise<void> {
-  const payload = JSON.stringify(tokens);
+  const payload = encrypt(JSON.stringify(tokens));
   const existing = await db
     .select({ id: ingestConfigs.id })
     .from(ingestConfigs)
