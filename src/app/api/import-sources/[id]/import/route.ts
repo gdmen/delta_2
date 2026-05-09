@@ -23,6 +23,8 @@ import {
   type EventInput,
 } from "@/lib/ingest-service";
 import { loadUserTimezone } from "@/lib/app-settings";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/import-sources/[id]/import
@@ -53,6 +55,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error: authError } = await requireUserOr401();
+  if (authError) return authError;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -60,7 +65,7 @@ export async function POST(
   const sourceRows = await db
     .select()
     .from(importSources)
-    .where(eq(importSources.id, id))
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
     .limit(1);
   if (sourceRows.length === 0) {
     return NextResponse.json({ error: "Import source not found" }, { status: 404 });
@@ -86,13 +91,13 @@ export async function POST(
 
   const result: TableResult = { accepted: 0, skipped: 0, updated: 0, errors: [] };
 
-  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
-  const sportCache = await buildSportCache();
-  const tracker = new ReconcileTracker();
+  const typeCache = await buildMetricTypeCache(user.id);
+  const sportCache = await buildSportCache(user.id);
+  const tracker = new ReconcileTracker(user.id);
   // User timezone anchors naive dates ("2026-05-07" or
   // "2026-05-07 23:00") to wall-clock time in `tz`. Without this a
   // late-evening sleep entry in PT lands on the wrong calendar day.
-  const tz = await loadUserTimezone();
+  const tz = await loadUserTimezone(user.id);
 
   for (let i = 0; i < rows.length; i++) {
     const { out, error } = applyMapping(mapping, headers, rows[i], i, tz);
@@ -102,7 +107,7 @@ export async function POST(
     }
     for (const item of out) {
       try {
-        await writeOutRow(item, sourceTag, typeCache, sportCache, result, i, tracker);
+        await writeOutRow(item, sourceTag, typeCache, sportCache, result, i, tracker, user.id);
       } catch (err) {
         result.errors.push(
           `row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
@@ -128,7 +133,8 @@ async function writeOutRow(
   sportCache: SportCache,
   result: TableResult,
   rowIdx: number,
-  tracker: ReconcileTracker
+  tracker: ReconcileTracker,
+  userId: number,
 ): Promise<void> {
   if (item.kind === "metric") {
     // No identity map — let unknown columns auto-create as
@@ -147,6 +153,7 @@ async function writeOutRow(
     const sourceId =
       item.sourceId ?? `${sourceTag}-${item.metric}-${item.recordedAt}`;
     const input: MetricInput = {
+      userId,
       metricTypeId: typeId,
       value: item.value,
       recordedAt: item.recordedAt,
@@ -176,6 +183,7 @@ async function writeOutRow(
     const sourceId =
       item.sourceId ?? `${sourceTag}-${item.sport}-${item.type}-${item.startedAt}-${rowIdx}`;
     const input: EventInput = {
+      userId,
       sportId,
       type: item.type,
       durationMinutes: item.durationMinutes ?? null,
@@ -222,11 +230,12 @@ async function writeOutRow(
       const existing = await db
         .select({ id: events.id })
         .from(events)
-        .where(eq(events.sourceId, synth))
+        .where(and(userScope(userId).events, eq(events.sourceId, synth)))
         .limit(1);
       parentId = existing[0]?.id ?? null;
       if (parentId === null) {
         const { eventId } = await upsertEvent({
+          userId,
           sportId,
           type: item.eventType,
           durationMinutes: null,
@@ -243,9 +252,10 @@ async function writeOutRow(
         .from(events)
         .where(
           and(
+            userScope(userId).events,
             eq(events.startedAt, item.startedAt),
             eq(events.sportId, sportId),
-            eq(events.type, item.eventType)
+            eq(events.type, item.eventType),
           )
         )
         .limit(1);
@@ -255,6 +265,7 @@ async function writeOutRow(
         const synth = `${sourceTag}-${item.sport}-${item.eventType}-${item.startedAt}`;
         parentSourceId = synth;
         const { eventId } = await upsertEvent({
+          userId,
           sportId,
           type: item.eventType,
           durationMinutes: null,
@@ -291,4 +302,3 @@ async function writeOutRow(
     return;
   }
 }
-

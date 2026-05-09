@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { metrics, events } from "@/db/schema";
 import { sql } from "drizzle-orm";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * Per-source activity summary for the data-sources index.
@@ -8,6 +9,9 @@ import { sql } from "drizzle-orm";
  * Reads the `source` column on `metrics` and `events` and aggregates counts
  * + the latest timestamp seen. Used to show "last import" on the index
  * without navigating into each integration's sub-page.
+ *
+ * Per-user: only counts rows belonging to the requesting user — Alice's
+ * data-sources page MUST NOT show Bob's row counts.
  */
 
 export interface SourceActivity {
@@ -18,7 +22,7 @@ export interface SourceActivity {
   lastDataAt: string | null;  // latest recordedAt/startedAt seen
 }
 
-export async function getSourceActivity(): Promise<Record<string, SourceActivity>> {
+export async function getSourceActivity(userId: number): Promise<Record<string, SourceActivity>> {
   const metricRows = await db
     .select({
       source: metrics.source,
@@ -27,6 +31,7 @@ export async function getSourceActivity(): Promise<Record<string, SourceActivity
       lastAt: sql<string>`max(${metrics.recordedAt})`,
     })
     .from(metrics)
+    .where(userScope(userId).metrics)
     .groupBy(metrics.source);
 
   const eventRows = await db
@@ -37,6 +42,7 @@ export async function getSourceActivity(): Promise<Record<string, SourceActivity
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(events)
+    .where(userScope(userId).events)
     .groupBy(events.source);
 
   const out: Record<string, SourceActivity> = {};

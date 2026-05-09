@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { workoutSets } from "@/db/schema";
+import { events, workoutSets } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface CreateSetBody {
   eventId: number;
@@ -14,6 +17,9 @@ interface CreateSetBody {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: Partial<CreateSetBody>;
   try {
     body = await request.json();
@@ -34,10 +40,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // INHERIT scoping: workout_sets has no user_id; confirm parent event
+  // belongs to this user before inserting.
+  const owns = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(and(userScope(user.id).events, eq(events.id, body.eventId)))
+    .limit(1);
+  if (owns.length === 0) {
+    return NextResponse.json({ error: "event not found" }, { status: 404 });
+  }
+
   // Resolve the free-text exercise name to a metric_types row. Known names
   // (canonical or previously-aliased) route to their existing id; unknown
   // ones auto-create under `manual:<rawName>` for user review later.
-  const cache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
+  const cache = await buildMetricTypeCache(user.id);
   const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
     rawName: body.exerciseName,
     map: { [body.exerciseName]: body.exerciseName },

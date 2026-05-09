@@ -3,13 +3,17 @@ import { db } from "@/db";
 import { events, sports } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { NewEventForm } from "./form";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewEventPage() {
+  const user = await requireUserOrSignin();
   const sportsList = await db
     .select({ id: sports.id, name: sports.name })
     .from(sports)
+    .where(userScope(user.id).sports)
     .orderBy(asc(sports.name));
 
   // Distinct (sport, type) pairs feed the autocomplete on the Type input.
@@ -18,6 +22,7 @@ export default async function NewEventPage() {
   const typeRows = await db
     .selectDistinct({ sportId: events.sportId, type: events.type })
     .from(events)
+    .where(userScope(user.id).events)
     .orderBy(asc(events.sportId), asc(events.type));
   const typesBySport: Record<number, string[]> = {};
   for (const r of typeRows) {

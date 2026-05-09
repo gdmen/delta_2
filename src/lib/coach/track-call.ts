@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { coachCalls } from "@/db/schema";
 import { desc, eq, and, gte } from "drizzle-orm";
 import { parseSqliteUtc } from "@/lib/sqlite-time";
+import { userScope } from "@/lib/auth/scope";
 
 export type CoachEndpoint = "suggest-focuses" | "summarize-period" | "close-focus-verdict";
 
@@ -16,6 +17,7 @@ export type CoachEndpoint = "suggest-focuses" | "summarize-period" | "close-focu
  * blowing up.
  */
 export async function trackCoachCall(args: {
+  userId: number;
   endpoint: CoachEndpoint;
   goalId: number | null;
   tokensIn: number;
@@ -25,6 +27,7 @@ export async function trackCoachCall(args: {
   status: "success" | "failed";
 }): Promise<void> {
   await db.insert(coachCalls).values({
+    userId: args.userId,
     endpoint: args.endpoint,
     goalId: args.goalId,
     tokensIn: args.tokensIn,
@@ -43,12 +46,14 @@ export async function trackCoachCall(args: {
 export async function getLastSuccessfulCallAt(
   goalId: number,
   endpoint: CoachEndpoint,
+  userId: number,
 ): Promise<Date | null> {
   const rows = await db
     .select({ ts: coachCalls.ts })
     .from(coachCalls)
     .where(
       and(
+        userScope(userId).coachCalls,
         eq(coachCalls.goalId, goalId),
         eq(coachCalls.endpoint, endpoint),
         eq(coachCalls.status, "success"),
@@ -65,7 +70,7 @@ export async function getLastSuccessfulCallAt(
  * Lightweight health check: how many calls in the last 24h, broken down by
  * endpoint + status. Useful for "am I burning money" sanity in PR #4.
  */
-export async function getRecentCoachCallStats(hours = 24): Promise<{
+export async function getRecentCoachCallStats(userId: number, hours = 24): Promise<{
   total: number;
   byEndpoint: Record<string, { success: number; failed: number; tokens: number }>;
 }> {
@@ -78,7 +83,7 @@ export async function getRecentCoachCallStats(hours = 24): Promise<{
       tokensOut: coachCalls.tokensOut,
     })
     .from(coachCalls)
-    .where(gte(coachCalls.ts, since));
+    .where(and(userScope(userId).coachCalls, gte(coachCalls.ts, since)));
 
   const byEndpoint: Record<string, { success: number; failed: number; tokens: number }> = {};
   for (const r of rows) {

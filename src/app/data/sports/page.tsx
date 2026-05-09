@@ -3,6 +3,8 @@ import { sports, events, focuses, goals } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { SportsTable } from "./sports-table";
 import { DataTabShell } from "@/components/data-tab-shell";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,7 @@ function suffixOf(name: string): string {
 }
 
 export default async function SportsPage() {
+  const user = await requireUserOrSignin();
   // One round-trip: left-join each dependent table, aggregate in SQL.
   // focus/goal counts need COUNT(DISTINCT) because the joins multiply.
   const rows = await db
@@ -35,8 +38,8 @@ export default async function SportsPage() {
       lastEventAt: sql<string>`MAX(${events.startedAt})`,
     })
     .from(sports)
-    .leftJoin(events, eq(events.sportId, sports.id))
-    .leftJoin(goals, eq(goals.sportId, sports.id))
+    .leftJoin(events, and(userScope(user.id).events, eq(events.sportId, sports.id)))
+    .leftJoin(goals, and(userScope(user.id).goals, eq(goals.sportId, sports.id)))
     // Focuses now reach their sport via the goal, not a direct sport_id.
     // Count only manual focuses — un-promoted LLM proposals shouldn't
     // inflate the "you have N focuses" thumb-rule.
@@ -44,6 +47,7 @@ export default async function SportsPage() {
       focuses,
       and(eq(focuses.goalId, goals.id), eq(focuses.source, "manual")),
     )
+    .where(userScope(user.id).sports)
     .groupBy(sports.id)
     .orderBy(sql`COUNT(DISTINCT ${events.id}) DESC`);
 

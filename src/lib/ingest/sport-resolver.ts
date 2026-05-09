@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { sports } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * Resolve a source-specific sport name to a sports.id, auto-creating a
@@ -22,15 +23,24 @@ import { eq } from "drizzle-orm";
  * /data/sports updates `events.sport_id`, `goals.sport_id`,
  * `dashboards.sport_id`, and `metric_types.sport_id` directly. If sport
  * aliases ever become useful, mirror metric_type_aliases.
+ *
+ * Per-user: sports is OWNED. Each cache is built for one user_id and the
+ * resolver only sees that user's sports.
  */
 
 export interface SportCache {
+  /** Owner of this cache. Asserted on every autoCreate to prevent the
+   *  silent-corruption bug if a caller passes the wrong cache. */
+  userId: number;
   byName: Map<string, number>;
 }
 
-export async function buildSportCache(): Promise<SportCache> {
-  const rows = await db.select({ id: sports.id, name: sports.name }).from(sports);
-  return { byName: new Map(rows.map((r) => [r.name, r.id])) };
+export async function buildSportCache(userId: number): Promise<SportCache> {
+  const rows = await db
+    .select({ id: sports.id, name: sports.name })
+    .from(sports)
+    .where(userScope(userId).sports);
+  return { userId, byName: new Map(rows.map((r) => [r.name, r.id])) };
 }
 
 export interface ResolveSportArgs {
@@ -66,7 +76,7 @@ async function autoCreate(name: string, cache: SportCache): Promise<number> {
   const color = randomColor();
   const inserted = await db
     .insert(sports)
-    .values({ name, color })
+    .values({ userId: cache.userId, name, color })
     .onConflictDoNothing()
     .returning({ id: sports.id });
 
@@ -77,7 +87,7 @@ async function autoCreate(name: string, cache: SportCache): Promise<number> {
     const existing = await db
       .select({ id: sports.id })
       .from(sports)
-      .where(eq(sports.name, name))
+      .where(and(userScope(cache.userId).sports, eq(sports.name, name)))
       .limit(1);
     id = existing[0]?.id;
   }

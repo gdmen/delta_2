@@ -5,6 +5,8 @@ import { desc } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { MergesUndoButton } from "./undo-button";
 import { MergesFilterInput } from "./filter-input";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,7 @@ export default async function MergesPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  const user = await requireUserOrSignin();
   const sp = await searchParams;
   const qParam = sp.q?.trim() ?? "";
 
@@ -67,6 +70,7 @@ export default async function MergesPage({
       undoneAt: mergeLog.undoneAt,
     })
     .from(mergeLog)
+    .where(userScope(user.id).mergeLog)
     .orderBy(desc(mergeLog.createdAt))
     .limit(200)) as MergeRow[];
 

@@ -5,6 +5,8 @@ import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { PaginationControls } from "@/components/pagination-controls";
 import { formatShort } from "@/lib/format";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,7 @@ export default async function AllEventsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  const user = await requireUserOrSignin();
   const sp = await searchParams;
   const from = isIsoDate(sp.from) ? sp.from : "";
   const to = isIsoDate(sp.to) ? sp.to : "";
@@ -31,7 +34,7 @@ export default async function AllEventsPage({
   // Build WHERE from date range + optional text match. `started_at` is stored
   // as ISO with time; day-boundary ISO strings work with SQLite's text-string
   // comparison. Text match is OR across sport name, event type, source, notes.
-  const conditions = [];
+  const conditions = [userScope(user.id).events];
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));
   if (to) conditions.push(lte(events.startedAt, `${to}T23:59:59.999Z`));
   if (q) {
@@ -45,7 +48,7 @@ export default async function AllEventsPage({
       )!
     );
   }
-  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const where = and(...conditions);
 
   // Count query needs the join too (text match may reference sports.name).
   const totalRow = await db

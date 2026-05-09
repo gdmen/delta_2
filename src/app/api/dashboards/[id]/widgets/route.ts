@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { dashboards, dashboardWidgets } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { addWidgetInput, serializeConfig } from "@/lib/dashboards/validation";
 import { lookupWidget } from "@/lib/widgets/registry";
 import { readJson } from "@/lib/dashboards/request";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface Ctx {
   params: Promise<{ id: string }>;
@@ -16,6 +18,9 @@ function parseId(raw: string): number | null {
 }
 
 export async function POST(req: Request, { params }: Ctx) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idRaw } = await params;
   const dashboardId = parseId(idRaw);
   if (dashboardId === null) return NextResponse.json({ error: "Invalid id." }, { status: 400 });
@@ -65,10 +70,12 @@ export async function POST(req: Request, { params }: Ctx) {
   }
 
   // 404 BEFORE the position lookup so a missing-dashboard request bails fast.
+  // Scoped by user_id so an attacker can't add widgets to another user's
+  // dashboard.
   const dash = await db
     .select({ id: dashboards.id })
     .from(dashboards)
-    .where(eq(dashboards.id, dashboardId))
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)))
     .limit(1);
   if (dash.length === 0) {
     return NextResponse.json({ error: "Dashboard not found." }, { status: 404 });
@@ -99,7 +106,7 @@ export async function POST(req: Request, { params }: Ctx) {
   await db
     .update(dashboards)
     .set({ updatedAt: sql`(datetime('now'))` })
-    .where(eq(dashboards.id, dashboardId));
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ widget: inserted[0] }, { status: 201 });
 }

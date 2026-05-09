@@ -14,6 +14,7 @@ import {
   buildSportMergePayload,
 } from "@/lib/merge-log/builder";
 import type { SportMergedEntry } from "@/lib/merge-log/types";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/sports/merge
@@ -25,6 +26,10 @@ import type { SportMergedEntry } from "@/lib/merge-log/types";
  * layer, not the DB), no daily_summaries.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const userId = user.id;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -35,9 +40,6 @@ export async function POST(request: NextRequest) {
   const parsed = parseMergeByIdBody(body);
   if (!parsed.ok) return parsed.response;
   const { canonicalId, mergeIds } = parsed.value;
-
-  // TODO(pr2-phase-3): replace with `const { user } = await requireUserOr401()`.
-  const userId = 1;
 
   // Existence check scoped by user_id (per the eng-review HIGH finding).
   // Without this, an attacker could pass mergeIds=[victim_sport_id] and

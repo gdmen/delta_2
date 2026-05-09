@@ -33,8 +33,8 @@ export default async function RootLayout({
   // appear without code changes. The list is small (cap ~30) and the query
   // is indexed on (position) — re-fetching on every page load is fine and
   // keeps the sidebar in sync after mutations without explicit invalidation.
-  // TODO(pr2-phase-3b): scope to user.id once loadAllDashboards accepts it.
-  const dashboards = await loadAllDashboards();
+  const userId = parseInt(session.user.id, 10);
+  const dashboards = Number.isFinite(userId) ? await loadAllDashboards(userId) : [];
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full">

@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { dashboards } from "@/db/schema";
 import { asc } from "drizzle-orm";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +14,11 @@ export const dynamic = "force-dynamic";
  * the user to the create page so they're not staring at a 404.
  */
 export default async function Home() {
+  const user = await requireUserOrSignin();
   const rows = await db
     .select({ slug: dashboards.slug })
     .from(dashboards)
+    .where(userScope(user.id).dashboards)
     .orderBy(asc(dashboards.position), asc(dashboards.id))
     .limit(1);
   if (rows.length === 0) redirect("/dashboards/new");

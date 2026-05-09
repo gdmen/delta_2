@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { focuses, goals } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/goals/:id/focuses — create a manual focus on this goal.
@@ -14,6 +16,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const goalId = Number(idStr);
   if (!Number.isFinite(goalId) || goalId <= 0) {
@@ -23,7 +28,7 @@ export async function POST(
   const g = await db
     .select({ id: goals.id })
     .from(goals)
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(user.id).goals, eq(goals.id, goalId)))
     .limit(1);
   if (g.length === 0) {
     return NextResponse.json({ error: "goal not found" }, { status: 404 });

@@ -111,8 +111,8 @@ export async function POST(request: NextRequest) {
   const metricsIn = payload.data?.metrics ?? [];
   const workoutsIn = payload.data?.workouts ?? [];
 
-  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
-  const sportCache = await buildSportCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-4): pass user.id */;
+  const sportCache = await buildSportCache(1) /* TODO(pr2-phase-4): pass user.id */;
 
   const inputs: MetricInput[] = [];
 
@@ -139,6 +139,8 @@ export async function POST(request: NextRequest) {
             cache: typeCache,
           });
           inputs.push({
+            // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
+            userId: 1,
             metricTypeId: typeId,
             value,
             recordedAt: iso,
@@ -176,6 +178,8 @@ export async function POST(request: NextRequest) {
       if (typeof p.qty !== "number") continue;
       const iso = normalizeDate(p.date);
       inputs.push({
+        // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
+        userId: 1,
         metricTypeId: typeId,
         value: p.qty,
         recordedAt: iso,
@@ -190,7 +194,7 @@ export async function POST(request: NextRequest) {
 
   // Record upserts into the reconcile tracker so reconcile (if enabled for
   // apple_health) knows the batch's per-type date range + source_ids.
-  const tracker = new ReconcileTracker();
+  const tracker = new ReconcileTracker(1) /* TODO(pr2-phase-4): pass user.id */;
   for (const input of inputs) {
     tracker.recordMetric(input.metricTypeId, input.sourceId, input.recordedAt);
   }
@@ -223,6 +227,8 @@ export async function POST(request: NextRequest) {
     try {
       const sourceId = `hae-workout-${w.name}-${startIso}`;
       const { status } = await upsertEvent({
+        // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
+        userId: 1,
         sportId,
         // events.type holds the raw HAE workout name verbatim. No
         // canonical translation — user can rename via the event editor.

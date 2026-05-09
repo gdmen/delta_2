@@ -1,7 +1,9 @@
 import { db } from "@/db";
 import { sourceSettings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getLastReconcile } from "@/lib/reconcile";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 import { ReconcileToggle } from "./source-sync-behavior-client";
 
 /**
@@ -19,13 +21,14 @@ export async function SourceSyncBehavior({
   source: string;
   kind?: "third-party" | "csv";
 }) {
+  const user = await requireUserOrSignin();
   const rows = await db
     .select()
     .from(sourceSettings)
-    .where(eq(sourceSettings.source, source))
+    .where(and(userScope(user.id).sourceSettings, eq(sourceSettings.source, source)))
     .limit(1);
   const enabled = rows[0]?.reconcileEnabled === true;
-  const last = await getLastReconcile(source);
+  const last = await getLastReconcile(source, user.id);
 
   const csvLine =
     kind === "csv"

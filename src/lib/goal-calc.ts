@@ -45,7 +45,7 @@ function regressionSlopePerWeek(samples: Array<{ t: number; v: number }>): numbe
   return num / den;
 }
 
-export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgress> {
+export async function computeGoalProgress(goal: GoalSummary, userId: number): Promise<GoalProgress> {
   const now = Date.now();
   const deadlineTs = new Date(goal.deadline).getTime();
   const daysRemaining = Math.max(0, Math.ceil((deadlineTs - now) / MS_PER_DAY));
@@ -56,7 +56,7 @@ export async function computeGoalProgress(goal: GoalSummary): Promise<GoalProgre
   // metrics (e.g. bench_press_max). Goal-calc no longer needs to know
   // where samples come from — any metric_type that has a Series is
   // goal-targetable. Series.samples is sorted ASC by date.
-  const series = await getAllHistory(goal.metricName);
+  const series = await getAllHistory(goal.metricName, userId);
   const samples = series.samples;
 
   const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();

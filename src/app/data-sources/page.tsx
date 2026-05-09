@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { importSources } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { formatShort } from "@/lib/format";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +62,8 @@ const GRID_COLS =
   "tablet:!grid-cols-[minmax(10rem,1.4fr)_5.5rem_4.5rem_9rem_9rem]";
 
 export default async function DataSourcesPage() {
-  const activity = await getSourceActivity();
+  const user = await requireUserOrSignin();
+  const activity = await getSourceActivity(user.id);
 
   // Dynamically fold user-defined import sources into the table. Inserted
   // between the built-in "ready" integrations and the "coming soon" tail
@@ -68,6 +71,7 @@ export default async function DataSourcesPage() {
   const customSources = await db
     .select()
     .from(importSources)
+    .where(userScope(user.id).importSources)
     .orderBy(asc(importSources.name));
 
   const customRows: Row[] = customSources.map((s) => ({

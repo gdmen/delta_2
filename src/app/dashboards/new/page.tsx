@@ -2,13 +2,17 @@ import { db } from "@/db";
 import { sports } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { NewDashboardForm } from "./NewDashboardForm";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewDashboardPage() {
+  const user = await requireUserOrSignin();
   const sportRows = await db
     .select({ id: sports.id, name: sports.name, color: sports.color })
     .from(sports)
+    .where(userScope(user.id).sports)
     .orderBy(asc(sports.name));
 
   return (

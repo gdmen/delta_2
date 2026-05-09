@@ -46,7 +46,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const tokens = await exchangeCode(code);
-    await saveTokens(tokens);
+    // TODO(pr2-phase-4): replace with `user.id` from the OAuth state row.
+    await saveTokens(tokens, 1);
   } catch (err) {
     destUrl.searchParams.set("status", "error");
     destUrl.searchParams.set("reason", "token_exchange_failed");

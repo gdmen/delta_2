@@ -7,6 +7,7 @@ import { clearTokens } from "@/lib/strava/client";
  * do that in Strava's connected-apps settings if desired.
  */
 export async function POST() {
-  await clearTokens();
+  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
+  await clearTokens(1);
   return NextResponse.json({ ok: true });
 }

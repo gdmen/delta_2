@@ -1,9 +1,9 @@
 import { db } from "@/db";
 import { ingestConfigs } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 // Strava's stored config blob, stashed JSON-encoded in ingest_configs.encrypted_value.
-// TODO(pr2-phase-3): wrap with AES-256-GCM via src/lib/auth/secrets.ts so
+// TODO(pr2-phase-4): wrap with AES-256-GCM via src/lib/auth/secrets.ts so
 // the column lives up to its name. For now still plaintext JSON.
 export interface StravaTokens {
   access_token: string;
@@ -54,11 +54,11 @@ export function getEnv(): { clientId: string; clientSecret: string } {
 }
 
 /** Read the stored tokens from the DB. Returns null if not connected. */
-export async function loadTokens(): Promise<StravaTokens | null> {
+export async function loadTokens(userId: number): Promise<StravaTokens | null> {
   const rows = await db
     .select()
     .from(ingestConfigs)
-    .where(eq(ingestConfigs.source, "strava"))
+    .where(and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")))
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -71,17 +71,18 @@ export async function loadTokens(): Promise<StravaTokens | null> {
   }
 }
 
-/** Persist tokens. Upserts on source=strava. */
-export async function saveTokens(tokens: StravaTokens, lastSyncAt?: string): Promise<void> {
+/** Persist tokens. Upserts on (user_id, source=strava). */
+export async function saveTokens(tokens: StravaTokens, userId: number, lastSyncAt?: string): Promise<void> {
   const payload = JSON.stringify(tokens);
   const existing = await db
     .select({ id: ingestConfigs.id })
     .from(ingestConfigs)
-    .where(eq(ingestConfigs.source, "strava"))
+    .where(and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")))
     .limit(1);
 
   if (existing.length === 0) {
     await db.insert(ingestConfigs).values({
+      userId,
       source: "strava",
       encryptedValue: payload,
       lastSyncAt: lastSyncAt ?? null,
@@ -90,21 +91,26 @@ export async function saveTokens(tokens: StravaTokens, lastSyncAt?: string): Pro
   } else {
     const updates: Partial<typeof ingestConfigs.$inferInsert> = { encryptedValue: payload };
     if (lastSyncAt !== undefined) updates.lastSyncAt = lastSyncAt;
-    await db.update(ingestConfigs).set(updates).where(eq(ingestConfigs.source, "strava"));
+    await db
+      .update(ingestConfigs)
+      .set(updates)
+      .where(and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")));
   }
 }
 
 /** Drop stored tokens (disconnect). */
-export async function clearTokens(): Promise<void> {
-  await db.delete(ingestConfigs).where(eq(ingestConfigs.source, "strava"));
+export async function clearTokens(userId: number): Promise<void> {
+  await db
+    .delete(ingestConfigs)
+    .where(and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")));
 }
 
 /** Update just last_sync_at. */
-export async function touchLastSync(): Promise<void> {
+export async function touchLastSync(userId: number): Promise<void> {
   await db
     .update(ingestConfigs)
     .set({ lastSyncAt: new Date().toISOString() })
-    .where(eq(ingestConfigs.source, "strava"));
+    .where(and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")));
 }
 
 /** Exchange an authorization code for a token pair. */
@@ -138,7 +144,7 @@ export async function exchangeCode(code: string): Promise<StravaTokens> {
 }
 
 /** Refresh an expiring access token. Persists the new tokens. */
-export async function refreshTokens(tokens: StravaTokens): Promise<StravaTokens> {
+export async function refreshTokens(tokens: StravaTokens, userId: number): Promise<StravaTokens> {
   const { clientId, clientSecret } = getEnv();
   const res = await fetch(STRAVA_OAUTH_URL, {
     method: "POST",
@@ -161,17 +167,17 @@ export async function refreshTokens(tokens: StravaTokens): Promise<StravaTokens>
     refresh_token: json.refresh_token,
     expires_at: json.expires_at,
   };
-  await saveTokens(refreshed);
+  await saveTokens(refreshed, userId);
   return refreshed;
 }
 
 /** Get a valid access token, refreshing if within 60 seconds of expiry. */
-export async function getValidAccessToken(): Promise<string> {
-  const tokens = await loadTokens();
+export async function getValidAccessToken(userId: number): Promise<string> {
+  const tokens = await loadTokens(userId);
   if (!tokens) throw new StravaNotConnectedError();
   const nowSec = Math.floor(Date.now() / 1000);
   if (tokens.expires_at - nowSec < 60) {
-    const fresh = await refreshTokens(tokens);
+    const fresh = await refreshTokens(tokens, userId);
     return fresh.access_token;
   }
   return tokens.access_token;
@@ -184,8 +190,8 @@ export async function getValidAccessToken(): Promise<string> {
  * `after` is a Unix timestamp in seconds; only activities started after this
  * time are returned. Pass 0 for "everything". Strava's per_page cap is 200.
  */
-export async function* iterateActivities(afterUnix: number = 0): AsyncGenerator<StravaActivity> {
-  const token = await getValidAccessToken();
+export async function* iterateActivities(userId: number, afterUnix: number = 0): AsyncGenerator<StravaActivity> {
+  const token = await getValidAccessToken(userId);
   let page = 1;
   const perPage = 100;
 

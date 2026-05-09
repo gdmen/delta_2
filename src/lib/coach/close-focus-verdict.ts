@@ -7,10 +7,11 @@ import {
   sports,
   goalJournalEntries,
 } from "@/db/schema";
-import { and, eq, gte, lte, ne, desc, isNotNull } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, ne, desc, isNotNull } from "drizzle-orm";
 import { CloseFocusVerdictResponse, type CoachErrorBody } from "./schemas";
 import { trackCoachCall } from "./track-call";
 import { buildSignalsBlock, renderSignalsBlock } from "./suggest-focuses";
+import { userScope } from "@/lib/auth/scope";
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 1200;
@@ -90,7 +91,12 @@ interface GoalShape {
   deadline: string;
 }
 
-async function loadFocus(focusId: number, goalId: number): Promise<FocusContext | null> {
+async function loadFocus(focusId: number, goalId: number, userId: number): Promise<FocusContext | null> {
+  // focuses is INHERIT — restrict to focuses on this user's goals.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   const rows = await db
     .select({
       id: focuses.id,
@@ -103,12 +109,18 @@ async function loadFocus(focusId: number, goalId: number): Promise<FocusContext 
       source: focuses.source,
     })
     .from(focuses)
-    .where(and(eq(focuses.id, focusId), eq(focuses.goalId, goalId)))
+    .where(
+      and(
+        eq(focuses.id, focusId),
+        eq(focuses.goalId, goalId),
+        inArray(focuses.goalId, ownedGoalIds),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
 
-async function loadGoal(goalId: number): Promise<GoalShape | null> {
+async function loadGoal(goalId: number, userId: number): Promise<GoalShape | null> {
   const rows = await db
     .select({
       id: goals.id,
@@ -121,7 +133,7 @@ async function loadGoal(goalId: number): Promise<GoalShape | null> {
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -130,7 +142,13 @@ async function loadJournalInWindow(
   goalId: number,
   startDate: string,
   endDate: string,
+  userId: number,
 ): Promise<Array<{ createdAt: string; content: string }>> {
+  // goal_journal_entries is INHERIT — scope by this user's goals.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   const rows = await db
     .select({
       createdAt: goalJournalEntries.createdAt,
@@ -140,6 +158,7 @@ async function loadJournalInWindow(
     .where(
       and(
         eq(goalJournalEntries.goalId, goalId),
+        inArray(goalJournalEntries.goalId, ownedGoalIds),
         gte(goalJournalEntries.createdAt, startDate),
         lte(goalJournalEntries.createdAt, `${endDate}T23:59:59Z`),
       ),
@@ -155,7 +174,12 @@ interface PriorFocus extends FocusContext {
 async function loadPriorClosedFocuses(
   goalId: number,
   excludeFocusId: number,
+  userId: number,
 ): Promise<PriorFocus[]> {
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   const closed = await db
     .select({
       id: focuses.id,
@@ -171,6 +195,7 @@ async function loadPriorClosedFocuses(
     .where(
       and(
         eq(focuses.goalId, goalId),
+        inArray(focuses.goalId, ownedGoalIds),
         ne(focuses.id, excludeFocusId),
         ne(focuses.status, "active"),
         isNotNull(focuses.endDate),
@@ -182,7 +207,7 @@ async function loadPriorClosedFocuses(
   const results: PriorFocus[] = [];
   for (const f of closed) {
     if (!f.endDate) continue;
-    const snippets = await loadJournalInWindow(goalId, f.startDate, f.endDate);
+    const snippets = await loadJournalInWindow(goalId, f.startDate, f.endDate, userId);
     results.push({ ...f, journalSnippets: snippets.slice(0, 5) });
   }
   return results;
@@ -229,6 +254,7 @@ function parseLlmJson(raw: string): unknown {
 export async function generateCloseFocusVerdict(args: {
   goalId: number;
   focusId: number;
+  userId: number;
 }): Promise<CloseFocusVerdictResult> {
   const apiKey = process.env.CLAUDE_API_KEY;
   if (!apiKey || apiKey === "your-claude-api-key-here") {
@@ -241,7 +267,7 @@ export async function generateCloseFocusVerdict(args: {
     };
   }
 
-  const focus = await loadFocus(args.focusId, args.goalId);
+  const focus = await loadFocus(args.focusId, args.goalId, args.userId);
   if (!focus) {
     return {
       ok: false,
@@ -251,7 +277,7 @@ export async function generateCloseFocusVerdict(args: {
       durationMs: 0,
     };
   }
-  const goal = await loadGoal(args.goalId);
+  const goal = await loadGoal(args.goalId, args.userId);
   if (!goal) {
     return {
       ok: false,
@@ -265,9 +291,9 @@ export async function generateCloseFocusVerdict(args: {
   // Use today as the close date for the journal-window query if the focus
   // doesn't have an end_date yet (caller hasn't set it; we're pre-close).
   const closeDate = focus.endDate ?? new Date().toISOString().slice(0, 10);
-  const focusJournal = await loadJournalInWindow(args.goalId, focus.startDate, closeDate);
-  const priorFocuses = await loadPriorClosedFocuses(args.goalId, args.focusId);
-  const signals = await buildSignalsBlock();
+  const focusJournal = await loadJournalInWindow(args.goalId, focus.startDate, closeDate, args.userId);
+  const priorFocuses = await loadPriorClosedFocuses(args.goalId, args.focusId, args.userId);
+  const signals = await buildSignalsBlock(args.userId);
   const signalsBlock = renderSignalsBlock(signals);
 
   const promptTail = [
@@ -313,6 +339,7 @@ export async function generateCloseFocusVerdict(args: {
   } catch (err) {
     const durationMs = Date.now() - t0;
     await trackCoachCall({
+      userId: args.userId,
       endpoint: "close-focus-verdict",
       goalId: args.goalId,
       tokensIn: 0,
@@ -366,6 +393,7 @@ export async function generateCloseFocusVerdict(args: {
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
     await trackCoachCall({
+      userId: args.userId,
       endpoint: "close-focus-verdict",
       goalId: args.goalId,
       tokensIn,
@@ -394,6 +422,7 @@ export async function generateCloseFocusVerdict(args: {
       err,
     });
     await trackCoachCall({
+      userId: args.userId,
       endpoint: "close-focus-verdict",
       goalId: args.goalId,
       tokensIn,
@@ -420,6 +449,7 @@ export async function generateCloseFocusVerdict(args: {
       issues: validated.error.issues,
     });
     await trackCoachCall({
+      userId: args.userId,
       endpoint: "close-focus-verdict",
       goalId: args.goalId,
       tokensIn,
@@ -438,6 +468,7 @@ export async function generateCloseFocusVerdict(args: {
   }
 
   await trackCoachCall({
+    userId: args.userId,
     endpoint: "close-focus-verdict",
     goalId: args.goalId,
     tokensIn,

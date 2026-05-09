@@ -1,24 +1,25 @@
 import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
+import { userScope } from "@/lib/auth/scope";
 import type { DataDep } from "../types";
 import type { GoalBarConfig } from "./schema";
 import { dataKey, type GoalBarData } from "./keys";
 
-export function goalBarDataDeps(config: GoalBarConfig): DataDep[] {
+export function goalBarDataDeps(config: GoalBarConfig, userId: number): DataDep[] {
   // 0 = unconfigured (palette default). Skip the fetch so the Component
   // renders the "pick a goal" placeholder.
   if (!config.goalId) return [];
   return [
     {
       key: dataKey(config),
-      fetch: () => fetchGoal(config.goalId),
+      fetch: () => fetchGoal(config.goalId, userId),
     },
   ];
 }
 
-async function fetchGoal(goalId: number): Promise<GoalBarData | null> {
+async function fetchGoal(goalId: number, userId: number): Promise<GoalBarData | null> {
   const rows = await db
     .select({
       id: goals.id,
@@ -34,7 +35,7 @@ async function fetchGoal(goalId: number): Promise<GoalBarData | null> {
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
 
   if (rows.length === 0) return null;
@@ -47,6 +48,6 @@ async function fetchGoal(goalId: number): Promise<GoalBarData | null> {
     deadline: g.deadline,
     sportName: g.sportName,
     sportColor: g.sportColor,
-    progress: await computeGoalProgress(g),
+    progress: await computeGoalProgress(g, userId),
   };
 }

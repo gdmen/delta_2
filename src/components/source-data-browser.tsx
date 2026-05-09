@@ -1,7 +1,9 @@
 import { db } from "@/db";
 import { metrics, events, metricTypes, sports } from "@/db/schema";
-import { sql, eq } from "drizzle-orm";
+import { and, sql, eq } from "drizzle-orm";
 import { formatShort } from "@/lib/format";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * Per-source "what has been imported" summary.
@@ -9,8 +11,12 @@ import { formatShort } from "@/lib/format";
  * Shows one row per metric_type and (optionally) one row per sport's events
  * seen under this source. Intended for the sub-page of a data source so the
  * user can answer "what's in Delta from <source>?" without running SQL.
+ *
+ * Per-user: scoped to the requesting user's metrics + events.
  */
 export async function SourceDataBrowser({ source }: { source: string }) {
+  const user = await requireUserOrSignin();
+
   const metricRows = await db
     .select({
       typeId: metricTypes.id,
@@ -22,7 +28,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
     })
     .from(metrics)
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .where(eq(metrics.source, source))
+    .where(and(userScope(user.id).metrics, eq(metrics.source, source)))
     .groupBy(metrics.metricTypeId)
     .orderBy(sql`count(*) desc`);
 
@@ -36,7 +42,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .where(eq(events.source, source))
+    .where(and(userScope(user.id).events, eq(events.source, source)))
     .groupBy(events.sportId)
     .orderBy(sql`count(*) desc`);
 
@@ -142,4 +148,3 @@ export async function SourceDataBrowser({ source }: { source: string }) {
     </div>
   );
 }
-

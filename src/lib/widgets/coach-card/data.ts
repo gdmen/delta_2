@@ -1,11 +1,12 @@
 import { db } from "@/db";
 import { coachCalls, goals, metricTypes } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { userScope } from "@/lib/auth/scope";
 import type { DataDep } from "../types";
 import { DATA_KEY, type CoachCardData } from "./keys";
 
-export function coachCardDataDeps(): DataDep[] {
-  return [{ key: DATA_KEY, fetch: fetchLatest }];
+export function coachCardDataDeps(_config: unknown, userId: number): DataDep[] {
+  return [{ key: DATA_KEY, fetch: () => fetchLatest(userId) }];
 }
 
 /**
@@ -13,7 +14,7 @@ export function coachCardDataDeps(): DataDep[] {
  * metric_type so the widget can show "suggest-focuses on Bench 315lb"
  * instead of bare ids. Returns null if there are no coach calls yet.
  */
-async function fetchLatest(): Promise<CoachCardData | null> {
+async function fetchLatest(userId: number): Promise<CoachCardData | null> {
   const rows = await db
     .select({
       ts: coachCalls.ts,
@@ -27,6 +28,7 @@ async function fetchLatest(): Promise<CoachCardData | null> {
     .from(coachCalls)
     .leftJoin(goals, eq(coachCalls.goalId, goals.id))
     .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
+    .where(userScope(userId).coachCalls)
     .orderBy(desc(coachCalls.ts))
     .limit(1);
 
@@ -44,3 +46,4 @@ async function fetchLatest(): Promise<CoachCardData | null> {
     status: r.status,
   };
 }
+

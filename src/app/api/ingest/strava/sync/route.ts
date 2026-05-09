@@ -40,7 +40,8 @@ interface SyncResult {
  * = "strava-{activity.id}" so re-runs are idempotent.
  */
 export async function POST(request: NextRequest) {
-  const tokens = await loadTokens();
+  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
+  const tokens = await loadTokens(1);
   if (!tokens) {
     return NextResponse.json({ error: "Strava not connected." }, { status: 400 });
   }
@@ -74,8 +75,8 @@ export async function POST(request: NextRequest) {
   // canonical per-event metrics (distance_km, elevation_gain_m, etc.).
   // Sport names that don't already exist auto-create as `strava:<sport_type>`
   // — see src/lib/ingest/sport-resolver.ts for the rationale.
-  const sportCache = await buildSportCache();
-  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
+  const sportCache = await buildSportCache(1) /* TODO(pr2-phase-4): pass user.id */;
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-4): pass user.id */;
 
   const result: SyncResult = {
     fetched: 0,
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
     errors: [],
   };
 
-  const tracker = new ReconcileTracker();
+  const tracker = new ReconcileTracker(1) /* TODO(pr2-phase-4): pass user.id */;
 
   try {
     for await (const activity of iterateActivities(afterUnix)) {
@@ -105,7 +106,8 @@ export async function POST(request: NextRequest) {
   );
   const reconcile = await tracker.apply("strava");
 
-  await touchLastSync();
+  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
+  await touchLastSync(1);
 
   return NextResponse.json({ ...result, reconcile });
 }
@@ -153,6 +155,8 @@ async function ingestOne(
   try {
     const sourceId = `strava-${activity.id}`;
     const { status, eventId } = await upsertEvent({
+      // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
+      userId: 1,
       sportId,
       // Raw Strava sport_type / type goes into events.type verbatim.
       // No canonical translation — events.type is a free-text label.
@@ -206,7 +210,8 @@ async function ingestOne(
  * Returns connection status + last sync time.
  */
 export async function GET() {
-  const tokens = await loadTokens();
+  // TODO(pr2-phase-4): replace with `user.id` from requireUserOr401.
+  const tokens = await loadTokens(1);
   if (!tokens) {
     return NextResponse.json({ connected: false });
   }

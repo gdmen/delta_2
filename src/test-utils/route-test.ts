@@ -28,12 +28,100 @@
  * test file (before any other imports), passing the mock-builder this
  * helper exports. vitest hoists `vi.mock` so the mock is in place before
  * the route module imports `@/db`.
+ *
+ * AUTH MOCK: this file ALSO globally mocks `@/lib/auth/require` and
+ * `@/lib/auth/config` so route handlers calling `requireUserOr401()` /
+ * `requireUserOrSignin()` get a fake user (default id=1, isOwner=true)
+ * instead of trying to read a session cookie. Tests that want a
+ * different user id can override via `setTestUser(id, { isOwner })`.
  */
-import { afterAll, beforeAll, beforeEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, vi } from "vitest";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { PGlite } from "@electric-sql/pglite";
 import { sql } from "drizzle-orm";
+import { NextResponse } from "next/server";
 import * as schema from "@/db/schema";
+
+// Module-scoped fake user. Defaults to the bootstrap owner (id=1) so any
+// test that doesn't care about cross-user behavior passes the same auth
+// gate the prod codebase had with the hardcoded `userId = 1`.
+let testUser: { id: number; displayName: string; isOwner: boolean; jti: string; email: string | null } = {
+  id: 1,
+  displayName: "Test User",
+  isOwner: true,
+  jti: "test-jti",
+  email: "test@example.com",
+};
+
+let testAuthEnabled = true;
+
+/**
+ * Override the test user for the next route invocation. Useful for
+ * cross-user-isolation tests that need to make Bob's request inside a
+ * test that seeded Alice's data.
+ */
+export function setTestUser(id: number, opts?: { isOwner?: boolean; displayName?: string; email?: string | null }) {
+  testUser = {
+    id,
+    displayName: opts?.displayName ?? `Test User ${id}`,
+    isOwner: opts?.isOwner ?? false,
+    jti: `test-jti-${id}`,
+    email: opts?.email ?? `user${id}@example.com`,
+  };
+}
+
+/**
+ * Force the auth helpers to behave as if no user is signed in. Use to
+ * test 401 responses.
+ */
+export function setTestUnauthenticated(unauth: boolean) {
+  testAuthEnabled = !unauth;
+}
+
+vi.mock("@/lib/auth/require", async () => {
+  return {
+    UnauthorizedError: class extends Error {
+      status: number;
+      constructor(reason: string, status = 401) {
+        super(reason);
+        this.name = "UnauthorizedError";
+        this.status = status;
+      }
+    },
+    async requireUser() {
+      if (!testAuthEnabled) {
+        const err = new Error("not signed in");
+        err.name = "UnauthorizedError";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (err as any).status = 401;
+        throw err;
+      }
+      return testUser;
+    },
+    async requireUserOr401() {
+      if (!testAuthEnabled) {
+        return {
+          user: null,
+          error: NextResponse.json({ error: "not signed in" }, { status: 401 }),
+        };
+      }
+      return { user: testUser, error: null };
+    },
+    async requireUserOrSignin() {
+      if (!testAuthEnabled) {
+        throw new Error("test: requireUserOrSignin called while unauthenticated");
+      }
+      return testUser;
+    },
+  };
+});
+
+vi.mock("@/lib/auth/config", () => ({
+  auth: async () => ({ user: { id: String(testUser.id) } }),
+  signIn: vi.fn(),
+  signOut: vi.fn(),
+  handlers: {},
+}));
 
 // Module-scoped state. The vi.mock factory and the test setup helpers
 // share this so the Proxy in the mock can defer to the real testDb

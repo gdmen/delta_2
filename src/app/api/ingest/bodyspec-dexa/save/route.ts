@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
   const saved: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
-  const tracker = new ReconcileTracker();
+  const tracker = new ReconcileTracker(1) /* TODO(pr2-phase-4): pass user.id */;
 
   for (const [field, { rawName, unit }] of Object.entries(FIELD_TO_RAW) as Array<
     [FieldKey, (typeof FIELD_TO_RAW)[FieldKey]]
@@ -222,6 +222,8 @@ export async function POST(request: NextRequest) {
 
       const sourceId = `bodyspec-${body.scan_date}-${rawName}`;
       await upsertMetric({
+        // TODO(pr2-phase-4): replace with `user.id` once ingest auth lands.
+        userId: 1,
         metricTypeId: typeId,
         value,
         recordedAt,

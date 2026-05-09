@@ -1,8 +1,9 @@
 import { db } from "@/db";
 import { events, metrics, metricTypes, workoutSets } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { resolveComputedSamples } from "./computed-metrics";
 import { loadUserTimezone } from "./app-settings";
+import { userScope } from "./auth/scope";
 
 export interface Series {
   samples: Array<{ date: string; value: number }>;
@@ -19,7 +20,7 @@ export interface Series {
  * Series so the caller can render an empty placeholder rather than
  * crashing.
  */
-async function loadType(metricName: string) {
+async function loadType(metricName: string, userId: number) {
   const rows = await db
     .select({
       id: metricTypes.id,
@@ -29,7 +30,7 @@ async function loadType(metricName: string) {
       frequencyHint: metricTypes.frequencyHint,
     })
     .from(metricTypes)
-    .where(eq(metricTypes.name, metricName))
+    .where(and(userScope(userId).metricTypes, eq(metricTypes.name, metricName)))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -89,9 +90,13 @@ function excludeTodayIfDaily(
  * exercise) is a sub-100ms operation. If/when this gets hot enough to
  * materialize, the migration is the synthesis function pointed at INSERT
  * instead of array `concat` — see commit message for full rationale.
+ *
+ * INHERIT scoping: workout_sets has no user_id; restrict by joining
+ * through events.user_id.
  */
 async function loadSyntheticSamples(
   metricTypeId: number,
+  userId: number,
 ): Promise<Array<{ date: string; value: number }>> {
   const setRows = await db
     .select({
@@ -101,7 +106,12 @@ async function loadSyntheticSamples(
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .where(eq(workoutSets.exerciseMetricTypeId, metricTypeId));
+    .where(
+      and(
+        userScope(userId).events,
+        eq(workoutSets.exerciseMetricTypeId, metricTypeId),
+      ),
+    );
 
   const out: Array<{ date: string; value: number }> = [];
   for (const r of setRows) {
@@ -140,14 +150,17 @@ function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: 
 /** Pull the full history of a metric, ordered oldest-to-newest.
  * Daily-aggregate metrics (computed families, frequencyHint === "daily")
  * drop today's still-mid-flight value. */
-export async function getAllHistory(metricName: string): Promise<Series> {
-  const [type, userTz] = await Promise.all([loadType(metricName), loadUserTimezone()]);
+export async function getAllHistory(metricName: string, userId: number): Promise<Series> {
+  const [type, userTz] = await Promise.all([
+    loadType(metricName, userId),
+    loadUserTimezone(userId),
+  ]);
 
   // Computed metrics are pattern-matched on name. They route around the
   // metrics + workout_sets fanout and return their own samples; metadata
   // (unit/target/higherIsBetter) still comes from the metric_types row,
   // which is auto-seeded so it always exists.
-  const computed = await resolveComputedSamples(metricName);
+  const computed = await resolveComputedSamples(metricName, userId);
   if (computed !== null) {
     return makeSeries(sortByDate(excludeTodayIfDaily(computed, type, computed, userTz)), type);
   }
@@ -157,10 +170,10 @@ export async function getAllHistory(metricName: string): Promise<Series> {
   const rows = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
     .from(metrics)
-    .where(eq(metrics.metricTypeId, type.id));
+    .where(and(userScope(userId).metrics, eq(metrics.metricTypeId, type.id)));
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
-  const synthetic = await loadSyntheticSamples(type.id);
+  const synthetic = await loadSyntheticSamples(type.id, userId);
   return makeSeries(
     sortByDate(excludeTodayIfDaily([...real, ...synthetic], type, computed, userTz)),
     type,
@@ -170,14 +183,17 @@ export async function getAllHistory(metricName: string): Promise<Series> {
 /** Pull the last N days of a metric, ordered oldest-to-newest.
  * Daily-aggregate metrics (computed families, frequencyHint === "daily")
  * drop today's still-mid-flight value. */
-export async function getLastDays(metricName: string, days: number): Promise<Series> {
-  const [type, userTz] = await Promise.all([loadType(metricName), loadUserTimezone()]);
+export async function getLastDays(metricName: string, days: number, userId: number): Promise<Series> {
+  const [type, userTz] = await Promise.all([
+    loadType(metricName, userId),
+    loadUserTimezone(userId),
+  ]);
 
   const since = new Date();
   since.setDate(since.getDate() - days);
   const sinceIso = since.toISOString();
 
-  const computed = await resolveComputedSamples(metricName);
+  const computed = await resolveComputedSamples(metricName, userId);
   if (computed !== null) {
     return makeSeries(
       sortByDate(excludeTodayIfDaily(filterSince(computed, sinceIso), type, computed, userTz)),
@@ -190,10 +206,10 @@ export async function getLastDays(metricName: string, days: number): Promise<Ser
   const rows = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
     .from(metrics)
-    .where(eq(metrics.metricTypeId, type.id));
+    .where(and(userScope(userId).metrics, eq(metrics.metricTypeId, type.id)));
 
   const real = rows.map((r) => ({ date: r.recordedAt, value: r.value }));
-  const synthetic = await loadSyntheticSamples(type.id);
+  const synthetic = await loadSyntheticSamples(type.id, userId);
   return makeSeries(
     sortByDate(
       excludeTodayIfDaily(

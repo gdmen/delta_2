@@ -2,11 +2,6 @@ import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// TODO(pr2-phase-3): every caller should pass userId from requireUser().
-// Until then, default to the bootstrap owner (id=1) so existing
-// single-user code paths keep working.
-const DEFAULT_USER_ID = 1;
-
 /**
  * Read the user's preferred timezone (IANA name). Returns the JS
  * runtime's resolved TZ as a fallback when the row is missing or
@@ -18,7 +13,7 @@ const DEFAULT_USER_ID = 1;
  * hours off; without this, today's mid-flight value bleeds through the
  * 7-day window between 17:00 and 24:00 PDT.
  */
-export async function loadUserTimezone(userId: number = DEFAULT_USER_ID): Promise<string> {
+export async function loadUserTimezone(userId: number): Promise<string> {
   const row = await db
     .select({ tz: appSettings.timezone })
     .from(appSettings)
@@ -38,7 +33,7 @@ export async function loadUserTimezone(userId: number = DEFAULT_USER_ID): Promis
  */
 export async function saveUserTimezone(
   timezone: string | null,
-  userId: number = DEFAULT_USER_ID,
+  userId: number,
 ): Promise<void> {
   const result = await db
     .update(appSettings)

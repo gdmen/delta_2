@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { workoutSets } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { events, workoutSets } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface UpdateSetBody {
   exerciseName?: string;
@@ -17,6 +19,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -36,7 +41,7 @@ export async function PATCH(
     // Resolve the free-text name to a metric_types id. Same path manual
     // creation uses — known names route through aliases, unknown names
     // auto-create under `manual:<rawName>`.
-    const cache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
+    const cache = await buildMetricTypeCache(user.id);
     const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
       rawName: body.exerciseName,
       map: { [body.exerciseName]: body.exerciseName },
@@ -74,7 +79,16 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  await db.update(workoutSets).set(updates).where(eq(workoutSets.id, id));
+  // INHERIT scoping: scope through this user's events so an attacker can't
+  // PATCH another user's workout set by guessing its id.
+  const ownedEventIds = db
+    .select({ id: events.id })
+    .from(events)
+    .where(userScope(user.id).events);
+  await db
+    .update(workoutSets)
+    .set(updates)
+    .where(and(eq(workoutSets.id, id), inArray(workoutSets.eventId, ownedEventIds)));
   return NextResponse.json({ ok: true });
 }
 
@@ -82,9 +96,19 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  await db.delete(workoutSets).where(eq(workoutSets.id, id));
+
+  const ownedEventIds = db
+    .select({ id: events.id })
+    .from(events)
+    .where(userScope(user.id).events);
+  await db
+    .delete(workoutSets)
+    .where(and(eq(workoutSets.id, id), inArray(workoutSets.eventId, ownedEventIds)));
   return NextResponse.json({ ok: true });
 }

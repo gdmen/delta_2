@@ -18,6 +18,7 @@ import {
   buildMetricTypeMergePayload,
 } from "@/lib/merge-log/builder";
 import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/metric-types/merge
@@ -38,6 +39,10 @@ import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
  * query inside is awaited.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const userId = user.id;
+
   let body: {
     canonicalId?: number;
     mergeIds?: number[];
@@ -60,12 +65,6 @@ export async function POST(request: NextRequest) {
       scales[Number(k)] = Number(v);
     }
   }
-
-  // TODO(pr2-phase-3): replace with `const { user } = await requireUserOr401()`.
-  // Until every consumer has auth wired, hardcoded to the bootstrap owner
-  // so single-user behavior is preserved and the per-user scoping is in
-  // place ready for the auth swap.
-  const userId = 1;
 
   // Load all referenced types, validate existence, and enforce unit policy.
   // Per the eng-review HIGH finding on merge endpoints: BOTH the existence

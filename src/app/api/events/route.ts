@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { upsertEvent } from "@/lib/ingest-service";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 interface CreateEventBody {
   sportId: number;
@@ -10,6 +11,9 @@ interface CreateEventBody {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: CreateEventBody;
   try {
     body = await request.json();
@@ -23,6 +27,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await upsertEvent({
+      userId: user.id,
       sportId: body.sportId,
       type: body.type,
       durationMinutes: body.durationMinutes ?? null,

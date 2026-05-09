@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { focuses, goals } from "@/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { suggestFocuses } from "@/lib/coach/suggest-focuses";
 import { getLastSuccessfulCallAt } from "@/lib/coach/track-call";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -30,6 +32,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const goalId = Number(idStr);
   if (!Number.isFinite(goalId) || goalId <= 0) {
@@ -39,7 +44,7 @@ export async function POST(
   const g = await db
     .select({ id: goals.id })
     .from(goals)
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(user.id).goals, eq(goals.id, goalId)))
     .limit(1);
   if (g.length === 0) {
     return NextResponse.json({ error: "goal not found" }, { status: 404 });
@@ -48,13 +53,13 @@ export async function POST(
   const url = new URL(request.url);
   const ifStale = url.searchParams.get("if_stale") === "true";
   if (ifStale) {
-    const lastAt = await getLastSuccessfulCallAt(goalId, "suggest-focuses");
+    const lastAt = await getLastSuccessfulCallAt(goalId, "suggest-focuses", user.id);
     if (lastAt && Date.now() - lastAt.getTime() < STALE_THRESHOLD_MS) {
       return NextResponse.json({ skipped: true, reason: "fresh", lastAt: lastAt.toISOString() });
     }
   }
 
-  const result = await suggestFocuses(goalId);
+  const result = await suggestFocuses(goalId, user.id);
 
   if (!result.ok) {
     const status =
@@ -72,11 +77,21 @@ export async function POST(
 
   // Replace any previous un-dismissed LLM suggestions for this goal so the
   // tray shows only the freshest set. Dismissed ones stay (the prompt uses
-  // them to avoid re-proposing).
+  // them to avoid re-proposing). focuses is INHERIT — scope through this
+  // user's goals.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(user.id).goals);
   await db
     .delete(focuses)
     .where(
-      and(eq(focuses.goalId, goalId), eq(focuses.source, "llm"), isNull(focuses.dismissedAt)),
+      and(
+        eq(focuses.goalId, goalId),
+        eq(focuses.source, "llm"),
+        isNull(focuses.dismissedAt),
+        inArray(focuses.goalId, ownedGoalIds),
+      ),
     );
 
   const today = new Date().toISOString().slice(0, 10);

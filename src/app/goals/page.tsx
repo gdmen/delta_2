@@ -3,10 +3,13 @@ import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
 export default async function GoalsListPage() {
+  const user = await requireUserOrSignin();
   const rows = await db
     .select({
       id: goals.id,
@@ -23,10 +26,11 @@ export default async function GoalsListPage() {
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
+    .where(userScope(user.id).goals)
     .orderBy(desc(goals.deadline));
 
   const withProgress = await Promise.all(
-    rows.map(async (g) => ({ ...g, progress: await computeGoalProgress(g) }))
+    rows.map(async (g) => ({ ...g, progress: await computeGoalProgress(g, user.id) }))
   );
 
   // Abandoned is persistent (from the DB); everything else buckets on the

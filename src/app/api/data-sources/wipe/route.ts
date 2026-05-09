@@ -6,7 +6,9 @@ import {
   metrics,
   reconcileLog,
 } from "@/db/schema";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * Per-source data wipe.
@@ -33,6 +35,10 @@ import { and, eq, inArray, sql } from "drizzle-orm";
  * importers + a row in `import_sources` for CSV sources). The POST body
  * also requires a `confirm` field equal to the source key — protects
  * against stale URLs / accidental clicks.
+ *
+ * Per-user: every wipe is scoped to the requesting user — Alice wiping
+ * her Strava data MUST NOT touch Bob's Strava data. CSV-source whitelist
+ * also restricted to this user's import_sources rows.
  */
 
 const BUILT_IN_SOURCES = ["apple_health", "strava", "bodyspec_dexa"] as const;
@@ -43,27 +49,30 @@ interface WipeCounts {
   reconcileLog: number;
 }
 
-async function isValidSource(source: string): Promise<boolean> {
+async function isValidSource(source: string, userId: number): Promise<boolean> {
   if ((BUILT_IN_SOURCES as readonly string[]).includes(source)) return true;
   // CSV sources: `source` column on metrics/events is the lowercased
   // underscore-joined import_sources.name. Recompute and check existence.
-  const all = await db.select({ name: importSources.name }).from(importSources);
+  const all = await db
+    .select({ name: importSources.name })
+    .from(importSources)
+    .where(userScope(userId).importSources);
   return all.some((r) => r.name.toLowerCase().replace(/\s+/g, "_") === source);
 }
 
-async function countsFor(source: string): Promise<WipeCounts> {
+async function countsFor(source: string, userId: number): Promise<WipeCounts> {
   const [m] = await db
     .select({ c: sql<number>`count(*)` })
     .from(metrics)
-    .where(eq(metrics.source, source));
+    .where(and(userScope(userId).metrics, eq(metrics.source, source)));
   const [e] = await db
     .select({ c: sql<number>`count(*)` })
     .from(events)
-    .where(eq(events.source, source));
+    .where(and(userScope(userId).events, eq(events.source, source)));
   const [r] = await db
     .select({ c: sql<number>`count(*)` })
     .from(reconcileLog)
-    .where(eq(reconcileLog.source, source));
+    .where(and(userScope(userId).reconcileLog, eq(reconcileLog.source, source)));
   return {
     metrics: Number(m?.c ?? 0),
     events: Number(e?.c ?? 0),
@@ -77,14 +86,17 @@ async function countsFor(source: string): Promise<WipeCounts> {
  * user exactly what will go.
  */
 export async function GET(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const source = request.nextUrl.searchParams.get("source");
   if (!source) {
     return NextResponse.json({ error: "?source is required" }, { status: 400 });
   }
-  if (!(await isValidSource(source))) {
+  if (!(await isValidSource(source, user.id))) {
     return NextResponse.json({ error: `Unknown source: ${source}` }, { status: 400 });
   }
-  const counts = await countsFor(source);
+  const counts = await countsFor(source, user.id);
   return NextResponse.json({ source, counts });
 }
 
@@ -95,6 +107,9 @@ export async function GET(request: NextRequest) {
  * the source key into a confirmation field.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -117,12 +132,12 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  if (!(await isValidSource(source))) {
+  if (!(await isValidSource(source, user.id))) {
     return NextResponse.json({ error: `Unknown source: ${source}` }, { status: 400 });
   }
 
   // Capture pre-counts so the response can confirm what was deleted.
-  const before = await countsFor(source);
+  const before = await countsFor(source, user.id);
 
   // Delete metrics first (safe; no children). Then events — its children
   // (workout_sets, event_metrics) cascade. Finally reconcile_log. No FKs
@@ -134,15 +149,17 @@ export async function POST(request: NextRequest) {
   // its own implicit txn; a partial failure leaves the source in a
   // half-wiped state which the user can fix by retrying — same surface
   // the dev-wipe endpoint exposes.
-  await db.delete(metrics).where(eq(metrics.source, source));
+  await db
+    .delete(metrics)
+    .where(and(userScope(user.id).metrics, eq(metrics.source, source)));
   // Need to drop event_metrics first if FK isn't ON DELETE CASCADE — schema check below.
-  await db.delete(events).where(eq(events.source, source));
-  await db.delete(reconcileLog).where(eq(reconcileLog.source, source));
+  await db
+    .delete(events)
+    .where(and(userScope(user.id).events, eq(events.source, source)));
+  await db
+    .delete(reconcileLog)
+    .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, source)));
 
   return NextResponse.json({ source, deleted: before });
 }
 
-// (inArray and `and` are available in case future extensions need to bulk
-// delete across multiple sources. Kept imported as a forward hint.)
-void inArray;
-void and;

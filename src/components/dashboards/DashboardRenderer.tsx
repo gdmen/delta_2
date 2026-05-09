@@ -8,6 +8,8 @@ import { lookupWidget } from "@/lib/widgets/registry";
 import { lookupDataDeps } from "@/lib/widgets/server-registry";
 import { collectDataDeps, runDataDeps } from "@/lib/widgets/data-deps";
 import type { DataDep } from "@/lib/widgets/types";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 import { DashboardGrid } from "./DashboardGrid";
 import { WidgetSlot } from "./WidgetSlot";
 import { DashboardEmptyState } from "./DashboardEmptyState";
@@ -40,11 +42,12 @@ export async function DashboardRenderer({
   edit?: boolean;
   debug?: boolean;
 }) {
-  const dashboard = await loadDashboard(slug);
+  const user = await requireUserOrSignin();
+  const dashboard = await loadDashboard(slug, user.id);
   if (!dashboard) notFound();
 
-  const widgets = await loadWidgets(dashboard.id);
-  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w));
+  const widgets = await loadWidgets(dashboard.id, user.id);
+  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w, user.id));
 
   const data = await runDataDeps(collectDataDeps(parsedWidgets.map((p) => p.deps)));
 
@@ -70,10 +73,12 @@ export async function DashboardRenderer({
       db
         .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
         .from(metricTypes)
+        .where(userScope(user.id).metricTypes)
         .orderBy(asc(metricTypes.name)),
       db
         .select({ id: sports.id, name: sports.name, color: sports.color })
         .from(sports)
+        .where(userScope(user.id).sports)
         .orderBy(asc(sports.name)),
     ]);
     return (
@@ -134,7 +139,7 @@ export async function DashboardRenderer({
   );
 }
 
-function parseWidget(widget: WidgetRow): ParsedWidget {
+function parseWidget(widget: WidgetRow, userId: number): ParsedWidget {
   const def = lookupWidget(widget.widgetType);
   if (!def) {
     return { widget, parsed: null, parseError: null, deps: [] };
@@ -146,7 +151,7 @@ function parseWidget(widget: WidgetRow): ParsedWidget {
       widget,
       parsed,
       parseError: null,
-      deps: dataDeps?.(parsed) ?? [],
+      deps: dataDeps?.(parsed, userId) ?? [],
     };
   } catch (err) {
     return {

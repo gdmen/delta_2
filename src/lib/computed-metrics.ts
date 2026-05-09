@@ -1,7 +1,8 @@
 import { db } from "@/db";
 import { events, metricTypes, sports, workoutSets } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { oconnorE1RM } from "./strength-metrics";
+import { userScope } from "./auth/scope";
 
 /**
  * Auto-computed metric_types: their values are derived at read time from
@@ -75,23 +76,23 @@ export function matchComputed(name: string): ComputedMatch | null {
  * isn't computed. The caller (metric-history) supplies the metric_types
  * row for unit/target/higherIsBetter — we just produce the samples.
  */
-export async function resolveComputedSamples(name: string): Promise<Sample[] | null> {
+export async function resolveComputedSamples(name: string, userId: number): Promise<Sample[] | null> {
   const m = matchComputed(name);
   if (!m) return null;
 
   switch (m.family) {
     case "sport_sessions_count":
-      return await sportSessionsCount(m.subject);
+      return await sportSessionsCount(m.subject, userId);
     case "sport_minutes":
-      return await sportMinutes(m.subject);
+      return await sportMinutes(m.subject, userId);
     case "exercise_max":
-      return await exerciseLifetimeMax(m.subject);
+      return await exerciseLifetimeMax(m.subject, userId);
     case "exercise_max_12mo":
-      return await exerciseTrailingMax(m.subject, 365);
+      return await exerciseTrailingMax(m.subject, 365, userId);
     case "exercise_e1rm":
-      return await exerciseE1rmDailyMax(m.subject);
+      return await exerciseE1rmDailyMax(m.subject, userId);
     case "exercise_volume_per_day":
-      return await exerciseVolumePerDay(m.subject);
+      return await exerciseVolumePerDay(m.subject, userId);
   }
 }
 
@@ -103,14 +104,14 @@ export async function resolveComputedSamples(name: string): Promise<Sample[] | n
  * Returns null when the name isn't computed (caller falls through to the
  * stored + synthesized count path).
  */
-export async function countForComputed(name: string): Promise<number | null> {
+export async function countForComputed(name: string, userId: number): Promise<number | null> {
   const m = matchComputed(name);
   if (!m) return null;
   // Counts are bounded by underlying-row counts, so the cheapest way is
   // just to compute the Series and return its length. At current scale
   // (≤ a few thousand rows max per metric) this is fine. If the /data
   // page ever feels slow we can add per-family count shortcuts.
-  const samples = await resolveComputedSamples(name);
+  const samples = await resolveComputedSamples(name, userId);
   return samples?.length ?? 0;
 }
 
@@ -118,17 +119,17 @@ export async function countForComputed(name: string): Promise<number | null> {
 // Sport families
 // -----------------------------------------------------------------------------
 
-async function loadSportId(sportName: string): Promise<number | null> {
+async function loadSportId(sportName: string, userId: number): Promise<number | null> {
   const rows = await db
     .select({ id: sports.id })
     .from(sports)
-    .where(eq(sports.name, sportName))
+    .where(and(userScope(userId).sports, eq(sports.name, sportName)))
     .limit(1);
   return rows[0]?.id ?? null;
 }
 
-async function sportSessionsCount(sportName: string): Promise<Sample[]> {
-  const sportId = await loadSportId(sportName);
+async function sportSessionsCount(sportName: string, userId: number): Promise<Sample[]> {
+  const sportId = await loadSportId(sportName, userId);
   if (sportId === null) return [];
   // Group by calendar date in the started_at string. SQLite's substr is
   // cheaper here than parsing — recordedAt is always ISO 8601 prefixed
@@ -139,14 +140,14 @@ async function sportSessionsCount(sportName: string): Promise<Sample[]> {
       n: sql<number>`count(*)`,
     })
     .from(events)
-    .where(eq(events.sportId, sportId))
+    .where(and(userScope(userId).events, eq(events.sportId, sportId)))
     .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
     .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
   return rows.map((r) => ({ date: r.day, value: Number(r.n) }));
 }
 
-async function sportMinutes(sportName: string): Promise<Sample[]> {
-  const sportId = await loadSportId(sportName);
+async function sportMinutes(sportName: string, userId: number): Promise<Sample[]> {
+  const sportId = await loadSportId(sportName, userId);
   if (sportId === null) return [];
   const rows = await db
     .select({
@@ -154,7 +155,7 @@ async function sportMinutes(sportName: string): Promise<Sample[]> {
       mins: sql<number>`coalesce(sum(${events.durationMinutes}), 0)`,
     })
     .from(events)
-    .where(eq(events.sportId, sportId))
+    .where(and(userScope(userId).events, eq(events.sportId, sportId)))
     .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
     .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
   // Drop days where the sum is 0 (events with NULL duration sum to 0). A
@@ -175,10 +176,11 @@ async function sportMinutes(sportName: string): Promise<Sample[]> {
  * no stored slug column. With ~150 exercise rows this is fine; upgrade to
  * a stored slug or a slug-keyed index when the catalog gets large.
  */
-async function loadExerciseId(slug: string): Promise<number | null> {
+async function loadExerciseId(slug: string, userId: number): Promise<number | null> {
   const rows = await db
     .select({ id: metricTypes.id, name: metricTypes.name })
-    .from(metricTypes);
+    .from(metricTypes)
+    .where(userScope(userId).metricTypes);
   for (const r of rows) {
     if (slugifyExercise(r.name) === slug) return r.id;
   }
@@ -199,7 +201,7 @@ interface SetRow {
   startedAt: string;
 }
 
-async function loadSetsForExercise(metricTypeId: number): Promise<SetRow[]> {
+async function loadSetsForExercise(metricTypeId: number, userId: number): Promise<SetRow[]> {
   return db
     .select({
       weight: workoutSets.weight,
@@ -208,7 +210,12 @@ async function loadSetsForExercise(metricTypeId: number): Promise<SetRow[]> {
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .where(eq(workoutSets.exerciseMetricTypeId, metricTypeId))
+    .where(
+      and(
+        userScope(userId).events,
+        eq(workoutSets.exerciseMetricTypeId, metricTypeId),
+      ),
+    )
     .orderBy(events.startedAt);
 }
 
@@ -236,10 +243,10 @@ function collapseSetsToDailyMax(
   );
 }
 
-async function exerciseLifetimeMax(slug: string): Promise<Sample[]> {
-  const id = await loadExerciseId(slug);
+async function exerciseLifetimeMax(slug: string, userId: number): Promise<Sample[]> {
+  const id = await loadExerciseId(slug, userId);
   if (id === null) return [];
-  const sets = await loadSetsForExercise(id);
+  const sets = await loadSetsForExercise(id, userId);
   // Day-collapse first so a session that warms up through several sub-PRs
   // (e.g. 135 → 185 → 225 → 245) emits at most one sample for that day.
   const daily = collapseSetsToDailyMax(sets);
@@ -262,10 +269,10 @@ async function exerciseLifetimeMax(slug: string): Promise<Sample[]> {
  * Emit one sample per active day with the current windowed max, then
  * collapse consecutive equal-value samples to keep the chart sparse.
  */
-async function exerciseTrailingMax(slug: string, windowDays: number): Promise<Sample[]> {
-  const id = await loadExerciseId(slug);
+async function exerciseTrailingMax(slug: string, windowDays: number, userId: number): Promise<Sample[]> {
+  const id = await loadExerciseId(slug, userId);
   if (id === null) return [];
-  const sets = await loadSetsForExercise(id);
+  const sets = await loadSetsForExercise(id, userId);
   const daily = collapseSetsToDailyMax(sets);
   if (daily.length === 0) return [];
   const windowMs = windowDays * 24 * 60 * 60 * 1000;
@@ -293,10 +300,10 @@ async function exerciseTrailingMax(slug: string, windowDays: number): Promise<Sa
   return collapsed;
 }
 
-async function exerciseE1rmDailyMax(slug: string): Promise<Sample[]> {
-  const id = await loadExerciseId(slug);
+async function exerciseE1rmDailyMax(slug: string, userId: number): Promise<Sample[]> {
+  const id = await loadExerciseId(slug, userId);
   if (id === null) return [];
-  const sets = await loadSetsForExercise(id);
+  const sets = await loadSetsForExercise(id, userId);
   // Group by calendar day of started_at; max e1RM across the day's sets.
   const byDay = new Map<string, { date: string; maxE1: number }>();
   for (const s of sets) {
@@ -313,8 +320,8 @@ async function exerciseE1rmDailyMax(slug: string): Promise<Sample[]> {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-async function exerciseVolumePerDay(slug: string): Promise<Sample[]> {
-  const id = await loadExerciseId(slug);
+async function exerciseVolumePerDay(slug: string, userId: number): Promise<Sample[]> {
+  const id = await loadExerciseId(slug, userId);
   if (id === null) return [];
   const rows = await db
     .select({
@@ -323,7 +330,12 @@ async function exerciseVolumePerDay(slug: string): Promise<Sample[]> {
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .where(eq(workoutSets.exerciseMetricTypeId, id))
+    .where(
+      and(
+        userScope(userId).events,
+        eq(workoutSets.exerciseMetricTypeId, id),
+      ),
+    )
     .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
     .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
   return rows
@@ -353,4 +365,3 @@ export function describeComputedSource(name: string): string | null {
       return `per-day sum(weight × reps) over workout_sets where exercise = "${m.subject}"`;
   }
 }
-

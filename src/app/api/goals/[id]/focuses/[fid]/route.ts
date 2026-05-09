@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { focuses } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { focuses, goals } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * PATCH /api/goals/:id/focuses/:fid — mutate a focus on this goal.
@@ -12,11 +14,16 @@ import { and, eq } from "drizzle-orm";
  *
  * Closing a focus does NOT auto-generate a verdict here — that lives on
  * /api/goals/:id/focuses/:fid/close (PR #3) which closes + LLM-summarises.
+ *
+ * focuses is INHERIT — restrict via this user's goals.
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; fid: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr, fid: fidStr } = await params;
   const goalId = Number(idStr);
   const focusId = Number(fidStr);
@@ -27,10 +34,21 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid focus id" }, { status: 400 });
   }
 
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(user.id).goals);
+
   const existing = await db
     .select({ id: focuses.id, status: focuses.status })
     .from(focuses)
-    .where(and(eq(focuses.id, focusId), eq(focuses.goalId, goalId)))
+    .where(
+      and(
+        eq(focuses.id, focusId),
+        eq(focuses.goalId, goalId),
+        inArray(focuses.goalId, ownedGoalIds),
+      ),
+    )
     .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "focus not found on this goal" }, { status: 404 });
@@ -124,7 +142,10 @@ export async function PATCH(
     return NextResponse.json({ error: "no fields to update" }, { status: 400 });
   }
 
-  await db.update(focuses).set(updates).where(eq(focuses.id, focusId));
+  await db
+    .update(focuses)
+    .set(updates)
+    .where(and(eq(focuses.id, focusId), inArray(focuses.goalId, ownedGoalIds)));
 
   return NextResponse.json({ ok: true, id: focusId, ...updates });
 }
@@ -139,6 +160,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; fid: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr, fid: fidStr } = await params;
   const goalId = Number(idStr);
   const focusId = Number(fidStr);
@@ -149,9 +173,19 @@ export async function DELETE(
     return NextResponse.json({ error: "invalid focus id" }, { status: 400 });
   }
 
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(user.id).goals);
   const result = await db
     .delete(focuses)
-    .where(and(eq(focuses.id, focusId), eq(focuses.goalId, goalId)))
+    .where(
+      and(
+        eq(focuses.id, focusId),
+        eq(focuses.goalId, goalId),
+        inArray(focuses.goalId, ownedGoalIds),
+      ),
+    )
     .returning({ id: focuses.id });
   if (result.length === 0) {
     return NextResponse.json({ error: "focus not found on this goal" }, { status: 404 });

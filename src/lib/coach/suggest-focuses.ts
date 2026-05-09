@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/db";
 import { goals, metricTypes, sports, focuses } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   getPlateauSignals,
   getRollingAverages,
@@ -10,6 +10,7 @@ import {
 } from "./pre-aggregate";
 import { SuggestFocusesResponse, type SuggestedFocus, type CoachErrorBody } from "./schemas";
 import { trackCoachCall } from "./track-call";
+import { userScope } from "@/lib/auth/scope";
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 1500;
@@ -82,7 +83,7 @@ interface GoalShape {
   dismissedLlmFocuses: string[];
 }
 
-async function loadGoalShape(goalId: number): Promise<GoalShape | null> {
+async function loadGoalShape(goalId: number, userId: number): Promise<GoalShape | null> {
   const rows = await db
     .select({
       id: goals.id,
@@ -95,11 +96,16 @@ async function loadGoalShape(goalId: number): Promise<GoalShape | null> {
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
   if (rows.length === 0) return null;
   const g = rows[0];
 
+  // focuses is INHERIT — scope through this user's goals.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   const existing = await db
     .select({
       name: focuses.name,
@@ -107,7 +113,7 @@ async function loadGoalShape(goalId: number): Promise<GoalShape | null> {
       dismissedAt: focuses.dismissedAt,
     })
     .from(focuses)
-    .where(eq(focuses.goalId, goalId));
+    .where(and(eq(focuses.goalId, goalId), inArray(focuses.goalId, ownedGoalIds)));
 
   return {
     ...g,
@@ -127,12 +133,12 @@ interface SignalsBlock {
   volumeTrends: Awaited<ReturnType<typeof getVolumeTrends>>;
 }
 
-export async function buildSignalsBlock(): Promise<SignalsBlock> {
+export async function buildSignalsBlock(userId: number): Promise<SignalsBlock> {
   const [plateau, rolling, recovery, volume] = await Promise.all([
-    getPlateauSignals(),
-    getRollingAverages(),
-    getRecoveryDebt(),
-    getVolumeTrends(),
+    getPlateauSignals(userId),
+    getRollingAverages(userId),
+    getRecoveryDebt(userId),
+    getVolumeTrends(userId),
   ]);
   return {
     plateau,
@@ -236,7 +242,7 @@ function parseLlmJson(raw: string): unknown {
  * Side effect: writes one row to `coach_calls` per invocation (success or
  * fail), so the cost log accumulates regardless of outcome.
  */
-export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResult> {
+export async function suggestFocuses(goalId: number, userId: number): Promise<SuggestFocusesResult> {
   const apiKey = process.env.CLAUDE_API_KEY;
   if (!apiKey || apiKey === "your-claude-api-key-here") {
     return {
@@ -248,7 +254,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
     };
   }
 
-  const goal = await loadGoalShape(goalId);
+  const goal = await loadGoalShape(goalId, userId);
   if (!goal) {
     // Caller's responsibility to surface this — return as malformed_llm_output
     // would be misleading. Endpoint should 404 before reaching here.
@@ -261,7 +267,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
     };
   }
 
-  const signals = await buildSignalsBlock();
+  const signals = await buildSignalsBlock(userId);
   const signalsBlock = renderSignalsBlock(signals);
   const goalTail = renderGoalTail(goal);
 
@@ -293,6 +299,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
   } catch (err) {
     const durationMs = Date.now() - t0;
     await trackCoachCall({
+      userId,
       endpoint: "suggest-focuses",
       goalId,
       tokensIn: 0,
@@ -349,6 +356,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
   const textBlock = response.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
     await trackCoachCall({
+      userId,
       endpoint: "suggest-focuses",
       goalId,
       tokensIn,
@@ -372,6 +380,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
   } catch (err) {
     console.error("[suggest-focuses] JSON parse failed", { goalId, raw: textBlock.text, err });
     await trackCoachCall({
+      userId,
       endpoint: "suggest-focuses",
       goalId,
       tokensIn,
@@ -397,6 +406,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
       issues: validated.error.issues,
     });
     await trackCoachCall({
+      userId,
       endpoint: "suggest-focuses",
       goalId,
       tokensIn,
@@ -415,6 +425,7 @@ export async function suggestFocuses(goalId: number): Promise<SuggestFocusesResu
   }
 
   await trackCoachCall({
+    userId,
     endpoint: "suggest-focuses",
     goalId,
     tokensIn,
