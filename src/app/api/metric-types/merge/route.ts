@@ -171,17 +171,23 @@ export async function POST(request: NextRequest) {
       // Postgres-specific: `LEAST()` / `GREATEST()` for two-argument min/max
       // (SQLite's `MIN(a, b)` / `MAX(a, b)` are scalar; Postgres reserves
       // `MIN`/`MAX` for aggregates only).
+      //
+      // TODO(pr2-phase-3): both the existence check and the INSERT need
+      // user_id scoping (caller's user). For now uses metric_type_id only
+      // (single-user assumption — every metric_type belongs to user_id=1).
+      // ON CONFLICT target matches the new (user_id, date, metric_type_id)
+      // unique index added in 0001_multi_user.
       const summariesBefore = await tx
         .select({ id: dailySummaries.id })
         .from(dailySummaries)
         .where(eq(dailySummaries.metricTypeId, mergeId));
       if (summariesBefore.length > 0) {
         await tx.execute(sql`
-          INSERT INTO daily_summaries (date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
-          SELECT date, ${canonicalId}, avg_value * ${rescale}, min_value * ${rescale}, max_value * ${rescale}, count, last_ingest_at
+          INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
+          SELECT user_id, date, ${canonicalId}, avg_value * ${rescale}, min_value * ${rescale}, max_value * ${rescale}, count, last_ingest_at
           FROM daily_summaries
           WHERE metric_type_id = ${mergeId}
-          ON CONFLICT (date, metric_type_id) DO UPDATE SET
+          ON CONFLICT (user_id, date, metric_type_id) DO UPDATE SET
             count = daily_summaries.count + excluded.count,
             min_value = CASE
               WHEN daily_summaries.min_value IS NULL THEN excluded.min_value

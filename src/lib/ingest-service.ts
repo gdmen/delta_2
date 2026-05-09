@@ -257,18 +257,29 @@ async function invalidateDailySummary(
   metricTypeId: number,
   recordedAt: string,
   conn: DbLike = db,
+  // TODO(pr2-phase-3): plumb userId through every caller (ingest paths
+  // already have user.id from requireUser at the top). Default to 1 so
+  // existing single-user code paths still upsert the right row.
+  userId: number = 1,
 ) {
   const db = conn;
   const date = recordedAt.slice(0, 10);
   const now = new Date().toISOString();
 
-  await db.insert(dailySummaries).values({
-    date,
-    metricTypeId,
-    count: 0,
-    lastIngestAt: now,
-  }).onConflictDoUpdate({
-    target: [dailySummaries.date, dailySummaries.metricTypeId],
-    set: { lastIngestAt: now },
-  });
+  // ON CONFLICT must target the actual unique index. After the multi-
+  // user migration the index became (user_id, date, metric_type_id) so
+  // the conflict target list now includes user_id.
+  await db
+    .insert(dailySummaries)
+    .values({
+      userId,
+      date,
+      metricTypeId,
+      count: 0,
+      lastIngestAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [dailySummaries.userId, dailySummaries.date, dailySummaries.metricTypeId],
+      set: { lastIngestAt: now },
+    });
 }

@@ -2,8 +2,9 @@ import { db } from "@/db";
 import { ingestConfigs } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-// Strava's stored config blob, stashed JSON-encoded in ingest_configs.api_key_encrypted.
-// (Not actually encrypted yet - the column name is aspirational. Fine for single-user self-host.)
+// Strava's stored config blob, stashed JSON-encoded in ingest_configs.encrypted_value.
+// TODO(pr2-phase-3): wrap with AES-256-GCM via src/lib/auth/secrets.ts so
+// the column lives up to its name. For now still plaintext JSON.
 export interface StravaTokens {
   access_token: string;
   refresh_token: string;
@@ -61,7 +62,7 @@ export async function loadTokens(): Promise<StravaTokens | null> {
     .limit(1);
 
   if (rows.length === 0) return null;
-  const blob = rows[0].apiKeyEncrypted;
+  const blob = rows[0].encryptedValue;
   if (!blob) return null;
   try {
     return JSON.parse(blob) as StravaTokens;
@@ -82,12 +83,12 @@ export async function saveTokens(tokens: StravaTokens, lastSyncAt?: string): Pro
   if (existing.length === 0) {
     await db.insert(ingestConfigs).values({
       source: "strava",
-      apiKeyEncrypted: payload,
+      encryptedValue: payload,
       lastSyncAt: lastSyncAt ?? null,
       enabled: true,
     });
   } else {
-    const updates: Partial<typeof ingestConfigs.$inferInsert> = { apiKeyEncrypted: payload };
+    const updates: Partial<typeof ingestConfigs.$inferInsert> = { encryptedValue: payload };
     if (lastSyncAt !== undefined) updates.lastSyncAt = lastSyncAt;
     await db.update(ingestConfigs).set(updates).where(eq(ingestConfigs.source, "strava"));
   }

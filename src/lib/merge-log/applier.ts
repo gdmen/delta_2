@@ -182,9 +182,13 @@ export async function applyMetricTypeUndo(
   await tx
     .delete(dailySummaries)
     .where(inArray(dailySummaries.metricTypeId, touchedIds));
+  // Re-aggregate carrying user_id through (multi-user: each summary
+  // row belongs to the metric_type's owner). Group by user_id too so
+  // the (user_id, date, metric_type_id) unique index is honored.
   await tx.execute(sql`
-    INSERT INTO daily_summaries (date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
+    INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
     SELECT
+      user_id,
       substr(recorded_at, 1, 10) AS date,
       metric_type_id,
       AVG(value),
@@ -197,7 +201,7 @@ export async function applyMetricTypeUndo(
       touchedIds.map((id) => sql`${id}`),
       sql`, `,
     )})
-    GROUP BY substr(recorded_at, 1, 10), metric_type_id
+    GROUP BY user_id, substr(recorded_at, 1, 10), metric_type_id
   `);
 
   // 6. Re-point aliases first (so the row exists for any merged.name

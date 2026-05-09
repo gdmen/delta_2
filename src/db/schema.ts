@@ -4,10 +4,14 @@ import {
   integer,
   doublePrecision,
   boolean,
+  timestamp,
+  primaryKey,
   index,
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { AdapterAccountType } from "next-auth/adapters";
 
 // All ISO-8601 timestamp columns (createdAt, updatedAt, ts, at, ingestedAt, …)
 // store JS-format strings (`new Date().toISOString()`). Keeping them as `text`
@@ -20,35 +24,205 @@ import {
 // `src/lib/sqlite-time.ts`.
 const isoNow = () => new Date().toISOString();
 
-export const sports = pgTable("sports", {
+// =============================================================================
+// AUTH.JS BASE TABLES
+// =============================================================================
+//
+// Standard Auth.js v5 schema layered on the @auth/drizzle-adapter, with
+// Delta-specific extensions on `users`. We use integer ids (matching every
+// other Delta table's convention) instead of the adapter's default text/uuid
+// — the adapter accepts either as long as the FK columns match. Bootstrap
+// row is users(id=1, password_hash='!') (set by admin-bootstrap-owner).
+
+export const users = pgTable("users", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  name: text("name").notNull().unique(),
-  color: text("color").notNull(),
+  // Auth.js standard columns
+  name: text("name"),
+  email: text("email").unique(),
+  emailVerified: timestamp("email_verified", { mode: "date" }),
+  image: text("image"),
+  // Delta extensions
+  // displayName: shown in the sidebar, share-link banner, /preferences/account.
+  // Distinct from `name` so we can let the user edit display without touching
+  // the OAuth-provider-supplied `name`.
+  displayName: text("display_name").notNull(),
+  // passwordHash: argon2id. Nullable for Google-only users (no password set).
+  // Sentinel '!' means un-bootstrapped owner (admin-bootstrap-owner replaces
+  // it on first run). authorize() must reject both cases with the same
+  // generic "invalid credentials" before calling argon2.verify.
+  passwordHash: text("password_hash"),
+  // Bumped to invalidate every outstanding JWT for this user (kill-all-
+  // sessions semantic). Each issued JWT carries this as `pwv` and
+  // requireUser() rejects on mismatch.
+  passwordHashVersion: integer("password_hash_version").notNull().default(1),
+  // Owner bit drives /preferences/invites visibility + can't-self-delete
+  // protection. There's exactly one owner today (id=1).
+  isOwner: boolean("is_owner").notNull().default(false),
   createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
 
-export const metricTypes = pgTable("metric_types", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  name: text("name").notNull().unique(),
-  sportId: integer("sport_id").references(() => sports.id),
-  unit: text("unit").notNull(),
-  frequencyHint: text("frequency_hint", { enum: ["daily", "weekly", "occasional"] })
+// One row per linked OAuth identity (e.g. Google). The Auth.js drizzle
+// adapter writes here on first OAuth sign-in to bind providerAccountId
+// to our users.id. `accounts` IS used at runtime under JWT strategy.
+export const accounts = pgTable(
+  "accounts",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").$type<AdapterAccountType>().notNull(),
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id").notNull(),
+    refresh_token: text("refresh_token"),
+    access_token: text("access_token"),
+    expires_at: integer("expires_at"),
+    token_type: text("token_type"),
+    scope: text("scope"),
+    id_token: text("id_token"),
+    session_state: text("session_state"),
+  },
+  (account) => [
+    primaryKey({ columns: [account.provider, account.providerAccountId] }),
+  ],
+);
+
+// Empty under JWT strategy — kept for adapter-compatibility only.
+export const sessions = pgTable("sessions", {
+  sessionToken: text("session_token").primaryKey(),
+  userId: integer("user_id")
     .notNull()
-    .default("daily"),
-  /**
-   * Target value for compliance dashboards. Single source of truth — widgets
-   * read from here rather than carrying their own target. NULL = no target
-   * line on charts, no color coding on headlines.
-   */
-  target: doublePrecision("target"),
-  /**
-   * Direction of the target. true (default) = floor (sleep, protein); false =
-   * ceiling (body fat %, weight). Drives the green/orange/red color buckets
-   * on metric_block headlines.
-   */
-  higherIsBetter: boolean("higher_is_better").notNull().default(true),
+    .references(() => users.id, { onDelete: "cascade" }),
+  expires: timestamp("expires", { mode: "date" }).notNull(),
+});
+
+// Used by Auth.js's email magic-link provider (which we don't ship today
+// but the adapter still requires the table to exist).
+export const verificationTokens = pgTable(
+  "verification_tokens",
+  {
+    identifier: text("identifier").notNull(),
+    token: text("token").notNull(),
+    expires: timestamp("expires", { mode: "date" }).notNull(),
+  },
+  (vt) => [primaryKey({ columns: [vt.identifier, vt.token] })],
+);
+
+// =============================================================================
+// AUTH SUPPORT TABLES (custom)
+// =============================================================================
+
+// Single-use sign-up gate. No group association in this plan.
+// Atomic claim pattern: UPDATE invite_codes SET used_by_user_id = ?,
+// used_at = now() WHERE code = ? AND used_by_user_id IS NULL;
+// rowCount === 1 confirms the claim was successful.
+export const inviteCodes = pgTable("invite_codes", {
+  code: text("code").primaryKey(),
+  createdByUserId: integer("created_by_user_id")
+    .notNull()
+    .references(() => users.id),
+  usedByUserId: integer("used_by_user_id").references(() => users.id),
+  expiresAt: text("expires_at"),
+  usedAt: text("used_at"),
   createdAt: text("created_at").$defaultFn(isoNow).notNull(),
 });
+
+// Strava OAuth state with user_id binding (replaces the previous cookie-
+// based state). Lazy delete on callback + 1h sweep.
+export const oauthStates = pgTable("oauth_states", {
+  state: text("state").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+});
+
+// JWT revocation list. Sign-out inserts the current request's `jti`. Every
+// authed request checks WHERE jti = ? in requireUser(). Sweep deletes rows
+// older than JWT TTL (8 days default) — past that, the row no longer
+// protects anything because the JWT itself is expired.
+export const sessionDenylist = pgTable("session_denylist", {
+  jti: text("jti").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  revokedAt: text("revoked_at").$defaultFn(isoNow).notNull(),
+});
+
+// Per-dashboard read-only public links. Owner of the dashboard can mint and
+// revoke. ONE active token per dashboard at a time (re-mint revokes the
+// previous one). View page lives at /share/[token]; renders the dashboard
+// READ-ONLY using the dashboard owner's user_id (not the viewer's session).
+export const dashboardShareTokens = pgTable(
+  "dashboard_share_tokens",
+  {
+    token: text("token").primaryKey(), // 32-byte url-safe random
+    dashboardId: integer("dashboard_id")
+      .notNull()
+      .references((): AnyPgColumn => dashboards.id, { onDelete: "cascade" }),
+    createdByUserId: integer("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    revokedAt: text("revoked_at"),
+  },
+  (t) => [
+    uniqueIndex("dashboard_share_tokens_one_active_per_dashboard")
+      .on(t.dashboardId)
+      .where(sql`revoked_at IS NULL`),
+  ],
+);
+
+// =============================================================================
+// OWNED TABLES (every row has a user_id; cascade-delete on user removal)
+// =============================================================================
+
+export const sports = pgTable(
+  "sports",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    color: text("color").notNull(),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [uniqueIndex("sports_user_name_uniq").on(t.userId, t.name)],
+);
+
+export const metricTypes = pgTable(
+  "metric_types",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sportId: integer("sport_id").references(() => sports.id),
+    unit: text("unit").notNull(),
+    frequencyHint: text("frequency_hint", {
+      enum: ["daily", "weekly", "occasional"],
+    })
+      .notNull()
+      .default("daily"),
+    /**
+     * Target value for compliance dashboards. Single source of truth — widgets
+     * read from here rather than carrying their own target. NULL = no target
+     * line on charts, no color coding on headlines.
+     */
+    target: doublePrecision("target"),
+    /**
+     * Direction of the target. true (default) = floor (sleep, protein); false =
+     * ceiling (body fat %, weight). Drives the green/orange/red color buckets
+     * on metric_block headlines.
+     */
+    higherIsBetter: boolean("higher_is_better").notNull().default(true),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [uniqueIndex("metric_types_user_name_uniq").on(t.userId, t.name)],
+);
 
 /**
  * Routes a raw import name onto a canonical metric_types row. The `alias` key
@@ -57,85 +231,137 @@ export const metricTypes = pgTable("metric_types", {
  * and their IDs disappear. Every ingest path checks this table before falling
  * back to auto-creating a `${source}:${rawName}` orphan.
  */
-export const metricTypeAliases = pgTable("metric_type_aliases", {
-  alias: text("alias").primaryKey(),
-  canonicalMetricTypeId: integer("canonical_metric_type_id")
-    .notNull()
-    .references(() => metricTypes.id, { onDelete: "cascade" }),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-}, (table) => [
-  index("idx_metric_type_aliases_canonical").on(table.canonicalMetricTypeId),
-]);
+export const metricTypeAliases = pgTable(
+  "metric_type_aliases",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    alias: text("alias").notNull(),
+    canonicalMetricTypeId: integer("canonical_metric_type_id")
+      .notNull()
+      .references(() => metricTypes.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.alias] }),
+    index("idx_metric_type_aliases_canonical").on(t.canonicalMetricTypeId),
+  ],
+);
 
-export const metrics = pgTable("metrics", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  value: doublePrecision("value").notNull(),
-  recordedAt: text("recorded_at").notNull(),
-  source: text("source").notNull(),
-  sourceId: text("source_id"),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-  // Alias key the resolver matched at ingest time (e.g.
-  // "fitnotes_bt:weight"). Powers chain-undo of merges: when a merge is
-  // reversed, the applier moves metrics whose `alias` matches the
-  // pre-merge resolution back to the merged_id. NULL for rows ingested
-  // before this column existed — those are reversed via the captured
-  // metricsMovedIds path only.
-  alias: text("alias"),
-}, (table) => [
-  index("idx_metrics_type_recorded").on(table.metricTypeId, table.recordedAt),
-  uniqueIndex("idx_metrics_source_id").on(table.sourceId),
-  index("idx_metrics_type_alias").on(table.metricTypeId, table.alias),
-]);
+export const metrics = pgTable(
+  "metrics",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    metricTypeId: integer("metric_type_id")
+      .notNull()
+      .references(() => metricTypes.id),
+    value: doublePrecision("value").notNull(),
+    recordedAt: text("recorded_at").notNull(),
+    source: text("source").notNull(),
+    sourceId: text("source_id"),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    // Alias key the resolver matched at ingest time (e.g.
+    // "fitnotes_bt:weight"). Powers chain-undo of merges: when a merge is
+    // reversed, the applier moves metrics whose `alias` matches the
+    // pre-merge resolution back to the merged_id. NULL for rows ingested
+    // before this column existed — those are reversed via the captured
+    // metricsMovedIds path only.
+    alias: text("alias"),
+  },
+  (t) => [
+    index("idx_metrics_type_recorded").on(t.metricTypeId, t.recordedAt),
+    uniqueIndex("idx_metrics_user_source_id").on(t.userId, t.sourceId),
+    index("idx_metrics_type_alias").on(t.metricTypeId, t.alias),
+    index("idx_metrics_user").on(t.userId),
+  ],
+);
 
-export const events = pgTable("events", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  sportId: integer("sport_id").notNull().references(() => sports.id),
-  type: text("type").notNull(),
-  durationMinutes: integer("duration_minutes"),
-  notes: text("notes"),
-  startedAt: text("started_at").notNull(),
-  source: text("source").notNull().default("manual"),
-  sourceId: text("source_id"),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-}, (table) => [
-  index("idx_events_sport_started").on(table.sportId, table.startedAt),
-  uniqueIndex("idx_events_source_id").on(table.sourceId),
-]);
+export const events = pgTable(
+  "events",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    sportId: integer("sport_id").notNull().references(() => sports.id),
+    type: text("type").notNull(),
+    durationMinutes: integer("duration_minutes"),
+    notes: text("notes"),
+    startedAt: text("started_at").notNull(),
+    source: text("source").notNull().default("manual"),
+    sourceId: text("source_id"),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [
+    index("idx_events_sport_started").on(t.sportId, t.startedAt),
+    uniqueIndex("idx_events_user_source_id").on(t.userId, t.sourceId),
+    index("idx_events_user").on(t.userId),
+  ],
+);
 
 /**
  * Per-event numeric dimensions: distance, calories, avg HR, elevation, etc.
  * Lets cardio + workout sessions carry arbitrary quantified data without
  * ballooning the events schema.  Keyed by (event_id, metric_type_id) so
  * imports can upsert idempotently.
+ *
+ * INHERIT table — no user_id; scope via parent events row.
  */
-export const eventMetrics = pgTable("event_metrics", {
-  eventId: integer("event_id")
-    .notNull()
-    .references(() => events.id, { onDelete: "cascade" }),
-  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  value: doublePrecision("value").notNull(),
-}, (table) => [
-  uniqueIndex("idx_event_metrics_event_type").on(table.eventId, table.metricTypeId),
-]);
+export const eventMetrics = pgTable(
+  "event_metrics",
+  {
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    metricTypeId: integer("metric_type_id")
+      .notNull()
+      .references(() => metricTypes.id),
+    value: doublePrecision("value").notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_event_metrics_event_type").on(t.eventId, t.metricTypeId),
+  ],
+);
 
-export const workoutSets = pgTable("workout_sets", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  eventId: integer("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
-  exerciseMetricTypeId: integer("exercise_metric_type_id").notNull().references(() => metricTypes.id),
-  setNumber: integer("set_number").notNull(),
-  reps: integer("reps").notNull(),
-  weight: doublePrecision("weight").notNull(),
-  rpe: doublePrecision("rpe"),
-  notes: text("notes"),
-}, (table) => [
-  index("idx_workout_sets_event").on(table.eventId),
-  index("idx_workout_sets_exercise_mt").on(table.exerciseMetricTypeId),
-]);
+// INHERIT table — no user_id; scope via parent events row.
+export const workoutSets = pgTable(
+  "workout_sets",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    exerciseMetricTypeId: integer("exercise_metric_type_id")
+      .notNull()
+      .references(() => metricTypes.id),
+    setNumber: integer("set_number").notNull(),
+    reps: integer("reps").notNull(),
+    weight: doublePrecision("weight").notNull(),
+    rpe: doublePrecision("rpe"),
+    notes: text("notes"),
+  },
+  (t) => [
+    index("idx_workout_sets_event").on(t.eventId),
+    index("idx_workout_sets_exercise_mt").on(t.exerciseMetricTypeId),
+  ],
+);
 
 export const goals = pgTable("goals", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
+  userId: integer("user_id")
+    .notNull()
+    .default(1)
+    .references(() => users.id, { onDelete: "cascade" }),
+  metricTypeId: integer("metric_type_id")
+    .notNull()
+    .references(() => metricTypes.id),
   sportId: integer("sport_id").notNull().references(() => sports.id),
   targetValue: doublePrecision("target_value").notNull(),
   deadline: text("deadline").notNull(),
@@ -153,22 +379,32 @@ export const goals = pgTable("goals", {
  *
  * Sport is reachable via the goal — focuses don't carry sport_id directly.
  * Promote-an-llm-focus = update source to 'manual'. Dismiss = set dismissed_at.
+ *
+ * INHERIT table — no user_id; scope via parent goal row.
  */
-export const focuses = pgTable("focuses", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  name: text("name").notNull(),
-  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
-  source: text("source", { enum: ["manual", "llm"] }).notNull().default("manual"),
-  startDate: text("start_date").notNull(),
-  endDate: text("end_date"),
-  status: text("status", { enum: ["active", "completed", "abandoned"] }).notNull().default("active"),
-  technicalNotes: text("technical_notes"),
-  evidence: text("evidence"),
-  dismissedAt: text("dismissed_at"),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-}, (table) => [
-  index("idx_focuses_goal_status").on(table.goalId, table.status),
-]);
+export const focuses = pgTable(
+  "focuses",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    name: text("name").notNull(),
+    goalId: integer("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    source: text("source", { enum: ["manual", "llm"] })
+      .notNull()
+      .default("manual"),
+    startDate: text("start_date").notNull(),
+    endDate: text("end_date"),
+    status: text("status", { enum: ["active", "completed", "abandoned"] })
+      .notNull()
+      .default("active"),
+    technicalNotes: text("technical_notes"),
+    evidence: text("evidence"),
+    dismissedAt: text("dismissed_at"),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [index("idx_focuses_goal_status").on(t.goalId, t.status)],
+);
 
 /**
  * Per-goal markdown journal. Append-only timestamped entries form the longitudinal
@@ -176,68 +412,124 @@ export const focuses = pgTable("focuses", {
  * closes, so they can be styled differently in the journal feed.
  * `linked_metric_type_id` is optional — pin an entry to a metric without resurrecting
  * a join table.
+ *
+ * INHERIT table — no user_id; scope via parent goal row.
  */
-export const goalJournalEntries = pgTable("goal_journal_entries", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
-  content: text("content").notNull(),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-  verdictFocusId: integer("verdict_focus_id").references((): AnyPgColumn => focuses.id, { onDelete: "set null" }),
-  linkedMetricTypeId: integer("linked_metric_type_id").references(() => metricTypes.id, { onDelete: "set null" }),
-}, (table) => [
-  index("idx_goal_journal_goal_created").on(table.goalId, table.createdAt),
-]);
+export const goalJournalEntries = pgTable(
+  "goal_journal_entries",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    goalId: integer("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    verdictFocusId: integer("verdict_focus_id").references(
+      (): AnyPgColumn => focuses.id,
+      { onDelete: "set null" },
+    ),
+    linkedMetricTypeId: integer("linked_metric_type_id").references(
+      () => metricTypes.id,
+      { onDelete: "set null" },
+    ),
+  },
+  (t) => [index("idx_goal_journal_goal_created").on(t.goalId, t.createdAt)],
+);
 
 /**
  * One row per LLM call. Metadata only (no message content — content lives in
  * focuses.evidence or goal_journal_entries). Lets us track cost, latency, and
  * failure rates without joining to external service logs.
+ *
+ * `userId` is nullable because account deletion sets it to NULL (anonymizes
+ * historical cost data — we want the cumulative usage stats to survive).
+ * `deletedUserHash` captures sha256 of the deleted user's email so we can
+ * still bucket calls per ex-user for cost attribution without keeping the
+ * email itself. NULL while the user is alive.
  */
-export const coachCalls = pgTable("coach_calls", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  ts: text("ts").$defaultFn(isoNow).notNull(),
-  endpoint: text("endpoint").notNull(),
-  goalId: integer("goal_id").references(() => goals.id, { onDelete: "set null" }),
-  tokensIn: integer("tokens_in").notNull().default(0),
-  tokensOut: integer("tokens_out").notNull().default(0),
-  durationMs: integer("duration_ms").notNull().default(0),
-  model: text("model").notNull(),
-  status: text("status").notNull().default("success"),
-}, (table) => [
-  index("idx_coach_calls_ts").on(table.ts),
-  index("idx_coach_calls_goal").on(table.goalId),
-]);
+export const coachCalls = pgTable(
+  "coach_calls",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    deletedUserHash: text("deleted_user_hash"),
+    ts: text("ts").$defaultFn(isoNow).notNull(),
+    endpoint: text("endpoint").notNull(),
+    goalId: integer("goal_id").references(() => goals.id, {
+      onDelete: "set null",
+    }),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    durationMs: integer("duration_ms").notNull().default(0),
+    model: text("model").notNull(),
+    status: text("status").notNull().default("success"),
+  },
+  (t) => [
+    index("idx_coach_calls_ts").on(t.ts),
+    index("idx_coach_calls_goal").on(t.goalId),
+    index("idx_coach_calls_user").on(t.userId),
+  ],
+);
 
-export const ingestConfigs = pgTable("ingest_configs", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  source: text("source").notNull().unique(),
-  apiKeyEncrypted: text("api_key_encrypted"),
-  lastSyncAt: text("last_sync_at"),
-  enabled: boolean("enabled").notNull().default(true),
-});
+export const ingestConfigs = pgTable(
+  "ingest_configs",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    // AES-256-GCM ciphertext, format: base64(iv || ciphertext || tag).
+    // 12-byte random IV per encryption (IV reuse breaks GCM). Decrypt
+    // fails closed on tag mismatch via src/lib/auth/secrets.ts.
+    encryptedValue: text("encrypted_value"),
+    // sha256(plaintext_token), indexed. Required for HAE rows (bearer-
+    // auth lookup); not used for Strava (looked up by (user_id, source)).
+    // AES-GCM is non-deterministic — we cannot index ciphertext directly,
+    // so the hash column is the only way to find a row by token value.
+    lookupHash: text("lookup_hash"),
+    lastSyncAt: text("last_sync_at"),
+    enabled: boolean("enabled").notNull().default(true),
+  },
+  (t) => [
+    uniqueIndex("ingest_configs_user_source_uniq").on(t.userId, t.source),
+    index("idx_ingest_configs_lookup_hash").on(t.lookupHash),
+  ],
+);
 
-export const importSources = pgTable("import_sources", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  // Display name, also used as the `source` value written to metrics/events.
-  name: text("name").notNull().unique(),
-  kind: text("kind", { enum: ["metrics", "events", "workout_sets"] }).notNull(),
-  // JSON-encoded ImportMapping (see src/lib/import-mapping.ts). Opaque to
-  // the DB layer; parsed by the import runner.
-  mapping: text("mapping").notNull(),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-});
+export const importSources = pgTable(
+  "import_sources",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Display name, also used as the `source` value written to metrics/events.
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["metrics", "events", "workout_sets"] }).notNull(),
+    // JSON-encoded ImportMapping (see src/lib/import-mapping.ts). Opaque to
+    // the DB layer; parsed by the import runner.
+    mapping: text("mapping").notNull(),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [uniqueIndex("import_sources_user_name_uniq").on(t.userId, t.name)],
+);
 
 /**
- * App-wide preferences. Single row by convention (`id = 1`). Migration
- * 0022 inserts that row so reads can be unconditional.
+ * Per-user app preferences. PK is user_id (was singleton id=1 in pre-multi-
+ * user days; now one row per user).
  *
  * - `timezone`: IANA name (e.g. `America/Los_Angeles`). null falls back
- *   to the JS runtime's resolved TZ. Used by metric-history to compute
- *   the user's "today" when filtering daily-aggregate windows — without
- *   it, a UTC server makes the wrong call for any user not on UTC.
+ *   to the JS runtime's resolved TZ.
  */
 export const appSettings = pgTable("app_settings", {
-  id: integer("id").primaryKey().default(1),
+  userId: integer("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
   timezone: text("timezone"),
   updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
 });
@@ -249,78 +541,105 @@ export const appSettings = pgTable("app_settings", {
  * inline undo toast.
  *
  * - `payload` is a versioned JSON blob (top-level `v: 1`) carrying
- *   everything needed to reverse the merge. Snapshot includes the
- *   merged metric_type/sport row data, the lists of FK row ids that
- *   were re-pointed, deduped-and-deleted event_metrics rows, and the
- *   rescale factor (if any). Daily_summaries is NOT in the payload —
- *   it's recomputed from `metrics` on undo so post-merge ingest
- *   survives.
- * - `userId` is nullable and indexed alongside createdAt so the
- *   future multi-user list query (`WHERE user_id = ? ORDER BY ...`)
- *   stays efficient. NULL today (no auth/user table yet); when auth
- *   lands the merge endpoints fill it in and the GET/undo endpoints
- *   filter by it.
+ *   everything needed to reverse the merge.
+ * - `userId` is NOT NULL (multi-user enforces ownership). undo rejects
+ *   if the caller's user_id doesn't match.
  * - `undoneAt` flips from NULL to a timestamp via CAS at undo start
  *   (TOCTOU-safe — concurrent double-undos see only one winner).
  */
-export const mergeLog = pgTable("merge_log", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-  canonicalId: integer("canonical_id").notNull(),
-  canonicalName: text("canonical_name").notNull(),
-  mergedNames: text("merged_names").notNull(),
-  payload: text("payload").notNull(),
-  undoneAt: text("undone_at"),
-  userId: integer("user_id"),
-}, (table) => [
-  index("idx_merge_log_created_at").on(table.createdAt),
-  index("idx_merge_log_user_id_created_at").on(table.userId, table.createdAt),
-]);
+export const mergeLog = pgTable(
+  "merge_log",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    canonicalId: integer("canonical_id").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    mergedNames: text("merged_names").notNull(),
+    payload: text("payload").notNull(),
+    undoneAt: text("undone_at"),
+  },
+  (t) => [
+    index("idx_merge_log_created_at").on(t.createdAt),
+    index("idx_merge_log_user_id_created_at").on(t.userId, t.createdAt),
+  ],
+);
 
 /**
- * Per-source config. Today: just the reconcile toggle. Future per-source
- * prefs fit here too. One row per `source` tag (matches the `source`
- * column on metrics/events).
+ * Per-source config, scoped to user. PK becomes (user_id, source).
  */
-export const sourceSettings = pgTable("source_settings", {
-  source: text("source").primaryKey(),
-  reconcileEnabled: boolean("reconcile_enabled").notNull().default(false),
-  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
-});
+export const sourceSettings = pgTable(
+  "source_settings",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    reconcileEnabled: boolean("reconcile_enabled").notNull().default(false),
+    updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.source] })],
+);
 
 /**
  * Audit trail for reconcile deletions. Zero-deletion ingest runs don't
- * write here; only batches that actually removed rows. Used by the
- * "Last reconcile" chip on each source sub-page.
+ * write here; only batches that actually removed rows.
  *
  * `metric_type_id` has no FK so rows survive a later metric_types delete.
  */
-export const reconcileLog = pgTable("reconcile_log", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  source: text("source").notNull(),
-  kind: text("kind", { enum: ["metric", "event"] }).notNull(),
-  metricTypeId: integer("metric_type_id"),
-  deletedCount: integer("deleted_count").notNull(),
-  rangeStart: text("range_start").notNull(),
-  rangeEnd: text("range_end").notNull(),
-  at: text("at").$defaultFn(isoNow).notNull(),
-}, (table) => [
-  index("idx_reconcile_log_source_at").on(table.source, table.at),
-]);
+export const reconcileLog = pgTable(
+  "reconcile_log",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    kind: text("kind", { enum: ["metric", "event"] }).notNull(),
+    metricTypeId: integer("metric_type_id"),
+    deletedCount: integer("deleted_count").notNull(),
+    rangeStart: text("range_start").notNull(),
+    rangeEnd: text("range_end").notNull(),
+    at: text("at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [
+    index("idx_reconcile_log_source_at").on(t.source, t.at),
+    index("idx_reconcile_log_user").on(t.userId),
+  ],
+);
 
-export const dailySummaries = pgTable("daily_summaries", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  date: text("date").notNull(),
-  metricTypeId: integer("metric_type_id").notNull().references(() => metricTypes.id),
-  avgValue: doublePrecision("avg_value"),
-  minValue: doublePrecision("min_value"),
-  maxValue: doublePrecision("max_value"),
-  count: integer("count").notNull().default(0),
-  lastIngestAt: text("last_ingest_at"),
-}, (table) => [
-  uniqueIndex("idx_daily_summaries_date_metric").on(table.date, table.metricTypeId),
-]);
+export const dailySummaries = pgTable(
+  "daily_summaries",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    metricTypeId: integer("metric_type_id")
+      .notNull()
+      .references(() => metricTypes.id),
+    avgValue: doublePrecision("avg_value"),
+    minValue: doublePrecision("min_value"),
+    maxValue: doublePrecision("max_value"),
+    count: integer("count").notNull().default(0),
+    lastIngestAt: text("last_ingest_at"),
+  },
+  (t) => [
+    uniqueIndex("idx_daily_summaries_user_date_metric").on(
+      t.userId,
+      t.date,
+      t.metricTypeId,
+    ),
+  ],
+);
 
 /**
  * A dashboard is a named collection of widgets. System dashboards (Today,
@@ -335,48 +654,57 @@ export const dailySummaries = pgTable("daily_summaries", {
  * `sport_id` is optional and drives the sport-color dot in the sidebar.
  * `position` orders dashboards in the sidebar.
  */
-export const dashboards = pgTable("dashboards", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  icon: text("icon"),
-  sportId: integer("sport_id").references(() => sports.id, { onDelete: "set null" }),
-  position: integer("position").notNull().default(0),
-  isSystem: boolean("is_system").notNull().default(false),
-  seededId: text("seeded_id").unique(),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
-}, (table) => [
-  index("idx_dashboards_position").on(table.position),
-]);
+export const dashboards = pgTable(
+  "dashboards",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .default(1)
+      .references(() => users.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    sportId: integer("sport_id").references(() => sports.id, {
+      onDelete: "set null",
+    }),
+    position: integer("position").notNull().default(0),
+    isSystem: boolean("is_system").notNull().default(false),
+    seededId: text("seeded_id"),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [
+    uniqueIndex("dashboards_user_slug_uniq").on(t.userId, t.slug),
+    uniqueIndex("dashboards_user_seeded_id_uniq").on(t.userId, t.seededId),
+    index("idx_dashboards_position").on(t.position),
+  ],
+);
 
 /**
- * Each row is one widget on one dashboard. `widget_type` is a string key into
- * the widget registry (src/lib/widgets/registry.ts). `config` is JSON parsed
- * by the widget's Zod schema at render time. `body` is reserved for widgets
- * (text_card) whose content exceeds the 4KB JSON cap and benefits from a
- * dedicated TEXT column.
- *
- * grid_x / grid_y / grid_w / grid_h are abstract grid units (not pixels):
- * x and y index into a 12-column CSS Grid, w/h are spans. Layout is purely
- * CSS-driven; the renderer doesn't convert to pixels.
- *
- * `position` is the mobile single-column stacking order; on desktop the
- * grid_x/y dictate layout.
+ * Each row is one widget on one dashboard. INHERIT table — scope via parent
+ * dashboard row.
  */
-export const dashboardWidgets = pgTable("dashboard_widgets", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  dashboardId: integer("dashboard_id")
-    .notNull()
-    .references(() => dashboards.id, { onDelete: "cascade" }),
-  widgetType: text("widget_type").notNull(),
-  config: text("config").notNull().default("{}"),
-  body: text("body"),
-  gridX: integer("grid_x").notNull().default(0),
-  gridY: integer("grid_y").notNull().default(0),
-  gridW: integer("grid_w").notNull().default(12),
-  gridH: integer("grid_h").notNull().default(2),
-  position: integer("position").notNull().default(0),
-}, (table) => [
-  index("idx_dashboard_widgets_dashboard_position").on(table.dashboardId, table.position),
-]);
+export const dashboardWidgets = pgTable(
+  "dashboard_widgets",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    dashboardId: integer("dashboard_id")
+      .notNull()
+      .references(() => dashboards.id, { onDelete: "cascade" }),
+    widgetType: text("widget_type").notNull(),
+    config: text("config").notNull().default("{}"),
+    body: text("body"),
+    gridX: integer("grid_x").notNull().default(0),
+    gridY: integer("grid_y").notNull().default(0),
+    gridW: integer("grid_w").notNull().default(12),
+    gridH: integer("grid_h").notNull().default(2),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    index("idx_dashboard_widgets_dashboard_position").on(
+      t.dashboardId,
+      t.position,
+    ),
+  ],
+);

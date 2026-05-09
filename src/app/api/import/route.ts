@@ -1387,8 +1387,14 @@ async function importMergeLog(text: string): Promise<TableResult> {
         canonicalId = id ?? (Number(canonicalIdRaw) || 0);
       }
 
+      // merge_log.user_id is now NOT NULL (multi-user). Default exported
+      // CSVs from pre-multi-user instances had user_id="" — backfill to
+      // 1 (the bootstrap owner) since that's the only user who could
+      // have created those rows.
       const userId =
-        userIdRaw === "" ? null : Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : null;
+        userIdRaw === "" || !Number.isFinite(Number(userIdRaw))
+          ? 1
+          : Number(userIdRaw);
 
       // Dedup on (kind, created_at, canonical_name, merged_names).
       const existing = await db

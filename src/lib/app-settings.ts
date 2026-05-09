@@ -1,5 +1,11 @@
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+// TODO(pr2-phase-3): every caller should pass userId from requireUser().
+// Until then, default to the bootstrap owner (id=1) so existing
+// single-user code paths keep working.
+const DEFAULT_USER_ID = 1;
 
 /**
  * Read the user's preferred timezone (IANA name). Returns the JS
@@ -12,10 +18,11 @@ import { appSettings } from "@/db/schema";
  * hours off; without this, today's mid-flight value bleeds through the
  * 7-day window between 17:00 and 24:00 PDT.
  */
-export async function loadUserTimezone(): Promise<string> {
+export async function loadUserTimezone(userId: number = DEFAULT_USER_ID): Promise<string> {
   const row = await db
     .select({ tz: appSettings.timezone })
     .from(appSettings)
+    .where(eq(appSettings.userId, userId))
     .limit(1);
   return row[0]?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
@@ -25,15 +32,20 @@ export async function loadUserTimezone(): Promise<string> {
  * to the runtime default on read). Caller is responsible for validating
  * the IANA name against `Intl.supportedValuesOf("timeZone")` before
  * writing — bad strings reach the formatter and throw at render time.
+ *
+ * Upsert pattern: try update; if no row exists, insert. Per-user PK
+ * means each user gets at most one settings row.
  */
-export async function saveUserTimezone(timezone: string | null): Promise<void> {
-  // Single-row table (id=1), inserted by migration 0022. Use update; if
-  // the row is somehow missing, fall back to insert with the seeded id.
+export async function saveUserTimezone(
+  timezone: string | null,
+  userId: number = DEFAULT_USER_ID,
+): Promise<void> {
   const result = await db
     .update(appSettings)
     .set({ timezone })
-    .returning({ id: appSettings.id });
+    .where(eq(appSettings.userId, userId))
+    .returning({ userId: appSettings.userId });
   if (result.length === 0) {
-    await db.insert(appSettings).values({ id: 1, timezone });
+    await db.insert(appSettings).values({ userId, timezone });
   }
 }
