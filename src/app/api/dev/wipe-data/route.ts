@@ -83,12 +83,16 @@ export async function POST() {
   ];
 
   // Count rows per table BEFORE wiping for the response payload.
+  // Use Drizzle's query builder (returns Row[] uniformly across drivers)
+  // instead of raw db.execute() — postgres-js exposes rows directly,
+  // pglite wraps them in `{ rows, fields, ... }`. The query builder
+  // normalizes that for us.
   const counts: Record<string, number> = {};
   for (const t of tables) {
-    const r = await db.execute(
-      sql`SELECT count(*)::int AS n FROM ${sql.raw(`"${t.name}"`)}`,
-    );
-    counts[t.name] = (r[0] as { n: number }).n;
+    const rows = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(t.obj);
+    counts[t.name] = rows[0]?.n ?? 0;
   }
 
   // ONE TRUNCATE statement covering every table at once, with

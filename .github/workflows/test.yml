@@ -1,16 +1,20 @@
-# Lint + typecheck + vitest on every PR and on push to main.
-#
-# PR3 will append the Playwright E2E step once the editor exists. For PR1+PR2,
-# this workflow is unit-tests-only.
+# Lint + typecheck + vitest + migrate + build on every PR and on push to main.
 #
 # Notes:
-#   - We run `npx drizzle-kit migrate` to verify the schema applies cleanly
-#     against a fresh DB on every CI run. Catches migration syntax errors
-#     and lets the build step exercise an existing schema.
-#   - WAL checkpoint + cleanup keep the SQLite WAL/SHM files from leaking
-#     between steps and causing intermittent "database is locked" failures.
+#   - Vitest tests run against pglite (in-process WASM Postgres) via the
+#     vi.mock("@/db", ...) helper in src/test-utils/route-test.ts and the
+#     direct pglite handle in src/test-utils/in-memory-db.ts. So `npm test`
+#     does NOT need DATABASE_URL or the postgres service — those are only
+#     wired into the migrate + build steps that talk to a real Postgres.
+#   - `npx drizzle-kit migrate` against a fresh Postgres catches migration
+#     SQL syntax errors and lets the build step exercise an applied schema.
+#   - `npm run build` runs Next.js prerender, which hits `db.select(...)
+#     .from(dashboards)` on a few static pages — needs a live Postgres.
+#     An empty migrated DB returns empty arrays which render the
+#     "no data yet" placeholders without error.
 #   - SITE_PASSWORD is set to empty string so the auth gate is disabled in
-#     CI; src/proxy.test.ts asserts this is the correct semantics.
+#     CI; src/proxy.test.ts asserts that's the correct semantics.
+#   - PR3 will append the Playwright E2E step once the editor exists.
 
 name: test
 
@@ -25,6 +29,26 @@ jobs:
     timeout-minutes: 15
     env:
       SITE_PASSWORD: ""
+
+    services:
+      # Postgres 16 — matches RDS production version. Bound to 127.0.0.1:5432
+      # on the runner so the migrate + build steps can connect via the same
+      # DATABASE_URL we use locally. Healthcheck makes sure the service is
+      # accepting connections before the steps that use it run.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: delta
+          POSTGRES_PASSWORD: delta
+          POSTGRES_DB: delta_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -39,18 +63,23 @@ jobs:
 
       - run: npx tsc --noEmit
 
+      # Vitest. No DATABASE_URL on purpose — tests use pglite in-process.
       - run: npm test
 
-      - name: Apply DB migrations to a fresh delta2.db
+      # Apply migrations to the postgres service. Catches dialect drift
+      # (e.g. a Drizzle-generated statement Postgres rejects) before the
+      # build step depends on the schema.
+      - name: Apply DB migrations to fresh Postgres
+        env:
+          DATABASE_URL: postgresql://delta:delta@localhost:5432/delta_test
         run: npx drizzle-kit migrate
 
-      - name: Checkpoint WAL so build/start don't see locked DB
-        run: |
-          sqlite3 delta2.db 'PRAGMA wal_checkpoint(TRUNCATE);'
-          rm -f delta2.db-wal delta2.db-shm
-
-      - run: npm run build
-
-      - name: Cleanup CI-only artifacts
-        if: always()
-        run: rm -f delta2.db delta2.db-wal delta2.db-shm
+      # Next.js prerender pass talks to Postgres for the static-generation
+      # candidates. INGEST_API_KEY is a stub — the build step never invokes
+      # the ingest path, but having it set keeps any module-load env-var
+      # validation happy.
+      - name: Build
+        env:
+          DATABASE_URL: postgresql://delta:delta@localhost:5432/delta_test
+          INGEST_API_KEY: ci-stub-key
+        run: npm run build

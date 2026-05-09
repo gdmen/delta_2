@@ -1,40 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync } from "fs";
 import { join } from "path";
 import { parseBodySpecPdf } from "./parse";
 
 /**
- * Runs the parser against every BodySpec PDF the user provided. Skips
- * the suite cleanly when the fixtures aren't present (other developers
- * cloning the repo won't have them). Each fixture asserts:
- *   - scan_date parses to YYYY-MM-DD
- *   - core summary fields (body weight, fat %, lean, fat) are non-null
- *     and finite
- *   - regional + bone fields are present on reports newer than 2016
+ * Pinned regression test for the BodySpec DEXA PDF parser. The
+ * `bodyspec-results-1.pdf` fixture lives at __fixtures__/ next to this
+ * file (committed) so CI runs against the same bytes a fresh clone
+ * does — the parser's regex extractors are picky about column spacing,
+ * and any PDF text-layout drift in pdf-parse breaks the tests loudly.
  *
- * Lock-in numbers for PDF #1 (2016-02-25, the earliest fixture) are
- * baked in so any regression on the regex extractors trips immediately.
+ * The numbers below are the values from the actual report (2016-02-25
+ * scan), so a regression in any extractor surfaces on the matching
+ * field.
+ *
+ * Older versions of this file pulled fixtures from the user's local
+ * `~/Downloads/bodyspec/` and skipped the suite when absent. That made
+ * CI silently green even when the parser broke — co-locating one PDF
+ * in the repo turns the suite back on for everyone.
  */
 
-const FIXTURE_DIR = "/Users/garymenezes/Downloads/bodyspec";
-const FIXTURE_FILES = [
-  "bodyspec-results-1.pdf",
-  "bodyspec-results-2.pdf",
-  "bodyspec-results 2.pdf",
-  "bodyspec-results-3.pdf",
-  "bodyspec-results-4.pdf",
-  "bodyspec-results-5.pdf",
-  "bodyspec-results-6.pdf",
-  "bodyspec-results-7.pdf",
-  "bodyspec-results-8.pdf",
-  "bodyspec-results-10.pdf",
-];
+const FIXTURE_PATH = join(__dirname, "__fixtures__", "bodyspec-results-1.pdf");
 
-const haveFixtures = existsSync(join(FIXTURE_DIR, "bodyspec-results-1.pdf"));
-
-describe.skipIf(!haveFixtures)("parseBodySpecPdf", () => {
-  it("parses PDF #1 (2016 baseline) — every value matches the report", async () => {
-    const buf = readFileSync(join(FIXTURE_DIR, "bodyspec-results-1.pdf"));
+describe("parseBodySpecPdf", () => {
+  it("parses the 2016 baseline PDF — every value matches the report", async () => {
+    const buf = readFileSync(FIXTURE_PATH);
     const r = await parseBodySpecPdf(buf);
     expect(r.scan_date).toBe("2016-02-25");
     expect(r.height_in).toBe(70.0);
@@ -72,38 +62,4 @@ describe.skipIf(!haveFixtures)("parseBodySpecPdf", () => {
     expect(r.t_score).toBe(1.2);
     expect(r.z_score).toBeNull(); // shown as `-` in this report
   });
-
-  it("parses PDF #10 (2019 with 2016 baseline) — picks the current scan", async () => {
-    const buf = readFileSync(join(FIXTURE_DIR, "bodyspec-results-10.pdf"));
-    const r = await parseBodySpecPdf(buf);
-    // The current scan is 2019-07-24; its values must NOT collide with
-    // the 2016 baseline rows shown in the same table.
-    expect(r.scan_date).toBe("2019-07-24");
-    expect(r.body_fat_pct).toBe(14.8);
-    expect(r.body_weight_lb).toBe(154.7);
-    expect(r.rmr_kcal).toBe(1591);
-    expect(r.ag_ratio).toBe(0.7);
-    expect(r.visceral_fat_lb).toBe(0.53);
-  });
-
-  it.each(FIXTURE_FILES)(
-    "parses %s without throwing and finds the core fields",
-    async (file) => {
-      const path = join(FIXTURE_DIR, file);
-      if (!existsSync(path)) return; // gap in numbering — skip
-      const buf = readFileSync(path);
-      const r = await parseBodySpecPdf(buf);
-      // scan_date is the cheapest sanity check — if the header demographics
-      // line didn't match, the whole parse is broken. Every BodySpec PDF
-      // has it.
-      expect(r.scan_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      // Core summary: every report has these.
-      expect(r.body_fat_pct).not.toBeNull();
-      expect(r.body_weight_lb).not.toBeNull();
-      expect(r.lean_mass_lb).not.toBeNull();
-      expect(r.fat_mass_lb).not.toBeNull();
-      // Regional Arms row — present on every BodySpec template.
-      expect(r.arms_fat_pct).not.toBeNull();
-    },
-  );
 });

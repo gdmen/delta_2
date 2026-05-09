@@ -17,7 +17,7 @@ export default defineConfig({
     // pglite (in-process WASM Postgres) takes ~500ms-2s to spin up per
     // call to createTestDb(); the default 5s leaves no room for the
     // first test in a file plus the actual assertions. Bump to 30s.
-    testHookTimeout: 30_000,
+    hookTimeout: 30_000,
     testTimeout: 30_000,
   },
 });
