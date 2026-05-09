@@ -15,6 +15,38 @@ const nextConfig: NextConfig = {
     // skips the redundant in-build pass.
     ignoreBuildErrors: true,
   },
+  async headers() {
+    return [
+      {
+        // Strict CSP on /share/* per the eng-review HIGH finding on
+        // owner-XSS into share-link viewers via dashboard/widget
+        // titles. No inline scripts; same-origin only; no framing
+        // off-site (clickjacking defense). Anywhere the renderer uses
+        // dangerouslySetInnerHTML on owner-controlled strings is a
+        // hole — phase 9's isolation harness audits for that.
+        source: "/share/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self'",
+              "script-src 'self'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data:",
+              "frame-ancestors 'self'",
+              "object-src 'none'",
+              "base-uri 'self'",
+            ].join("; "),
+          },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          // No referer-leak when a viewer clicks a link out of the
+          // shared dashboard.
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

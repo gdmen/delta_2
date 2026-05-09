@@ -37,17 +37,32 @@ export async function DashboardRenderer({
   slug,
   edit = false,
   debug = process.env.NODE_ENV !== "production",
+  shareMode,
 }: {
   slug: string;
   edit?: boolean;
   debug?: boolean;
+  /**
+   * When set, skip requireUserOrSignin and use the given user id
+   * directly. Used by /share/[token] to render the OWNER's data
+   * without an auth check (the token IS the auth). When shareMode is
+   * present, edit affordances are forced off.
+   */
+  shareMode?: { ownerId: number };
 }) {
-  const user = await requireUserOrSignin();
-  const dashboard = await loadDashboard(slug, user.id);
+  let userId: number;
+  if (shareMode) {
+    userId = shareMode.ownerId;
+    edit = false; // share pages are always read-only
+  } else {
+    const user = await requireUserOrSignin();
+    userId = user.id;
+  }
+  const dashboard = await loadDashboard(slug, userId);
   if (!dashboard) notFound();
 
-  const widgets = await loadWidgets(dashboard.id, user.id);
-  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w, user.id));
+  const widgets = await loadWidgets(dashboard.id, userId);
+  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w, userId));
 
   const data = await runDataDeps(collectDataDeps(parsedWidgets.map((p) => p.deps)));
 
@@ -73,12 +88,12 @@ export async function DashboardRenderer({
       db
         .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
         .from(metricTypes)
-        .where(userScope(user.id).metricTypes)
+        .where(userScope(userId).metricTypes)
         .orderBy(asc(metricTypes.name)),
       db
         .select({ id: sports.id, name: sports.name, color: sports.color })
         .from(sports)
-        .where(userScope(user.id).sports)
+        .where(userScope(userId).sports)
         .orderBy(asc(sports.name)),
     ]);
     return (
