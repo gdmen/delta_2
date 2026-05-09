@@ -2,54 +2,148 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Very simple site-wide HTTP Basic Auth gate.
+ * Site-wide auth gate (multi-user, post-PR-2). Replaces the previous
+ * single-password Basic-auth setup. The proxy only checks for the
+ * EXISTENCE of the Auth.js session cookie — actual validation
+ * (signature, denylist, password-hash-version) happens inside the
+ * route handler via requireUser(). Per the eng-review HIGH finding,
+ * keeping the heavy check at the route layer (not middleware) lets
+ * the millisecond-scale race between sign-out and an in-flight
+ * request resolve cleanly.
  *
- * Reads SITE_PASSWORD from .env.local. If unset, the site is wide open (useful
- * for local dev). If set, every request outside the exempt list must include
- * an Authorization: Basic header with the matching password (username is
- * ignored - any value works, "delta" is a fine default).
+ * Cookie name varies by transport (Auth.js convention):
+ *   - HTTPS  →  __Secure-authjs.session-token
+ *   - HTTP   →  authjs.session-token
  *
- * Exempt paths:
- *   - /api/ingest/*   - has its own auth (bearer token for apple-health,
- *                       OAuth state+code for Strava callback). Strava's
- *                       servers won't send Basic creds.
- *   - Next.js internals (_next/*) are already excluded via the matcher.
+ * Exempt paths (matched against the NORMALIZED pathname per the
+ * eng-review LOW finding on path traversal — never against
+ * request.url):
+ *   - /signin, /signup        - users must reach these to authenticate
+ *   - /api/auth/*             - Auth.js's own routes (csrf, providers,
+ *                               session, signin/credentials, callback/google)
+ *   - /api/ingest/*           - bearer-auth or OAuth-state-auth at the
+ *                               route level (Strava's servers won't send
+ *                               our session cookie)
+ *   - /share/*                - read-only public share links by design
+ *
+ * Unauthenticated requests:
+ *   - HTML / page request     - 302 redirect to /signin
+ *   - API request             - 401 JSON
+ *
+ * The legacy SITE_PASSWORD path is preserved as an opt-in fallback
+ * (set both vars to use Basic-auth instead of session-cookie). Useful
+ * for staging environments or for the initial pre-bootstrap window
+ * where no users exist yet.
  */
+
+const EXEMPT_PREFIXES = [
+  "/signin",
+  "/signup",
+  "/api/auth/",
+  "/api/ingest/",
+  "/share/",
+];
+
+const EXEMPT_EXACT = new Set(["/signin", "/signup"]);
+
+/**
+ * Empirical note (verified by src/proxy.test.ts): NextRequest's
+ * URL parser fully normalizes `..` and `%2E%2E` BEFORE the proxy
+ * sees the path. So `/share/foo/../api/users/me` arrives as
+ * `/share/api/users/me` (still under `/share/` — exempt, but harmless
+ * because no nested route renders it) and `/share/../api/users/me`
+ * arrives as `/api/users/me` (not exempt — auth enforced as expected).
+ *
+ * The defense-in-depth strip below is belt-and-suspenders for any
+ * future Next.js change that surfaces un-normalized segments here.
+ */
+function isExempt(pathname: string): boolean {
+  // Reject anything that smells like un-collapsed path-traversal.
+  // Today this is dead code — Next normalizes for us — but keeping
+  // it cheap-and-explicit means a future Next regression on this
+  // can't silently re-open a bypass.
+  if (pathname.includes("..") || pathname.includes("//")) return false;
+  if (EXEMPT_EXACT.has(pathname)) return true;
+  for (const prefix of EXEMPT_PREFIXES) {
+    if (pathname.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+function sessionCookieName(protocol: string): string {
+  return protocol === "https:"
+    ? "__Secure-authjs.session-token"
+    : "authjs.session-token";
+}
+
+function isApiRequest(pathname: string, accept: string): boolean {
+  if (pathname.startsWith("/api/")) return true;
+  // Curl + fetch defaults send `*/*`. Browser navigation sends
+  // `text/html,application/xhtml+xml,...`. If the client explicitly
+  // accepts JSON before HTML, treat as API.
+  return /^application\/json/.test(accept);
+}
+
 export function proxy(request: NextRequest) {
+  // matcher already excludes _next/* and favicon, so we only see
+  // app routes here.
+  const pathname = request.nextUrl.pathname;
+
+  // Path-traversal defense: nextUrl.pathname is the normalized form
+  // (Next decodes + collapses .. before this runs), so prefix-matching
+  // here is safe. NEVER use request.url for the same check — that's
+  // the un-normalized form and `/share/foo/../api/users/me` would
+  // bypass the auth gate.
+  if (isExempt(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Legacy SITE_PASSWORD path: if set, fall back to Basic-auth. Useful
+  // for the transition window before any user exists, OR for staging
+  // environments that don't want full Auth.js.
   const password = process.env.SITE_PASSWORD;
-
-  // No password configured → gate disabled.
-  if (!password) {
-    return NextResponse.next();
-  }
-
-  const { pathname } = request.nextUrl;
-
-  // Ingest endpoints authenticate themselves; don't gate them.
-  if (pathname.startsWith("/api/ingest/")) {
-    return NextResponse.next();
-  }
-
-  const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Basic ")) {
-    const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-    const idx = decoded.indexOf(":");
-    const supplied = idx >= 0 ? decoded.slice(idx + 1) : decoded;
-    if (supplied === password) {
-      return NextResponse.next();
+  if (password) {
+    const header = request.headers.get("authorization") ?? "";
+    if (header.startsWith("Basic ")) {
+      const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+      const idx = decoded.indexOf(":");
+      const supplied = idx >= 0 ? decoded.slice(idx + 1) : decoded;
+      if (supplied === password) {
+        return NextResponse.next();
+      }
     }
+    return new NextResponse("Authentication required", {
+      status: 401,
+      headers: {
+        "WWW-Authenticate": 'Basic realm="Delta", charset="UTF-8"',
+      },
+    });
   }
 
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: {
-      "WWW-Authenticate": 'Basic realm="Delta", charset="UTF-8"',
-    },
-  });
+  // Auth.js session-cookie path (the one this codepath cares about).
+  const cookieName = sessionCookieName(request.nextUrl.protocol);
+  const cookie = request.cookies.get(cookieName);
+  if (cookie?.value) {
+    return NextResponse.next();
+  }
+
+  // No cookie — redirect HTML, JSON-error API.
+  const accept = request.headers.get("accept") ?? "";
+  if (isApiRequest(pathname, accept)) {
+    return NextResponse.json(
+      { error: "not signed in" },
+      { status: 401 },
+    );
+  }
+
+  // Capture the original path so /signin can bounce back to it after
+  // successful sign-in.
+  const url = request.nextUrl.clone();
+  url.pathname = "/signin";
+  url.search = `?from=${encodeURIComponent(pathname + request.nextUrl.search)}`;
+  return NextResponse.redirect(url);
 }
 
 export const config = {
-  // Run on every route except Next.js static assets / image optimizer / favicon.
-  // /api/ingest/* is allowed through inside the proxy function above.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
