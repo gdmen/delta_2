@@ -5,15 +5,21 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import type { DashboardRow } from "@/lib/dashboards/row-types";
 
+interface UserFooterInfo {
+  displayName: string;
+  isOwner: boolean;
+}
+
 function dashboardHref(slug: string): string {
   return `/dashboards/${slug}`;
 }
 
 interface SidebarProps {
   dashboards: DashboardRow[];
+  user: UserFooterInfo;
 }
 
-export function Sidebar({ dashboards }: SidebarProps) {
+export function Sidebar({ dashboards, user }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Reset the mobile drawer's open state on route change. React 19's
@@ -73,6 +79,7 @@ export function Sidebar({ dashboards }: SidebarProps) {
           w-[260px] md:w-[200px]
           border-r border-border bg-background
           transition-transform duration-200
+          flex flex-col
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
           md:translate-x-0
         `}
@@ -112,9 +119,50 @@ export function Sidebar({ dashboards }: SidebarProps) {
             active={pathname === "/data" || pathname.startsWith("/data/")}
           />
           <NavItem href="/preferences" label="Preferences" active={pathname === "/preferences"} />
+          <NavItem
+            href="/preferences/account"
+            label="Account"
+            active={pathname.startsWith("/preferences/account")}
+          />
+          {user.isOwner && (
+            <NavItem
+              href="/preferences/invites"
+              label="Invites"
+              active={pathname.startsWith("/preferences/invites")}
+            />
+          )}
         </Section>
+
+        <UserFooter user={user} />
       </nav>
     </>
+  );
+}
+
+function UserFooter({ user }: { user: UserFooterInfo }) {
+  const truncated =
+    user.displayName.length > 22
+      ? `${user.displayName.slice(0, 20)}…`
+      : user.displayName;
+  return (
+    <div className="mt-auto px-5 pt-6 pb-2 border-t border-border text-[0.75rem]">
+      <div
+        className="text-muted truncate"
+        title={user.displayName}
+      >
+        Signed in as <span className="text-foreground">{truncated}</span>
+      </div>
+      <button
+        type="button"
+        onClick={async () => {
+          await fetch("/api/auth/signout", { method: "POST" });
+          window.location.href = "/signin";
+        }}
+        className="mt-1 text-muted hover:text-foreground underline-offset-2 hover:underline text-left"
+      >
+        Sign out
+      </button>
+    </div>
   );
 }
 
