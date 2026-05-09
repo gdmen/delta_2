@@ -30,7 +30,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     await db
       .insert(metricTypes)
       .values({ name: "weight_canonical", unit: "lb", frequencyHint: "daily" });
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "Weight",
@@ -51,7 +51,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     await db
       .insert(metricTypeAliases)
       .values({ alias: "weight", canonicalMetricTypeId: inserted[0].id });
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "weight",
@@ -75,7 +75,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
         alias: "fitnotes_bt:weight",
         canonicalMetricTypeId: inserted[0].id,
       });
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "weight",
@@ -89,7 +89,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
   });
 
   it("R3: map points to unseeded canonical → alias is the canonical name", async () => {
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "Weight",
@@ -107,7 +107,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
   });
 
   it("R4: unknown → alias is `${source}:${rawName}`", async () => {
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "weight",
@@ -128,7 +128,7 @@ describe("resolveMetricTypeId — alias-aware return", () => {
     await db
       .insert(metricTypes)
       .values({ name: "weight", unit: "lb", frequencyHint: "daily" });
-    const cache = await buildMetricTypeCache(db);
+    const cache = await buildMetricTypeCache(1, db);
     const result = await resolveMetricTypeId(
       {
         rawName: "weight",

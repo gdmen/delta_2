@@ -86,7 +86,7 @@ export async function POST(
 
   const result: TableResult = { accepted: 0, skipped: 0, updated: 0, errors: [] };
 
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   const sportCache = await buildSportCache();
   const tracker = new ReconcileTracker();
   // User timezone anchors naive dates ("2026-05-07" or

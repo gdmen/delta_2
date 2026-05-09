@@ -7,7 +7,7 @@ import {
   metricTypes,
   mergeLog,
 } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { parseMergeByIdBody } from "@/lib/merge-validation";
 import {
   buildSportMergedEntry,
@@ -36,11 +36,17 @@ export async function POST(request: NextRequest) {
   if (!parsed.ok) return parsed.response;
   const { canonicalId, mergeIds } = parsed.value;
 
+  // TODO(pr2-phase-3): replace with `const { user } = await requireUserOr401()`.
+  const userId = 1;
+
+  // Existence check scoped by user_id (per the eng-review HIGH finding).
+  // Without this, an attacker could pass mergeIds=[victim_sport_id] and
+  // pass the existence check.
   const allIds = [canonicalId, ...mergeIds];
   const rows = await db
     .select({ id: sports.id, name: sports.name })
     .from(sports)
-    .where(inArray(sports.id, allIds));
+    .where(and(eq(sports.userId, userId), inArray(sports.id, allIds)));
   const byId = new Map(rows.map((r) => [r.id, r]));
   const canonical = byId.get(canonicalId);
   if (!canonical) {
@@ -68,10 +74,11 @@ export async function POST(request: NextRequest) {
       // empty. Capture mid-loop for multi-row merge correctness.
       mergedEntries.push(await buildSportMergedEntry(tx, mergeId));
 
+      // Defense-in-depth: scope every retarget by user_id.
       const eventsUpd = await tx
         .update(events)
         .set({ sportId: canonicalId })
-        .where(eq(events.sportId, mergeId))
+        .where(and(eq(events.userId, userId), eq(events.sportId, mergeId)))
         .returning({ id: events.id });
 
       // focuses no longer carry sport_id directly — they reach sport via their
@@ -79,13 +86,17 @@ export async function POST(request: NextRequest) {
       await tx
         .update(goals)
         .set({ sportId: canonicalId })
-        .where(eq(goals.sportId, mergeId));
+        .where(and(eq(goals.userId, userId), eq(goals.sportId, mergeId)));
       await tx
         .update(metricTypes)
         .set({ sportId: canonicalId })
-        .where(eq(metricTypes.sportId, mergeId));
+        .where(
+          and(eq(metricTypes.userId, userId), eq(metricTypes.sportId, mergeId)),
+        );
 
-      await tx.delete(sports).where(eq(sports.id, mergeId));
+      await tx
+        .delete(sports)
+        .where(and(eq(sports.userId, userId), eq(sports.id, mergeId)));
 
       out.push({ mergeId, name: merged.name, eventsMoved: eventsUpd.length });
     }
@@ -95,6 +106,7 @@ export async function POST(request: NextRequest) {
     const inserted = await tx
       .insert(mergeLog)
       .values({
+        userId,
         kind: "sport",
         canonicalId,
         canonicalName: canonical.name,

@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
 // -----------------------------------------------------------------------------
 
 async function importMetrics(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "metrics.csv",
     text,
@@ -392,7 +392,7 @@ async function importEvents(text: string): Promise<TableResult> {
 
 async function importEventMetrics(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "event_metrics.csv",
     text,
@@ -457,7 +457,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 
 async function importWorkoutSets(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "workout_sets.csv",
     text,
@@ -652,7 +652,7 @@ async function importMetricTypes(text: string): Promise<TableResult> {
 }
 
 async function importMetricTypeAliases(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "metric_type_aliases.csv",
     text,
@@ -730,7 +730,7 @@ async function importSourceSettings(text: string): Promise<TableResult> {
 
 async function importGoals(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "goals.csv",
     text,
@@ -781,7 +781,7 @@ async function importGoals(text: string): Promise<TableResult> {
 
 async function importFocuses(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "focuses.csv",
     text,
@@ -869,7 +869,7 @@ async function importFocuses(text: string): Promise<TableResult> {
 
 async function importGoalJournalEntries(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "goal_journal_entries.csv",
     text,
@@ -1117,7 +1117,7 @@ async function importDashboardWidgets(text: string): Promise<TableResult> {
  */
 async function importCoachCalls(text: string): Promise<TableResult> {
   const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "coach_calls.csv",
     text,
@@ -1202,7 +1202,7 @@ async function importCoachCalls(text: string): Promise<TableResult> {
  * has no FK for that reason); we resolve when possible, NULL otherwise.
  */
 async function importReconcileLog(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "reconcile_log.csv",
     text,
@@ -1268,7 +1268,7 @@ async function importReconcileLog(text: string): Promise<TableResult> {
  * on the next aggregation pass).
  */
 async function importDailySummaries(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   return processCsv(
     "daily_summaries.csv",
     text,
@@ -1342,7 +1342,7 @@ async function importDailySummaries(text: string): Promise<TableResult> {
  * Re-running import on the same bundle is a no-op.
  */
 async function importMergeLog(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   // Build a sport-name → id cache once for the same purpose.
   const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
   const sportCache = new Map(sportRows.map((r) => [r.name, r.id]));

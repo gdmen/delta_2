@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "scan_date must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const cache = await buildMetricTypeCache();
+  const cache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   const recordedAt = `${body.scan_date}T12:00:00Z`;
   const saved: string[] = [];
   const skipped: string[] = [];

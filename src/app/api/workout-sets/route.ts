@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   // Resolve the free-text exercise name to a metric_types row. Known names
   // (canonical or previously-aliased) route to their existing id; unknown
   // ones auto-create under `manual:<rawName>` for user review later.
-  const cache = await buildMetricTypeCache();
+  const cache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
     rawName: body.exerciseName,
     map: { [body.exerciseName]: body.exerciseName },

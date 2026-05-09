@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
   const metricsIn = payload.data?.metrics ?? [];
   const workoutsIn = payload.data?.workouts ?? [];
 
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
   const sportCache = await buildSportCache();
 
   const inputs: MetricInput[] = [];

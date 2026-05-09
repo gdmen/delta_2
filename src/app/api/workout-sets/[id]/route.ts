@@ -36,7 +36,7 @@ export async function PATCH(
     // Resolve the free-text name to a metric_types id. Same path manual
     // creation uses — known names route through aliases, unknown names
     // auto-create under `manual:<rawName>`.
-    const cache = await buildMetricTypeCache();
+    const cache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
     const { id: exerciseMetricTypeId } = await resolveMetricTypeId({
       rawName: body.exerciseName,
       map: { [body.exerciseName]: body.exerciseName },

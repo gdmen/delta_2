@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
   // Sport names that don't already exist auto-create as `strava:<sport_type>`
   // — see src/lib/ingest/sport-resolver.ts for the rationale.
   const sportCache = await buildSportCache();
-  const typeCache = await buildMetricTypeCache();
+  const typeCache = await buildMetricTypeCache(1) /* TODO(pr2-phase-3): pass user.id */;
 
   const result: SyncResult = {
     fetched: 0,
