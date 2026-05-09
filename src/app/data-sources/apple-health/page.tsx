@@ -3,10 +3,11 @@ import { CopyButton } from "@/components/copy-button";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 import { WipeSourceButton } from "@/components/wipe-source-button";
+import { ingestUrl } from "@/lib/site-url";
 
 export const dynamic = "force-dynamic";
 
-const endpoint = "https://delta.garymenezes.com/api/ingest/apple-health";
+const endpoint = ingestUrl("apple-health");
 // HAE's exact display names for the 13 metrics we pull.
 const metricsList =
   "Apple Stand Time, Headphone Audio Exposure, Heart Rate, Heart Rate Variability, Mindful Minutes, Protein, Respiratory Rate, Resting Heart Rate, Sleep Analysis, Step Count, VO2 Max, Water, Weight";

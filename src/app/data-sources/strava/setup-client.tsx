@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { siteHost } from "@/lib/site-url";
 
 interface Status {
   connected: boolean;
@@ -293,7 +294,7 @@ function PrereqNote() {
           </li>
           <li>
             <strong>Authorization Callback Domain</strong>: the domain Delta is served from (e.g.{" "}
-            <code className="font-mono bg-surface px-1 rounded">delta.garymenezes.com</code>, no path, no protocol).
+            <code className="font-mono bg-surface px-1 rounded">{siteHost()}</code>, no path, no protocol).
           </li>
           <li>Copy the Client ID and Client Secret.</li>
           <li>
