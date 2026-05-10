@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { dashboards, dashboardWidgets } from "@/db/schema";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { updateWidgetInput, serializeConfig } from "@/lib/dashboards/validation";
 import { lookupWidget } from "@/lib/widgets/registry";
 import { readJson } from "@/lib/dashboards/request";

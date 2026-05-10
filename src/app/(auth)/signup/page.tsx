@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth/config";
 import { redirect } from "next/navigation";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, inviteCodes } from "@/db/schema";
 import { SignUpForm } from "./form";
