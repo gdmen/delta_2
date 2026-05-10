@@ -107,30 +107,35 @@ export async function DashboardRenderer({
     );
   }
 
+  // Share-mode renders never include edit affordances. The /share/[token]
+  // page provides its own header (owner attribution + dashboard title), so
+  // the renderer also drops its own h1 to avoid a duplicate.
   return (
     <div>
-      {dashboard.name !== "Today" ? (
-        <div className="flex items-baseline justify-between mb-6">
-          <h1 className="text-2xl font-semibold">{dashboard.name}</h1>
-          <div className="flex items-center gap-3">
-            <Link href={editHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+      {!shareMode && (
+        dashboard.name !== "Today" ? (
+          <div className="flex items-baseline justify-between mb-6">
+            <h1 className="text-2xl font-semibold">{dashboard.name}</h1>
+            <div className="flex items-center gap-3">
+              <Link href={editHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+                Edit
+              </Link>
+              <Link href={settingsHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+                Settings
+              </Link>
+            </div>
+          </div>
+        ) : (
+          // Today keeps the headerless look. Edit + Settings float top-right.
+          <div className="flex justify-end gap-3 mb-2">
+            <Link href={editHref} className="text-[0.75rem] text-muted hover:text-foreground">
               Edit
             </Link>
-            <Link href={settingsHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+            <Link href={settingsHref} className="text-[0.75rem] text-muted hover:text-foreground">
               Settings
             </Link>
           </div>
-        </div>
-      ) : (
-        // Today keeps the headerless look. Edit + Settings float top-right.
-        <div className="flex justify-end gap-3 mb-2">
-          <Link href={editHref} className="text-[0.75rem] text-muted hover:text-foreground">
-            Edit
-          </Link>
-          <Link href={settingsHref} className="text-[0.75rem] text-muted hover:text-foreground">
-            Settings
-          </Link>
-        </div>
+        )
       )}
       {widgets.length === 0 ? (
         <DashboardEmptyState settingsHref={settingsHref} editHref={editHref} />

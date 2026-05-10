@@ -89,13 +89,24 @@ export function proxy(request: NextRequest) {
   // app routes here.
   const pathname = request.nextUrl.pathname;
 
+  // Forward the normalized pathname to server components via a request
+  // header. The root layout reads x-pathname (via next/headers) to
+  // decide whether to render the sidebar — /share/* and /signin should
+  // never get the sidebar even when the visitor has a valid session.
+  // Building the headers once here means every NextResponse.next()
+  // below uses the same forwarded set.
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set("x-pathname", pathname);
+  const passthrough = () =>
+    NextResponse.next({ request: { headers: forwardedHeaders } });
+
   // Path-traversal defense: nextUrl.pathname is the normalized form
   // (Next decodes + collapses .. before this runs), so prefix-matching
   // here is safe. NEVER use request.url for the same check — that's
   // the un-normalized form and `/share/foo/../api/users/me` would
   // bypass the auth gate.
   if (isExempt(pathname)) {
-    return NextResponse.next();
+    return passthrough();
   }
 
   // Legacy SITE_PASSWORD path: if set, fall back to Basic-auth. Useful
@@ -109,7 +120,7 @@ export function proxy(request: NextRequest) {
       const idx = decoded.indexOf(":");
       const supplied = idx >= 0 ? decoded.slice(idx + 1) : decoded;
       if (supplied === password) {
-        return NextResponse.next();
+        return passthrough();
       }
     }
     return new NextResponse("Authentication required", {
@@ -124,7 +135,7 @@ export function proxy(request: NextRequest) {
   const cookieName = sessionCookieName(request.nextUrl.protocol);
   const cookie = request.cookies.get(cookieName);
   if (cookie?.value) {
-    return NextResponse.next();
+    return passthrough();
   }
 
   // No cookie — redirect HTML, JSON-error API.

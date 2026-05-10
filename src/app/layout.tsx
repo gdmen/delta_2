@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { eq } from "drizzle-orm";
 import { Sidebar } from "@/components/sidebar";
@@ -13,18 +14,38 @@ export const metadata: Metadata = {
   description: "Fitness coaching dashboard",
 };
 
+/**
+ * Routes that should NEVER show the sidebar, even for signed-in
+ * viewers. Auth pages match via the (auth) route group already; this
+ * list catches public pages that share the root layout.
+ *
+ *   /share/<token> — read-only public dashboard view. Signed-in
+ *     visitors must NOT see their own sidebar (which would leak their
+ *     identity / dashboards into a screenshot of someone else's
+ *     share link, and also hijacks the suspense streaming chain
+ *     because the layout's auth + users SELECTs delay the shell).
+ */
+const BARE_LAYOUT_PREFIXES = ["/share/"] as const;
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Auth check at layout level so unauth pages (/signin, /signup,
-  // /share/*) render without the sidebar. The proxy already exempts
-  // those paths from the cookie gate, so users land here without a
-  // session and we render a bare layout.
-  const session = await auth();
+  // Pathname comes from the proxy's x-pathname header. App Router
+  // server components can't read the URL directly. Falling back to "/"
+  // means: in dev tools / tests where the proxy didn't set the header,
+  // assume non-bare so the sidebar still renders.
+  const headerList = await headers();
+  const pathname = headerList.get("x-pathname") ?? "/";
+  const bare = BARE_LAYOUT_PREFIXES.some((p) => pathname.startsWith(p));
 
-  if (!session?.user?.id) {
+  // Auth check at layout level so unauth pages (/signin, /signup) and
+  // bare-layout pages (/share/*) render without the sidebar. The proxy
+  // already exempts those paths from the cookie gate.
+  const session = bare ? null : await auth();
+
+  if (bare || !session?.user?.id) {
     return (
       <html lang="en" className="h-full antialiased">
         <body className="min-h-full">{children}</body>
