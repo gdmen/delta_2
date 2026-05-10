@@ -13,9 +13,10 @@ interface SportRow {
 interface Props {
   dashboard: DashboardRow;
   sports: SportRow[];
+  activeShareToken: string | null;
 }
 
-export function DashboardSettingsForm({ dashboard, sports }: Props) {
+export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: Props) {
   const router = useRouter();
   const [name, setName] = useState(dashboard.name);
   const [slug, setSlug] = useState(dashboard.slug);
@@ -111,7 +112,12 @@ export function DashboardSettingsForm({ dashboard, sports }: Props) {
   }
 
   return (
-    <form onSubmit={onSave} className="flex flex-col gap-4">
+    <div className="flex flex-col gap-8">
+      <ShareLinkSection
+        dashboardId={dashboard.id}
+        initialToken={activeShareToken}
+      />
+      <form onSubmit={onSave} className="flex flex-col gap-4">
       <Field label="Name" htmlFor="name">
         <input
           id="name"
@@ -185,7 +191,159 @@ export function DashboardSettingsForm({ dashboard, sports }: Props) {
           </button>
         )}
       </div>
-    </form>
+      </form>
+    </div>
+  );
+}
+
+function ShareLinkSection({
+  dashboardId,
+  initialToken,
+}: {
+  dashboardId: number;
+  initialToken: string | null;
+}) {
+  const [token, setToken] = useState<string | null>(initialToken);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const url =
+    token && typeof window !== "undefined"
+      ? `${window.location.origin}/share/${token}`
+      : token
+        ? `/share/${token}`
+        : null;
+
+  async function mint() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dashboards/${dashboardId}/share`, {
+        method: "POST",
+      });
+      const json = (await res.json()) as { token?: string; error?: string };
+      if (!res.ok || !json.token) {
+        setError(json.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setToken(json.token);
+      setCopied(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    if (busy || !token) return;
+    if (!window.confirm("Revoke this share link? Anyone holding it will get a 404 immediately.")) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/dashboards/${dashboardId}/share`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(json.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setToken(null);
+      setCopied(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      // Reset the "Copied!" affordance after a couple seconds so the
+      // button is ready for the next click.
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select the URL so the user can ⌘C themselves.
+      const input = document.getElementById(`share-url-${dashboardId}`) as HTMLInputElement | null;
+      input?.select();
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <header>
+        <h2 className="text-[0.875rem] font-semibold">Share link</h2>
+        <p className="text-[0.75rem] text-muted mt-0.5">
+          Read-only public URL. Anyone with the link can view this dashboard;
+          revoke any time. One active link per dashboard — re-minting replaces
+          the previous one.
+        </p>
+      </header>
+
+      {token && url ? (
+        <div className="flex flex-col gap-2">
+          <input
+            id={`share-url-${dashboardId}`}
+            type="text"
+            readOnly
+            value={url}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full px-3 py-2 border border-border rounded text-[0.8125rem] font-mono bg-surface focus:outline-none focus:border-foreground"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={copy}
+              className="px-3 py-1.5 border border-border rounded text-[0.8125rem] font-medium hover:bg-surface"
+            >
+              {copied ? "Copied!" : "Copy link"}
+            </button>
+            <button
+              type="button"
+              onClick={mint}
+              disabled={busy}
+              className="px-3 py-1.5 border border-border rounded text-[0.8125rem] font-medium hover:bg-surface disabled:opacity-50"
+              title="Mint a fresh link; the old one stops working immediately."
+            >
+              {busy ? "Working…" : "Regenerate"}
+            </button>
+            <button
+              type="button"
+              onClick={revoke}
+              disabled={busy}
+              className="ml-auto px-3 py-1.5 border border-accent-red/40 text-accent-red rounded text-[0.8125rem] font-medium hover:bg-accent-red/10 disabled:opacity-50"
+            >
+              {busy ? "Working…" : "Revoke"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <button
+            type="button"
+            onClick={mint}
+            disabled={busy}
+            className="px-3 py-1.5 bg-foreground text-background rounded text-[0.8125rem] font-medium disabled:opacity-50"
+          >
+            {busy ? "Creating…" : "Create share link"}
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="px-3 py-2 bg-accent-red/10 border border-accent-red/20 rounded text-[0.8125rem] text-accent-red">
+          {error}
+        </div>
+      )}
+    </section>
   );
 }
 
