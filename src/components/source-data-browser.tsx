@@ -29,7 +29,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
     .from(metrics)
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
     .where(and(userScope(user.id).metrics, eq(metrics.source, source)))
-    .groupBy(metrics.metricTypeId)
+    .groupBy(metricTypes.id)
     .orderBy(sql`count(*) desc`);
 
   const eventRows = await db
@@ -43,7 +43,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
     .where(and(userScope(user.id).events, eq(events.source, source)))
-    .groupBy(events.sportId)
+    .groupBy(sports.id)
     .orderBy(sql`count(*) desc`);
 
   const totalMetrics = metricRows.reduce((s, r) => s + Number(r.count), 0);
