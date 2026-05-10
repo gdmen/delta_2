@@ -6,9 +6,8 @@
 # Usage:
 #   DATABASE_URL=postgresql://... ./scripts/wipe-data.sh
 #
-# Run from inside the cloned repo. Doesn't require sudo (Postgres
-# concurrency means we don't need to stop the app the way SQLite did
-# with its WAL write lock).
+# Run from inside the cloned repo. Doesn't require sudo, and doesn't
+# require stopping the app — Postgres handles the concurrent writes.
 #
 # What it does:
 #   1. TRUNCATE every user-data table with RESTART IDENTITY CASCADE so

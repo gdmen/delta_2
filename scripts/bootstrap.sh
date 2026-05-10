@@ -12,15 +12,19 @@
 # (default on Ubuntu EC2). Idempotent — safe to re-run if something fails.
 #
 # What it does:
-#   1. System deps (nodejs 20, nginx, certbot, git)
-#   2. 2 GB swap (for t3.micro)
-#   3. npm ci / migrate / seed / build
-#   4. .env.local with your CLAUDE_API_KEY (prompted) + generated INGEST_API_KEY,
-#      plus STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET (optional, prompted)
-#   5. systemd service + start
-#   6. Nginx site with client_max_body_size 12M + proxy_read_timeout 60s
-#   7. Let's Encrypt SSL via certbot --nginx
-#   8. Smoke test
+#   1.  System deps (nodejs 20, nginx, certbot, git, postgresql)
+#   1b. Local Postgres role 'ubuntu' + database 'delta_prod'
+#   1c. Flip pg_hba.conf localhost-TCP rules to `trust` (idempotent — only
+#       lines currently using scram-sha-256/md5 get changed)
+#   2.  2 GB swap (for t3.micro)
+#   3.  npm ci / verify DB connection / migrate / seed / build
+#   4.  .env.local with hardcoded DATABASE_URL (postgresql://ubuntu@localhost/
+#       delta_prod) + CLAUDE_API_KEY (prompted) + generated INGEST_API_KEY,
+#       plus STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET (optional, prompted)
+#   5.  systemd service + start
+#   6.  Nginx site with client_max_body_size 12M + proxy_read_timeout 60s
+#   7.  Let's Encrypt SSL via certbot --nginx
+#   8.  Smoke test
 #
 # When it's done, it prints the INGEST_API_KEY — copy it into your iOS Shortcut.
 #
@@ -93,6 +97,20 @@ STRAVA_CLIENT_ID=""
 STRAVA_CLIENT_SECRET=""
 APPEND_STRAVA=false
 
+# Postgres connection: deterministic, no password, localhost-only.
+# The bootstrap creates the role + db AND patches pg_hba.conf to trust
+# localhost-TCP connections (safe — Postgres binds to localhost only by
+# default and 5432 stays closed at the security group).
+#
+# We can't use Unix-socket peer auth via DATABASE_URL because postgres-js
+# (the runtime + drizzle-kit driver) doesn't honor the `?host=...` query
+# param the way libpq does — it parses the URL host (localhost) and
+# connects via TCP, ignoring the query. Using TCP-localhost-trust keeps
+# the URL clean and works with every PG client identically.
+PG_DB="delta_prod"
+PG_ROLE="ubuntu"  # OS user the systemd unit runs as
+DATABASE_URL="postgresql://${PG_ROLE}@localhost/${PG_DB}"
+
 if [[ -f "$REPO_ROOT/.env.local" ]]; then
   echo "Found existing .env.local — will not overwrite Claude/Ingest keys."
   echo "(Edit $REPO_ROOT/.env.local by hand if you need to rotate those.)"
@@ -143,9 +161,66 @@ if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | cut -d. -f1 | tr -d v)" 
 fi
 
 sudo apt-get update -y
-sudo apt-get install -y nodejs nginx certbot python3-certbot-nginx git
+sudo apt-get install -y nodejs nginx certbot python3-certbot-nginx git postgresql
 
 node -v
+psql --version
+
+# -----------------------------------------------------------------------------
+# 1b. Postgres role + database
+# -----------------------------------------------------------------------------
+
+step "Configuring Postgres (role $PG_ROLE, database $PG_DB)"
+
+# `createuser -s` makes ubuntu a superuser of the local cluster — fine for
+# a single-app box. If we ever ship a second app on the same Postgres
+# we'll narrow the grants. Idempotent.
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$PG_ROLE'" | grep -q 1; then
+  sudo -u postgres createuser -s "$PG_ROLE"
+  echo "Created role $PG_ROLE."
+else
+  echo "Role $PG_ROLE already exists. Skipping."
+fi
+
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$PG_DB'" | grep -q 1; then
+  sudo -u postgres createdb -O "$PG_ROLE" "$PG_DB"
+  echo "Created database $PG_DB."
+else
+  echo "Database $PG_DB already exists. Skipping."
+fi
+
+# Sanity check: peer auth on the Unix socket works as the script's
+# invoking user. (psql with -d uses the socket by default; the app uses
+# TCP via DATABASE_URL — see step 1c.)
+psql -d "$PG_DB" -c '\conninfo'
+
+# -----------------------------------------------------------------------------
+# 1c. Trust localhost-TCP in pg_hba.conf
+# -----------------------------------------------------------------------------
+#
+# postgres-js (used by both the app at runtime and drizzle-kit at build
+# time) connects via TCP to localhost when DATABASE_URL is
+# postgresql://user@localhost/db. The default Ubuntu pg_hba.conf wants
+# scram-sha-256/md5 for those connections, which means a password.
+# Rather than manage one, we trust localhost (5432 is bound to lo only
+# by default; the SG keeps it closed externally too). Idempotent — only
+# flips lines that are currently scram-sha-256/md5/password.
+
+step "Patching pg_hba.conf to trust localhost-TCP"
+
+PG_HBA="$(sudo -u postgres psql -tAc 'SHOW hba_file')"
+echo "  hba_file: $PG_HBA"
+
+if sudo grep -qE '^host\s+all\s+all\s+(127\.0\.0\.1/32|::1/128)\s+(scram-sha-256|md5|password)' "$PG_HBA"; then
+  sudo sed -i.bak-$(date +%Y%m%d%H%M%S) -E \
+    -e 's|(^host\s+all\s+all\s+127\.0\.0\.1/32\s+)(scram-sha-256\|md5\|password)|\1trust|' \
+    -e 's|(^host\s+all\s+all\s+::1/128\s+)(scram-sha-256\|md5\|password)|\1trust|' \
+    "$PG_HBA"
+  sudo systemctl reload postgresql
+  echo "  pg_hba.conf patched + postgres reloaded."
+else
+  echo "  Localhost-TCP already trust (or no scram/md5/password lines to flip). Skipping."
+fi
 
 # -----------------------------------------------------------------------------
 # 2. Swap (for t3.micro — harmless on larger instances)
@@ -174,6 +249,7 @@ step "Writing .env.local (if missing) / appending Strava (if requested)"
 
 if [[ ! -f "$REPO_ROOT/.env.local" ]]; then
   {
+    echo "DATABASE_URL=$DATABASE_URL"
     echo "CLAUDE_API_KEY=$CLAUDE_API_KEY"
     echo "INGEST_API_KEY=$INGEST_API_KEY"
     if [[ -n "$SITE_PASSWORD" ]]; then
@@ -201,6 +277,17 @@ fi
 step "npm ci (this takes 1-2 min)"
 cd "$REPO_ROOT"
 npm ci
+
+# drizzle-kit + seed read DATABASE_URL from process env, not from
+# .env.local automatically. Source it before invoking either.
+step "Verifying DATABASE_URL is reachable"
+set -a; source "$REPO_ROOT/.env.local"; set +a
+if ! psql "$DATABASE_URL" -c '\conninfo' >/dev/null 2>&1; then
+  echo "Could not connect with DATABASE_URL ($DATABASE_URL)."
+  echo "Postgres should be running locally (sudo systemctl status postgresql)"
+  echo "and the role/db should exist (step 1b above)."
+  exit 1
+fi
 
 step "Running database migrations"
 npx drizzle-kit migrate

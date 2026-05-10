@@ -14,7 +14,7 @@ Two hearts: a **dashboard** (key metrics, PR curves, goal progress) and a **coac
 ## Tech Stack
 
 - Next.js 16 (App Router) + TypeScript
-- SQLite (WAL mode) via Drizzle ORM
+- Postgres via Drizzle ORM (`postgres-js` driver). Prod runs on AWS RDS; tests use `pglite` in-memory.
 - Tailwind CSS v4
 - Claude API (Haiku) via `@anthropic-ai/sdk`
 - Recharts + custom SVG components
@@ -25,9 +25,25 @@ Two hearts: a **dashboard** (key metrics, PR curves, goal progress) and a **coac
 npm install
 ```
 
+You need a Postgres 14+ instance the app can talk to. The fastest local
+option is the system package:
+
+```bash
+# macOS (Homebrew):
+brew install postgresql@16
+brew services start postgresql@16
+createdb delta_dev
+
+# Ubuntu / Debian:
+sudo apt install postgresql
+sudo -u postgres createuser -s "$USER"
+createdb delta_dev
+```
+
 Create `.env.local`:
 
 ```bash
+DATABASE_URL=postgresql://localhost:5432/delta_dev
 CLAUDE_API_KEY=sk-ant-...
 INGEST_API_KEY=<random-string-at-least-32-chars>
 ```
@@ -40,6 +56,9 @@ Initialize the database:
 npx drizzle-kit migrate
 npx tsx src/db/seed.ts
 ```
+
+`drizzle-kit migrate` applies every file in `drizzle/*.sql` in order against
+`DATABASE_URL`. Safe to re-run.
 
 Run the dev server:
 
@@ -137,14 +156,53 @@ trying to do so you can finish by hand and learn where it broke.
 |----------|----------|
 | Next.js production server (idle) | ~200 MB |
 | Next.js production server (serving requests) | ~400-600 MB |
+| Postgres (idle, default config) | ~150 MB |
 | `npm run build` peak | **~1.5-2 GB** |
 | Ubuntu + Nginx + journald baseline | ~300-400 MB |
 
-- **Recommended: t3.small (2 GB RAM, ~$15/mo)** — builds finish in under a minute, comfortable runtime headroom, no swap gymnastics. Start here.
-- **Budget: t3.micro (1 GB RAM, ~$7.60/mo) + 2 GB swap** — runtime is fine, builds OOM without swap. Free tier eligible for new AWS accounts (750h/month for 12 months). See "Build locally" escape hatch below.
+- **Recommended: t3.small (2 GB RAM, ~$15/mo)** — builds finish in under a minute, comfortable runtime + DB headroom, no swap gymnastics. Start here.
+- **Budget: t3.micro (1 GB RAM, ~$7.60/mo) + 2 GB swap** — runtime + DB fit, build OOMs without swap. Free tier eligible for new AWS accounts (750h/month for 12 months). Stop the app + Postgres during build if RAM gets tight, or build elsewhere and rsync `.next/` over.
 - **Do not use t3.nano (0.5 GB)** — can't complete `npm install`.
 
-**Storage.** Default 8 GB EBS fills up between `node_modules`, `.next`, apt packages, journald logs, and backups. Provision **20 GB gp3** (+$1.20/mo).
+**Storage.** Default 8 GB EBS fills up between `node_modules`, `.next`, apt
+packages, journald logs, and the Postgres data directory. Provision
+**20 GB gp3** (+$1.20/mo). At ~100 MB per user × 20 users that's a 2 GB DB
+ceiling — you'll have ~10 GB of headroom for everything else.
+
+**Postgres lives on the same box.** At this scale (low single-digit GB,
+~20 users, sole-author writes) RDS is overkill — $12/mo for a managed
+instance buys 5-minute PITR and a console-driven restore, but if
+"losing a day of fitness logs" isn't catastrophic, a nightly `pg_dump`
+from cron is enough. Roll your own — see section 11.
+
+We use **localhost-TCP with `trust` auth** (no password to manage). The
+`bootstrap.sh` script:
+
+1. Creates a Postgres role named `ubuntu` (matches the OS user the
+   systemd unit runs as) and a database `delta_prod`.
+2. Patches `pg_hba.conf` so connections to `127.0.0.1/32` and `::1/128`
+   skip authentication. Idempotent — only flips lines that are
+   currently `scram-sha-256`/`md5`/`password`.
+3. Reloads Postgres.
+
+This is safe at this scale because Postgres binds to `localhost` only by
+default (the cluster's `listen_addresses = 'localhost'` in
+`postgresql.conf`) and the EC2 security group keeps 5432 closed
+externally — so "anyone on localhost can connect without a password" is
+"the app process can connect without a password," because nothing else
+on this box runs as a user that needs DB access.
+
+After bootstrap, your `DATABASE_URL` looks like:
+
+```
+postgresql://ubuntu@localhost/delta_prod
+```
+
+(We tried `?host=/var/run/postgresql` for socket-peer auth instead, but
+postgres-js doesn't honor that query param the way libpq does — it
+parses the URL host as `localhost` and connects via TCP regardless.
+Trust-on-localhost gives us the same "no password" UX without fighting
+the driver.)
 
 **If you went with t3.micro, add swap before trying to build:**
 
@@ -158,7 +216,7 @@ free -h   # Confirm swap is active
 ```
 
 **Network + DNS:**
-- Security group inbound: **22 (SSH), 80 (HTTP), 443 (HTTPS). Block everything else.**
+- Security group inbound: **22 (SSH), 80 (HTTP), 443 (HTTPS). Block everything else.** Postgres binds to localhost only, so 5432 stays closed externally.
 - Assign an **Elastic IP** (so it survives stop/start — instance-type changes keep the EIP).
 - **Buy a domain** and set an A record pointing to the Elastic IP. HTTPS is required for:
   - Strava OAuth callback (when that integration lands)
@@ -173,11 +231,33 @@ free -h   # Confirm swap is active
 ```bash
 sudo apt update && sudo apt upgrade -y
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs nginx certbot python3-certbot-nginx git
+sudo apt install -y nodejs nginx certbot python3-certbot-nginx git postgresql
 node -v   # Should be v20.x or newer
+psql --version   # Should be 14+; Ubuntu 24.04 ships 16
+```
+
+**Create the app's Postgres role + database AND trust localhost-TCP**
+(one-shot; bootstrap.sh does all of this for you):
+
+```bash
+sudo -u postgres createuser -s ubuntu          # role ubuntu, superuser of this cluster
+sudo -u postgres createdb -O ubuntu delta_prod
+psql -d delta_prod -c '\conninfo'              # peer-auth via socket — sanity check
+
+# Trust localhost-TCP so postgres-js (the app's driver) can connect
+# without a password. Postgres binds to localhost only by default.
+PG_HBA="$(sudo -u postgres psql -tAc 'SHOW hba_file')"
+sudo sed -i.bak -E \
+  -e 's|(^host\s+all\s+all\s+127\.0\.0\.1/32\s+)(scram-sha-256\|md5\|password)|\1trust|' \
+  -e 's|(^host\s+all\s+all\s+::1/128\s+)(scram-sha-256\|md5\|password)|\1trust|' \
+  "$PG_HBA"
+sudo systemctl reload postgresql
 ```
 
 ### 3. Clone, install, migrate, seed, build
+
+`.env.local` (next section) MUST exist with `DATABASE_URL` before the
+migrate step — drizzle-kit reads it via `dotenv` at startup.
 
 ```bash
 sudo mkdir -p /opt/delta2 && sudo chown ubuntu:ubuntu /opt/delta2
@@ -185,32 +265,77 @@ cd /opt
 git clone git@github.com:gdmen/delta_2.git delta2   # SSH form if the repo is private and you forwarded your key.
                                                     # Use https://github.com/gdmen/delta_2.git if public or no agent.
 cd delta2
-npm ci              # Use 'ci' in prod, not 'install' — respects package-lock.json exactly
-npx drizzle-kit migrate        # Creates/updates delta2.db schema
-npx tsx src/db/seed.ts         # Seeds sports + metric types (idempotent)
-npm run build                  # Production build to .next/
+npm ci                          # 'ci', not 'install' — respects package-lock.json exactly
+npx drizzle-kit migrate         # Applies drizzle/*.sql in order against $DATABASE_URL
+npx tsx src/db/seed.ts          # Seeds sports + metric types (idempotent)
+npm run build                   # Production build to .next/
 ```
 
 **What each step does:**
 - `npm ci` — deterministic install from `package-lock.json`
-- `drizzle-kit migrate` — applies every file under `drizzle/*.sql` in order. Safe to re-run.
+- `drizzle-kit migrate` — applies every file under `drizzle/*.sql` in order against `DATABASE_URL`. Safe to re-run; the `__drizzle_migrations` table tracks which files have run.
 - `seed.ts` — inserts the 5 sports + all metric types using `ON CONFLICT DO NOTHING`. Safe to re-run; new metric types added over time will be inserted, existing ones untouched.
 - `npm run build` — Next.js production build. Must complete without errors.
+
+**Migrating an existing SQLite prod box to local Postgres** (one-shot
+cutover, only needed if you have a populated `delta2.db` from before the
+Postgres port):
+
+```bash
+# 1. From the OLD box, copy the live SQLite file onto the NEW box:
+scp ubuntu@<old-box>:/opt/delta2/delta2.db /opt/delta2/delta2.db
+
+# 2. Apply the schema to the empty Postgres database:
+cd /opt/delta2 && npx drizzle-kit migrate
+
+# 3. Bring better-sqlite3 in temporarily so the importer can read the .db file:
+npm install --save-dev better-sqlite3 @types/better-sqlite3
+
+# 4. Run the importer. It asserts the destination is empty before writing,
+#    so it cannot clobber a live DB. Inspect the row-count diff at the end —
+#    any non-zero delta means a transform dropped data.
+npx tsx scripts/sqlite-to-postgres-import.ts ./delta2.db
+
+# 5. Uninstall the one-shot dep (do NOT commit it):
+npm uninstall better-sqlite3 @types/better-sqlite3
+
+# 6. Move the SQLite file out of the working tree so it doesn't get rsync'd
+#    or accidentally committed.
+mv delta2.db /opt/delta2-archive/
+```
+
+The importer bumps every identity sequence to `MAX(id) + 1` after insert
+so the first post-cutover write doesn't collide with imported rows.
 
 ### 4. Environment variables
 
 Create `/opt/delta2/.env.local`:
 
 ```bash
+DATABASE_URL=postgresql://ubuntu@localhost/delta_prod
 CLAUDE_API_KEY=sk-ant-...
 INGEST_API_KEY=$(openssl rand -hex 32)
+```
+
+`DATABASE_URL` is plain TCP-localhost — no password, no `sslmode`.
+Postgres binds to localhost only by default and `pg_hba.conf` is patched
+to `trust` localhost connections (see section 2 / bootstrap step 1c).
+That gives every PG client (the app via postgres-js, drizzle-kit, the
+SQLite importer, ad-hoc `psql`) the same passwordless access without
+fighting any one driver's URL parser.
+
+Optional, for the Strava integration:
+
+```bash
+STRAVA_CLIENT_ID=<from strava.com/settings/api>
+STRAVA_CLIENT_SECRET=<from strava.com/settings/api>
 ```
 
 **Save the `INGEST_API_KEY` value** — you'll paste it into your iOS Shortcut's
 `Authorization: Bearer <key>` header. If you lose it, just rotate and reconfigure
 the Shortcut.
 
-Permissions should be 600 (only owner reads):
+Permissions should be 600 (only owner reads — the file holds the Claude key):
 
 ```bash
 chmod 600 /opt/delta2/.env.local
@@ -337,17 +462,17 @@ cd /opt/delta2
 ./scripts/deploy.sh
 ```
 
-It does the sequence below in one go, with the service stopped around
-the DB steps so `drizzle-kit migrate` doesn't contend with the running
-better-sqlite3 connection for the WAL write lock (observed in prod:
-that lock contention causes `migrate` to hang silently):
+It does the sequence below in one go. With the database on RDS we no longer
+need to stop the app to run migrations (the old WAL-lock-contention reason
+went away with SQLite); but we do stop briefly around the build to free RAM
+on small instances and avoid serving half-built bundles:
 
 ```bash
 git fetch && git reset --hard origin/main
 npm ci
-sudo systemctl stop delta2
-timeout 60 npx drizzle-kit migrate
+timeout 60 npx drizzle-kit migrate     # safe to run while the app is up
 timeout 60 npx tsx src/db/seed.ts
+sudo systemctl stop delta2             # frees ~400 MB for the build on t3.micro
 npm run build
 sudo systemctl start delta2
 ```
@@ -369,9 +494,12 @@ sudo journalctl -u delta2 -n 200 --no-pager
 sudo tail -f /var/log/nginx/access.log
 sudo tail -f /var/log/nginx/error.log
 
-# SQLite state:
-cd /opt/delta2 && sqlite3 delta2.db ".tables"
-sqlite3 delta2.db "SELECT COUNT(*) FROM metrics;"
+# Postgres state:
+psql -d delta_prod -c '\dt'                              # list tables
+psql -d delta_prod -c 'SELECT COUNT(*) FROM metrics;'    # row count
+psql -d delta_prod -c 'SELECT * FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5;'   # what's been applied
+sudo systemctl status postgresql                          # is the DB running at all
+du -sh /var/lib/postgresql/16/main                        # on-disk size (check vs your 20 GB EBS)
 ```
 
 **Common failures:**
@@ -379,15 +507,18 @@ sqlite3 delta2.db "SELECT COUNT(*) FROM metrics;"
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `502 Bad Gateway` | Node crashed or not started | `sudo systemctl status delta2` → `sudo journalctl -u delta2 -n 100` |
+| `DATABASE_URL is not set` on app start | Missing or unreadable `.env.local` | Check it exists, perms are 600, `EnvironmentFile=` in the systemd unit points at it |
+| App starts but errors on every request with `ECONNREFUSED` | Postgres not running | `sudo systemctl status postgresql` → `sudo systemctl start postgresql` |
+| `role "ubuntu" does not exist` | The Postgres role wasn't created | `sudo -u postgres createuser -s ubuntu` then `sudo -u postgres createdb -O ubuntu delta_prod` |
 | `413 Request Entity Too Large` on BodySpec upload | Missing `client_max_body_size` | Add `client_max_body_size 12M;` to Nginx, `sudo systemctl reload nginx` |
 | `401` from ingest endpoint | Wrong `INGEST_API_KEY` in header | Verify header matches `.env.local` — trailing newlines from paste break it |
 | `503` from `/api/coach/*` | `CLAUDE_API_KEY` unset or placeholder | Check `.env.local`, then `sudo systemctl restart delta2` (env is read at startup) |
 | Chat returns `"not enough data yet"` | Briefing refuses on empty context | Import some metrics first, or log a focus |
-| Migration errors on deploy | Conflicting schema state | Back up `delta2.db`, then `sqlite3 delta2.db ".dump" > backup.sql` and investigate |
+| Migration errors on deploy | A prior migration crashed mid-flight | `psql -d delta_prod -c 'SELECT * FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5;'`. Find the missing entry; if needed, manually run the offending SQL from `drizzle/` and insert the row |
 
 ### 10. Rollback
 
-Tag good commits. If a deploy breaks:
+Tag good commits. If a deploy breaks at the app layer:
 
 ```bash
 cd /opt/delta2
@@ -398,56 +529,37 @@ npm run build
 sudo systemctl restart delta2
 ```
 
-**Migration rollback**: Drizzle doesn't auto-generate down-migrations. If a
-bad migration corrupts the DB, restore from backup:
+**Migration rollback.** Drizzle doesn't auto-generate down-migrations. If
+a bad migration corrupts the DB, restore from your most recent backup
+(see section 11 — you wired this up yourself):
 
 ```bash
 sudo systemctl stop delta2
-cp /opt/delta2/backups/delta2-<date>.db /opt/delta2/delta2.db
+gunzip -c <your-backup>.sql.gz | psql -d delta_prod
+sudo systemctl start delta2
+```
+
+If the bad migration corrupted the schema (not just the data), drop and
+re-create the database first so the dump's `CREATE TABLE` statements
+don't collide:
+
+```bash
+sudo systemctl stop delta2
+sudo -u postgres dropdb delta_prod
+sudo -u postgres createdb -O ubuntu delta_prod
+gunzip -c <your-backup>.sql.gz | psql -d delta_prod
 sudo systemctl start delta2
 ```
 
 ### 11. Backups
 
-**Option A — Litestream (continuous replication, recommended):**
-
-```bash
-wget https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.deb
-sudo dpkg -i litestream-v0.3.13-linux-amd64.deb
-```
-
-Create `/etc/litestream.yml`:
-
-```yaml
-dbs:
-  - path: /opt/delta2/delta2.db
-    replicas:
-      - type: file
-        path: /opt/delta2/backups/litestream
-      # Or replicate to S3:
-      # - type: s3
-      #   bucket: your-bucket
-      #   path: delta2
-```
-
-Start:
-
-```bash
-sudo systemctl enable litestream
-sudo systemctl start litestream
-```
-
-**Option B — Simple cron snapshot:**
-
-```bash
-sudo tee /etc/cron.daily/delta2-backup > /dev/null <<'EOF'
-#!/bin/bash
-mkdir -p /opt/delta2/backups
-cp /opt/delta2/delta2.db /opt/delta2/backups/delta2-$(date +%Y%m%d).db
-find /opt/delta2/backups -name "delta2-*.db" -mtime +30 -delete
-EOF
-sudo chmod +x /etc/cron.daily/delta2-backup
-```
+Not wired up by this repo. Whatever fits your blast-radius tolerance —
+`pg_dump | gzip > file.sql.gz` from cron is the cheapest sane option;
+EBS snapshots cover the whole disk; managed offsite (rclone, restic, S3
+sync) if you want offsite. **Test the restore at least once before you
+need it** — restore a recent dump into a throwaway database, run
+`SELECT COUNT(*) FROM metrics;`, drop the test DB. If the round-trip
+works, your backups work.
 
 ---
 
@@ -459,14 +571,16 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] Root EBS volume is 20 GB gp3 (not the default 8 GB)
 - [ ] Elastic IP assigned, DNS A-record pointing at it
 - [ ] `dig delta.garymenezes.com +short` returns the EIP
-- [ ] System deps installed (Node 20+, Nginx, Certbot, Git)
+- [ ] System deps installed (Node 20+, Nginx, Certbot, Git, **postgresql**)
+- [ ] Postgres role `ubuntu` and database `delta_prod` exist (`psql -d delta_prod -c '\conninfo'` connects)
+- [ ] `pg_hba.conf` trusts `127.0.0.1/32` and `::1/128` (postgres-js connects via TCP-localhost — auth must not be `scram-sha-256`/`md5`/`password`)
 - [ ] Repo cloned to `/opt/delta2`, owned by `ubuntu`
+- [ ] `.env.local` exists at `/opt/delta2/.env.local` with `DATABASE_URL=postgresql://ubuntu@localhost/delta_prod`, real `CLAUDE_API_KEY`, real `INGEST_API_KEY`
+- [ ] `.env.local` permissions are 600
 - [ ] `npm ci` succeeded
-- [ ] `npx drizzle-kit migrate` succeeded (creates `delta2.db`)
+- [ ] `npx drizzle-kit migrate` succeeded (creates schema in `delta_prod`)
 - [ ] `npx tsx src/db/seed.ts` succeeded (seeds sports + metric types)
 - [ ] `npm run build` succeeded with no errors
-- [ ] `.env.local` exists at `/opt/delta2/.env.local` with real `CLAUDE_API_KEY` + real `INGEST_API_KEY`
-- [ ] `.env.local` permissions are 600
 - [ ] **Saved the `INGEST_API_KEY` somewhere you can copy-paste into the iOS Shortcut**
 - [ ] systemd service installed, enabled, and `active (running)`
 - [ ] `curl http://localhost:3000/` returns HTML from the server
@@ -475,7 +589,8 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] `sudo certbot --nginx` completed, `https://delta.garymenezes.com` serves over TLS
 - [ ] Browser smoke test: `/`, `/data-sources`, `/coach/chat` all load
 - [ ] API smoke tests (section 7) all return expected status codes
-- [ ] Backups configured (Litestream OR cron)
+- [ ] (Cutover from old SQLite box only) `scripts/sqlite-to-postgres-import.ts` ran clean with zero row-count deltas
+- [ ] Backups configured (see section 11 — at minimum a `pg_dump` cron, restore tested at least once)
 - [ ] A test DEXA PDF uploaded through `/data-sources/bodyspec` round-trips cleanly
 
 ## Manual Input

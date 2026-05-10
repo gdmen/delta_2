@@ -43,25 +43,31 @@ fi
 step "Installing dependencies"
 npm ci
 
-# Stop the app before touching SQLite. The running better-sqlite3 connection
-# holds a WAL write lock which makes drizzle-kit migrate hang silently —
-# observed in prod (2026-04-21) where a pending migration sat unapplied
-# across multiple deploys because of this. Restarting at the end brings
-# it back up regardless of whether it was running before.
-step "Stopping delta2 (releases SQLite write lock)"
-sudo systemctl stop delta2 || true
+# drizzle-kit reads DATABASE_URL from process.env; .env.local is loaded by
+# Next.js at runtime but NOT by drizzle-kit (different process, no Next).
+# Source it here so the migrate / seed steps below see it.
+if [[ -f "$REPO_ROOT/.env.local" ]]; then
+  set -a; source "$REPO_ROOT/.env.local"; set +a
+fi
 
-# If any DB step fails or hangs below, still bring the service back up.
+# Run migrations while the app is still up — Postgres handles concurrent
+# writes (no SQLite WAL-lock contention to worry about). Migrations are
+# additive in this project (no destructive schema changes mid-deploy)
+# so running against a live app is safe. We DO stop the service later
+# for the build to free RAM on small instances.
 trap 'echo; echo "!!! deploy aborted — starting delta2 anyway"; sudo systemctl start delta2 || true' ERR
 
 step "Running migrations"
-# Timeout guards against the same silent hang reappearing under some other
-# lock holder. 60s is generous for the tiny SQL-only migrations this project
-# writes; bump it if schema diffs grow.
+# Timeout cap so a misbehaving migration fails loud rather than hanging
+# the deploy. 60s is generous for the schema diffs this project writes;
+# bump it if migrations start touching big tables.
 timeout 60 npx drizzle-kit migrate
 
 step "Running seed (idempotent)"
 timeout 60 npx tsx src/db/seed.ts
+
+step "Stopping delta2 (frees RAM for the build on small instances)"
+sudo systemctl stop delta2 || true
 
 step "Clearing stale .next build artifacts"
 # Next 15+ generates `.next/types/validator.ts` (typed-routes table) during
