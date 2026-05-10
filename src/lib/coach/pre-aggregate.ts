@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { metrics, metricTypes, events, sports, workoutSets } from "@/db/schema";
 import { and, eq, gte, lte, desc } from "drizzle-orm";
 import { classifyLift, oconnorE1RM, type Lift } from "@/lib/strength-metrics";
+import { userScope } from "@/lib/auth/scope";
 
 export interface DailySummary {
   date: string;
@@ -15,8 +16,11 @@ export interface DailySummary {
  *
  * Returns one DailySummary per day in range, newest first.
  */
-export async function getDailySummaries(startDate: string, endDate: string): Promise<DailySummary[]> {
-  const allMetricTypes = await db.select().from(metricTypes);
+export async function getDailySummaries(startDate: string, endDate: string, userId: number): Promise<DailySummary[]> {
+  const allMetricTypes = await db
+    .select()
+    .from(metricTypes)
+    .where(userScope(userId).metricTypes);
   const mtById = new Map(allMetricTypes.map((mt) => [mt.id, mt]));
 
   // Pull raw metrics for the range (small dataset for a 7-14 day window).
@@ -27,7 +31,13 @@ export async function getDailySummaries(startDate: string, endDate: string): Pro
       recordedAt: metrics.recordedAt,
     })
     .from(metrics)
-    .where(and(gte(metrics.recordedAt, startDate), lte(metrics.recordedAt, `${endDate}T23:59:59Z`)));
+    .where(
+      and(
+        userScope(userId).metrics,
+        gte(metrics.recordedAt, startDate),
+        lte(metrics.recordedAt, `${endDate}T23:59:59Z`),
+      ),
+    );
 
   // Pull events for the range.
   const rawEvents = await db
@@ -39,7 +49,13 @@ export async function getDailySummaries(startDate: string, endDate: string): Pro
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .where(and(gte(events.startedAt, startDate), lte(events.startedAt, `${endDate}T23:59:59Z`)));
+    .where(
+      and(
+        userScope(userId).events,
+        gte(events.startedAt, startDate),
+        lte(events.startedAt, `${endDate}T23:59:59Z`),
+      ),
+    );
 
   // Group by date.
   const dayMap = new Map<string, DailySummary>();
@@ -161,9 +177,11 @@ export interface VolumeTrendSignal {
  * `lastPrDate: null` so the LLM knows to ignore them rather than reporting
  * a fake plateau.
  */
-export async function getPlateauSignals(): Promise<PlateauSignal[]> {
+export async function getPlateauSignals(userId: number): Promise<PlateauSignal[]> {
   // Pull every powerlifting set in history. Dataset is bounded (low thousands
   // for an active trainee), in-memory classification + max-tracking is fast.
+  // INHERIT scoping: workout_sets has no user_id; restrict via
+  // events.user_id and metric_types.user_id.
   const rows = await db
     .select({
       exerciseName: metricTypes.name,
@@ -175,7 +193,14 @@ export async function getPlateauSignals(): Promise<PlateauSignal[]> {
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(sports, eq(events.sportId, sports.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
-    .where(eq(sports.name, "powerlifting"))
+    .where(
+      and(
+        userScope(userId).events,
+        userScope(userId).metricTypes,
+        userScope(userId).sports,
+        eq(sports.name, "powerlifting"),
+      ),
+    )
     .orderBy(desc(events.startedAt));
 
   type LiftAcc = {
@@ -256,6 +281,7 @@ export async function getPlateauSignals(): Promise<PlateauSignal[]> {
  * trinity + bodyweight which are the most universally useful daily signals.
  */
 export async function getRollingAverages(
+  userId: number,
   metricNames: string[] = ["sleep_hours", "protein_g", "bodyweight", "hrv_ms"],
 ): Promise<RollingAverageSignal[]> {
   if (metricNames.length === 0) return [];
@@ -274,6 +300,8 @@ export async function getRollingAverages(
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
     .where(
       and(
+        userScope(userId).metrics,
+        userScope(userId).metricTypes,
         gte(metrics.recordedAt, longStart),
         lte(metrics.recordedAt, `${longEnd}T23:59:59Z`),
       ),
@@ -336,7 +364,7 @@ export async function getRollingAverages(
  * (less sleep, lower HRV, less protein) → POSITIVE score. So +1.0 means
  * "1 stddev below baseline on average", not "above."
  */
-export async function getRecoveryDebt(): Promise<RecoveryDebtSignal> {
+export async function getRecoveryDebt(userId: number): Promise<RecoveryDebtSignal> {
   const recoveryNames = Object.keys(RECOVERY_METRICS_WEIGHTS);
   const baselineStart = daysAgo(RECOVERY_BASELINE_DAYS);
   const baselineEnd = today();
@@ -352,6 +380,8 @@ export async function getRecoveryDebt(): Promise<RecoveryDebtSignal> {
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
     .where(
       and(
+        userScope(userId).metrics,
+        userScope(userId).metricTypes,
         gte(metrics.recordedAt, baselineStart),
         lte(metrics.recordedAt, `${baselineEnd}T23:59:59Z`),
       ),
@@ -426,12 +456,15 @@ export async function getRecoveryDebt(): Promise<RecoveryDebtSignal> {
  * Returns one signal per sport that has data in the long window.
  */
 export async function getVolumeTrends(
+  userId: number,
   sportNames?: string[],
 ): Promise<VolumeTrendSignal[]> {
   const baselineStart = daysAgo(90);
   const recentStart = daysAgo(ROLLING_LONG_DAYS);
 
   // Powerlifting tonnage from workout_sets.
+  // INHERIT scoping: workout_sets has no user_id; restrict via
+  // events.user_id (also restricts the sports join naturally).
   const setsRows = await db
     .select({
       sport: sports.name,
@@ -442,7 +475,7 @@ export async function getVolumeTrends(
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .where(gte(events.startedAt, baselineStart));
+    .where(and(userScope(userId).events, gte(events.startedAt, baselineStart)));
 
   // Other sports: duration_minutes on events.
   const eventRows = await db
@@ -453,7 +486,7 @@ export async function getVolumeTrends(
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
-    .where(gte(events.startedAt, baselineStart));
+    .where(and(userScope(userId).events, gte(events.startedAt, baselineStart)));
 
   type Bucket = { baseline: number; recent: number };
   const tonnage = new Map<string, Bucket>();

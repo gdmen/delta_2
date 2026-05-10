@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseBodySpecPdf } from "@/lib/bodyspec/parse";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/ingest/bodyspec-dexa/extract
@@ -13,12 +14,21 @@ import { parseBodySpecPdf } from "@/lib/bodyspec/parse";
  * and faster — and BodySpec's report layout has been stable across years
  * of scans. If they ever change the template, the parser fails loudly
  * (specific section returns null), preferable to silent hallucination.
+ *
+ * Auth: the proxy exempts /api/ingest/* (so the HAE bearer path works
+ * unauth), but THIS route doesn't take a bearer token — it's only called
+ * from the in-app /data-sources/bodyspec page after sign-in. Require a
+ * session explicitly so an anonymous attacker can't burn CPU on the
+ * regex parser via repeated 10 MB uploads.
  */
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  const { error } = await requireUserOr401();
+  if (error) return error;
+
   const formData = await request.formData().catch(() => null);
   if (!formData) {
     return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });

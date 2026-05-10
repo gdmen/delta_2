@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { importSources } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import type { ImportMapping } from "@/lib/import-mapping";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * GET  /api/import-sources         list all saved sources
@@ -10,7 +12,14 @@ import type { ImportMapping } from "@/lib/import-mapping";
  */
 
 export async function GET() {
-  const rows = await db.select().from(importSources).orderBy(asc(importSources.name));
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
+  const rows = await db
+    .select()
+    .from(importSources)
+    .where(userScope(user.id).importSources)
+    .orderBy(asc(importSources.name));
   return NextResponse.json(
     rows.map((r) => ({
       id: r.id,
@@ -23,6 +32,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: { name?: string; kind?: string; mapping?: ImportMapping };
   try {
     body = await request.json();
@@ -45,6 +57,7 @@ export async function POST(request: NextRequest) {
     const result = await db
       .insert(importSources)
       .values({
+        userId: user.id,
         name: body.name.trim(),
         kind: body.kind as (typeof KINDS)[number],
         mapping: JSON.stringify(body.mapping),

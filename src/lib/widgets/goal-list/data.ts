@@ -2,24 +2,26 @@ import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
+import { userScope } from "@/lib/auth/scope";
 import type { DataDep } from "../types";
 import type { GoalListConfig } from "./schema";
 import { dataKey, type GoalRow } from "./keys";
 
-export function goalListDataDeps(config: GoalListConfig): DataDep[] {
+export function goalListDataDeps(config: GoalListConfig, userId: number): DataDep[] {
   return [
     {
       key: dataKey(config),
-      fetch: () => fetchGoals(config),
+      fetch: () => fetchGoals(config, userId),
     },
   ];
 }
 
 
-async function fetchGoals(config: GoalListConfig): Promise<GoalRow[]> {
+async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalRow[]> {
+  const baseScope = and(userScope(userId).goals, ne(goals.status, "abandoned"));
   const where = config.sportFilter
-    ? and(ne(goals.status, "abandoned"), eq(sports.name, config.sportFilter))
-    : ne(goals.status, "abandoned");
+    ? and(baseScope, eq(sports.name, config.sportFilter))
+    : baseScope;
 
   const rows = await db
     .select({
@@ -47,7 +49,7 @@ async function fetchGoals(config: GoalListConfig): Promise<GoalRow[]> {
       deadline: g.deadline,
       sportName: g.sportName,
       sportColor: g.sportColor,
-      progress: await computeGoalProgress(g),
+      progress: await computeGoalProgress(g, userId),
     })),
   );
 }

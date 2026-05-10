@@ -18,6 +18,7 @@ import {
   buildMetricTypeMergePayload,
 } from "@/lib/merge-log/builder";
 import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/metric-types/merge
@@ -38,6 +39,10 @@ import type { MetricTypeMergedEntry } from "@/lib/merge-log/types";
  * query inside is awaited.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const userId = user.id;
+
   let body: {
     canonicalId?: number;
     mergeIds?: number[];
@@ -62,11 +67,16 @@ export async function POST(request: NextRequest) {
   }
 
   // Load all referenced types, validate existence, and enforce unit policy.
+  // Per the eng-review HIGH finding on merge endpoints: BOTH the existence
+  // check AND every inner mutation must include `WHERE user_id = ?`.
+  // Without the scope on the existence check, an attacker could pass
+  // mergeIds=[victim_metric_id] and the existence check would pass; the
+  // existence check alone is necessary-but-not-sufficient.
   const allIds = [canonicalId, ...mergeIds];
   const typeRows = await db
     .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
     .from(metricTypes)
-    .where(inArray(metricTypes.id, allIds));
+    .where(and(eq(metricTypes.userId, userId), inArray(metricTypes.id, allIds)));
   const byId = new Map(typeRows.map((r) => [r.id, r]));
   const canonical = byId.get(canonicalId);
   if (!canonical) {
@@ -130,13 +140,18 @@ export async function POST(request: NextRequest) {
         await buildMetricTypeMergedEntry(tx, canonicalId, mergeId, rescale),
       );
 
+      // Defense-in-depth: scope every retarget by user_id even though
+      // the existence check above already filtered mergeId to this
+      // user's catalog. Belt + suspenders so a future bug in the
+      // existence-check codepath can't cascade into cross-user
+      // mutation here.
       const metricsUpd = await tx
         .update(metrics)
         .set({
           metricTypeId: canonicalId,
           value: rescale === 1 ? metrics.value : sql`${metrics.value} * ${rescale}`,
         })
-        .where(eq(metrics.metricTypeId, mergeId))
+        .where(and(eq(metrics.userId, userId), eq(metrics.metricTypeId, mergeId)))
         .returning({ id: metrics.id });
 
       // event_metrics has a UNIQUE(event_id, metric_type_id); dedupe before re-pointing.
@@ -171,17 +186,27 @@ export async function POST(request: NextRequest) {
       // Postgres-specific: `LEAST()` / `GREATEST()` for two-argument min/max
       // (SQLite's `MIN(a, b)` / `MAX(a, b)` are scalar; Postgres reserves
       // `MIN`/`MAX` for aggregates only).
+      //
+      // ON CONFLICT target matches the new (user_id, date, metric_type_id)
+      // unique index added in 0001_multi_user. SELECT and existence check
+      // both scoped by user_id for the same defense-in-depth reason as the
+      // metrics update above.
       const summariesBefore = await tx
         .select({ id: dailySummaries.id })
         .from(dailySummaries)
-        .where(eq(dailySummaries.metricTypeId, mergeId));
+        .where(
+          and(
+            eq(dailySummaries.userId, userId),
+            eq(dailySummaries.metricTypeId, mergeId),
+          ),
+        );
       if (summariesBefore.length > 0) {
         await tx.execute(sql`
-          INSERT INTO daily_summaries (date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
-          SELECT date, ${canonicalId}, avg_value * ${rescale}, min_value * ${rescale}, max_value * ${rescale}, count, last_ingest_at
+          INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
+          SELECT user_id, date, ${canonicalId}, avg_value * ${rescale}, min_value * ${rescale}, max_value * ${rescale}, count, last_ingest_at
           FROM daily_summaries
-          WHERE metric_type_id = ${mergeId}
-          ON CONFLICT (date, metric_type_id) DO UPDATE SET
+          WHERE user_id = ${userId} AND metric_type_id = ${mergeId}
+          ON CONFLICT (user_id, date, metric_type_id) DO UPDATE SET
             count = daily_summaries.count + excluded.count,
             min_value = CASE
               WHEN daily_summaries.min_value IS NULL THEN excluded.min_value
@@ -208,13 +233,18 @@ export async function POST(request: NextRequest) {
         `);
         await tx
           .delete(dailySummaries)
-          .where(eq(dailySummaries.metricTypeId, mergeId));
+          .where(
+            and(
+              eq(dailySummaries.userId, userId),
+              eq(dailySummaries.metricTypeId, mergeId),
+            ),
+          );
       }
 
       await tx
         .update(goals)
         .set({ metricTypeId: canonicalId })
-        .where(eq(goals.metricTypeId, mergeId));
+        .where(and(eq(goals.userId, userId), eq(goals.metricTypeId, mergeId)));
 
       // goal_journal_entries can pin to a metric_type; retarget any pin at the
       // merged row to the canonical. ON DELETE SET NULL on the FK already
@@ -244,21 +274,32 @@ export async function POST(request: NextRequest) {
       await tx
         .update(metricTypeAliases)
         .set({ canonicalMetricTypeId: canonicalId })
-        .where(eq(metricTypeAliases.canonicalMetricTypeId, mergeId));
+        .where(
+          and(
+            eq(metricTypeAliases.userId, userId),
+            eq(metricTypeAliases.canonicalMetricTypeId, mergeId),
+          ),
+        );
 
       // Record the alias so future ingests route here directly. Goes
       // after the re-point so a no-op ON CONFLICT path is fine if
       // `merged.name` was already in the table from a prior merge.
       await tx
         .insert(metricTypeAliases)
-        .values({ alias: merged.name, canonicalMetricTypeId: canonicalId })
+        .values({
+          userId,
+          alias: merged.name,
+          canonicalMetricTypeId: canonicalId,
+        })
         .onConflictDoNothing();
 
       // All FK references (metrics, event_metrics, daily_summaries, goals,
       // focus_metric_links, workout_sets) were retargeted above, and aliases
       // pointing at this row were re-pointed (not cascade-deleted), so the
       // delete has nothing holding it back.
-      await tx.delete(metricTypes).where(eq(metricTypes.id, mergeId));
+      await tx
+        .delete(metricTypes)
+        .where(and(eq(metricTypes.userId, userId), eq(metricTypes.id, mergeId)));
 
       out.push({
         mergeId,
@@ -276,6 +317,7 @@ export async function POST(request: NextRequest) {
     const inserted = await tx
       .insert(mergeLog)
       .values({
+        userId,
         kind: "metric_type",
         canonicalId,
         canonicalName: canonical.name,

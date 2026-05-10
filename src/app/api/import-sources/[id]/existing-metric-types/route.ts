@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { importSources, metrics, metricTypes } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * GET /api/import-sources/[id]/existing-metric-types
@@ -15,11 +17,18 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-  const srcRows = await db.select().from(importSources).where(eq(importSources.id, id)).limit(1);
+  const srcRows = await db
+    .select()
+    .from(importSources)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
+    .limit(1);
   if (srcRows.length === 0) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -33,7 +42,13 @@ export async function GET(
     })
     .from(metrics)
     .innerJoin(metricTypes, eq(metrics.metricTypeId, metricTypes.id))
-    .where(eq(metrics.source, sourceTag))
+    .where(
+      and(
+        userScope(user.id).metrics,
+        userScope(user.id).metricTypes,
+        eq(metrics.source, sourceTag),
+      ),
+    )
     .groupBy(metricTypes.id);
 
   return NextResponse.json(

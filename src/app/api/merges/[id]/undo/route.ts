@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { mergeLog, metricTypes, sports } from "@/db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { MergeLogPayloadV1 } from "@/lib/merge-log/types";
 import { applyMergeUndo } from "@/lib/merge-log/applier";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/merges/:id/undo
@@ -13,7 +15,8 @@ import { applyMergeUndo } from "@/lib/merge-log/applier";
  *   1. CAS-flip merge_log.undone_at from NULL to now() inside a single
  *      UPDATE...RETURNING. If no row returned, the merge is already
  *      undone or someone else just claimed it — 409. This is the
- *      TOCTOU-safe replacement for read-then-check.
+ *      TOCTOU-safe replacement for read-then-check. Scoped by
+ *      mergeLog.userId so an attacker can't undo another user's merge.
  *   2. Pre-check that every metric_type / sport id the payload
  *      references still exists. Catches:
  *        - Chain merges (canonical was itself merged into something
@@ -35,18 +38,23 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (!Number.isFinite(id) || id <= 0) {
     return NextResponse.json({ error: "id must be a positive integer" }, { status: 400 });
   }
 
-  // Step 1: CAS-flip undone_at. If no row returned → already undone or
-  // not found.
+  // Step 1: CAS-flip undone_at. If no row returned → already undone, not
+  // found, or owned by another user (all surface as 404/409 below). The
+  // user_id filter is the security gate — you can't claim another user's
+  // merge for undo.
   const claimed = await db
     .update(mergeLog)
     .set({ undoneAt: new Date().toISOString() })
-    .where(sql`${mergeLog.id} = ${id} AND ${mergeLog.undoneAt} IS NULL`)
+    .where(sql`${mergeLog.id} = ${id} AND ${mergeLog.userId} = ${user.id} AND ${mergeLog.undoneAt} IS NULL`)
     .returning({
       id: mergeLog.id,
       kind: mergeLog.kind,
@@ -56,12 +64,14 @@ export async function POST(
     });
 
   if (claimed.length === 0) {
-    // Either id doesn't exist OR already undone. Distinguish so the
-    // user gets a useful error.
+    // Either id doesn't exist OR not owned OR already undone. Distinguish
+    // so the user gets a useful error. Owned-but-already-undone vs
+    // not-owned both look the same to the user (404) on purpose — no
+    // existence-leak.
     const existing = await db
       .select({ id: mergeLog.id, undoneAt: mergeLog.undoneAt })
       .from(mergeLog)
-      .where(eq(mergeLog.id, id))
+      .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)))
       .limit(1);
     if (existing.length === 0) {
       return NextResponse.json({ error: "merge not found" }, { status: 404 });
@@ -80,7 +90,10 @@ export async function POST(
     payload = JSON.parse(row.payload) as MergeLogPayloadV1;
   } catch (err) {
     // Roll back the claim — the row is corrupted, can't undo.
-    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+    await db
+      .update(mergeLog)
+      .set({ undoneAt: null })
+      .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
     return NextResponse.json(
       { error: `merge payload corrupted: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 },
@@ -88,7 +101,10 @@ export async function POST(
   }
 
   if (payload.v !== 1) {
-    await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+    await db
+      .update(mergeLog)
+      .set({ undoneAt: null })
+      .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
     return NextResponse.json(
       { error: `unsupported merge_log payload version: ${payload.v}` },
       { status: 500 },
@@ -98,15 +114,18 @@ export async function POST(
   // Step 2: pre-check that all referenced ids still exist (chain
   // detection + manual-delete detection). The merged ids must NOT
   // exist yet (we're about to re-insert them); the canonical id MUST
-  // exist (the rows we'll re-point reference it).
+  // exist (the rows we'll re-point reference it). All scoped by user_id.
   if (payload.kind === "metric_type") {
     const canonicalRow = await db
       .select({ id: metricTypes.id })
       .from(metricTypes)
-      .where(eq(metricTypes.id, payload.canonicalId))
+      .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, payload.canonicalId)))
       .limit(1);
     if (canonicalRow.length === 0) {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+      await db
+        .update(mergeLog)
+        .set({ undoneAt: null })
+        .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
       return NextResponse.json(
         {
           error:
@@ -120,9 +139,12 @@ export async function POST(
       const colliding = await db
         .select({ id: metricTypes.id })
         .from(metricTypes)
-        .where(inArray(metricTypes.id, mergedIds));
+        .where(and(userScope(user.id).metricTypes, inArray(metricTypes.id, mergedIds)));
       if (colliding.length > 0) {
-        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+        await db
+          .update(mergeLog)
+          .set({ undoneAt: null })
+          .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
         return NextResponse.json(
           {
             error:
@@ -136,10 +158,13 @@ export async function POST(
     const canonicalRow = await db
       .select({ id: sports.id })
       .from(sports)
-      .where(eq(sports.id, payload.canonicalId))
+      .where(and(userScope(user.id).sports, eq(sports.id, payload.canonicalId)))
       .limit(1);
     if (canonicalRow.length === 0) {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+      await db
+        .update(mergeLog)
+        .set({ undoneAt: null })
+        .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
       return NextResponse.json(
         {
           error:
@@ -153,9 +178,12 @@ export async function POST(
       const colliding = await db
         .select({ id: sports.id })
         .from(sports)
-        .where(inArray(sports.id, mergedIds));
+        .where(and(userScope(user.id).sports, inArray(sports.id, mergedIds)));
       if (colliding.length > 0) {
-        await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+        await db
+          .update(mergeLog)
+          .set({ undoneAt: null })
+          .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
         return NextResponse.json(
           {
             error:
@@ -181,7 +209,10 @@ export async function POST(
     // The user can re-run undo and it'll 409 cleanly; manual SQL fix
     // is the recovery path for that rare failure.
     try {
-      await db.update(mergeLog).set({ undoneAt: null }).where(eq(mergeLog.id, id));
+      await db
+        .update(mergeLog)
+        .set({ undoneAt: null })
+        .where(and(userScope(user.id).mergeLog, eq(mergeLog.id, id)));
     } catch {
       // swallow — already in error path
     }

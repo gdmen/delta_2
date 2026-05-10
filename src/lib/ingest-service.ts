@@ -18,6 +18,8 @@ export interface IngestResult {
 }
 
 export interface MetricInput {
+  /** Per-user scoping. Inserted on the row and used to scope dedupe / summary writes. */
+  userId: number;
   metricTypeId: number;
   value: number;
   recordedAt: string;
@@ -30,6 +32,8 @@ export interface MetricInput {
 }
 
 export interface EventInput {
+  /** Per-user scoping. Inserted on the row and used to scope dedupe. */
+  userId: number;
   sportId: number;
   type: string;
   durationMinutes?: number | null;
@@ -58,18 +62,19 @@ export async function upsertMetric(
   if (input.sourceId) {
     const existing = await db.select({ id: metrics.id })
       .from(metrics)
-      .where(eq(metrics.sourceId, input.sourceId))
+      .where(and(eq(metrics.userId, input.userId), eq(metrics.sourceId, input.sourceId)))
       .limit(1);
 
     if (existing.length > 0) {
       await db.update(metrics)
         .set({ value: input.value, recordedAt: input.recordedAt, alias: input.alias })
-        .where(eq(metrics.sourceId, input.sourceId));
+        .where(and(eq(metrics.userId, input.userId), eq(metrics.sourceId, input.sourceId)));
       return "skipped";
     }
   }
 
   await db.insert(metrics).values({
+    userId: input.userId,
     metricTypeId: input.metricTypeId,
     value: input.value,
     recordedAt: input.recordedAt,
@@ -78,7 +83,7 @@ export async function upsertMetric(
     alias: input.alias,
   });
 
-  await invalidateDailySummary(input.metricTypeId, input.recordedAt, db);
+  await invalidateDailySummary(input.metricTypeId, input.recordedAt, db, input.userId);
   return "accepted";
 }
 
@@ -89,6 +94,7 @@ export async function upsertMetric(
  * source_id wins when present, natural key handles manual rows.
  */
 export async function resolveEventId(input: {
+  userId: number;
   sourceId: string;
   startedAt: string;
   sportId: number;
@@ -98,7 +104,7 @@ export async function resolveEventId(input: {
     const bySourceId = await db
       .select({ id: events.id })
       .from(events)
-      .where(eq(events.sourceId, input.sourceId))
+      .where(and(eq(events.userId, input.userId), eq(events.sourceId, input.sourceId)))
       .limit(1);
     if (bySourceId[0]) return bySourceId[0].id;
   }
@@ -107,6 +113,7 @@ export async function resolveEventId(input: {
     .from(events)
     .where(
       and(
+        eq(events.userId, input.userId),
         eq(events.startedAt, input.startedAt),
         eq(events.sportId, input.sportId),
         eq(events.type, input.type),
@@ -120,7 +127,7 @@ export async function upsertEvent(input: EventInput): Promise<{ status: "accepte
   if (input.sourceId) {
     const existing = await db.select({ id: events.id })
       .from(events)
-      .where(eq(events.sourceId, input.sourceId))
+      .where(and(eq(events.userId, input.userId), eq(events.sourceId, input.sourceId)))
       .limit(1);
 
     if (existing.length > 0) {
@@ -129,6 +136,7 @@ export async function upsertEvent(input: EventInput): Promise<{ status: "accepte
   }
 
   const result = await db.insert(events).values({
+    userId: input.userId,
     sportId: input.sportId,
     type: input.type,
     durationMinutes: input.durationMinutes,
@@ -162,6 +170,9 @@ export async function insertWorkoutSets(eventId: number, sets: WorkoutSetInput[]
  * Upsert a single per-event metric (distance, calories, avg HR, etc.) keyed
  * by (eventId, metricTypeId). Re-importing the same event rewrites the
  * value rather than appending a duplicate row.
+ *
+ * eventId is the parent (already scoped to a user); event_metrics is an
+ * INHERIT table with no user_id column of its own.
  */
 export async function upsertEventMetric(
   eventId: number,
@@ -195,6 +206,9 @@ export async function upsertEventMetric(
  * Used by the CSV importer so re-importing the same file doesn't duplicate
  * rows. There's no unique index on that tuple, so we look up first and
  * update-or-insert application-side.
+ *
+ * eventId is the parent (already scoped to a user); workout_sets is an
+ * INHERIT table with no user_id column.
  */
 export async function upsertWorkoutSet(
   eventId: number,
@@ -257,18 +271,26 @@ async function invalidateDailySummary(
   metricTypeId: number,
   recordedAt: string,
   conn: DbLike = db,
+  userId: number,
 ) {
   const db = conn;
   const date = recordedAt.slice(0, 10);
   const now = new Date().toISOString();
 
-  await db.insert(dailySummaries).values({
-    date,
-    metricTypeId,
-    count: 0,
-    lastIngestAt: now,
-  }).onConflictDoUpdate({
-    target: [dailySummaries.date, dailySummaries.metricTypeId],
-    set: { lastIngestAt: now },
-  });
+  // ON CONFLICT must target the actual unique index. After the multi-
+  // user migration the index became (user_id, date, metric_type_id) so
+  // the conflict target list now includes user_id.
+  await db
+    .insert(dailySummaries)
+    .values({
+      userId,
+      date,
+      metricTypeId,
+      count: 0,
+      lastIngestAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [dailySummaries.userId, dailySummaries.date, dailySummaries.metricTypeId],
+      set: { lastIngestAt: now },
+    });
 }

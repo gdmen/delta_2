@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { dashboards } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { updateDashboardInput } from "@/lib/dashboards/validation";
 import { readJson } from "@/lib/dashboards/request";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface Ctx {
   params: Promise<{ id: string }>;
@@ -15,6 +17,9 @@ function parseId(raw: string): number | null {
 }
 
 export async function PATCH(req: Request, { params }: Ctx) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idRaw } = await params;
   const id = parseId(idRaw);
   if (id === null) return NextResponse.json({ error: "Invalid id." }, { status: 400 });
@@ -29,7 +34,11 @@ export async function PATCH(req: Request, { params }: Ctx) {
     );
   }
 
-  const existing = await db.select().from(dashboards).where(eq(dashboards.id, id)).limit(1);
+  const existing = await db
+    .select()
+    .from(dashboards)
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, id)))
+    .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "Dashboard not found." }, { status: 404 });
   }
@@ -50,9 +59,9 @@ export async function PATCH(req: Request, { params }: Ctx) {
       .update(dashboards)
       .set({
         ...parsed.data,
-        updatedAt: sql`(datetime('now'))`,
+        updatedAt: new Date().toISOString(),
       })
-      .where(eq(dashboards.id, id))
+      .where(and(userScope(user.id).dashboards, eq(dashboards.id, id)))
       .returning();
     return NextResponse.json({ dashboard: updated[0] });
   } catch (err) {
@@ -67,11 +76,18 @@ export async function PATCH(req: Request, { params }: Ctx) {
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idRaw } = await params;
   const id = parseId(idRaw);
   if (id === null) return NextResponse.json({ error: "Invalid id." }, { status: 400 });
 
-  const existing = await db.select().from(dashboards).where(eq(dashboards.id, id)).limit(1);
+  const existing = await db
+    .select()
+    .from(dashboards)
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, id)))
+    .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "Dashboard not found." }, { status: 404 });
   }
@@ -82,6 +98,8 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     );
   }
 
-  await db.delete(dashboards).where(eq(dashboards.id, id));
+  await db
+    .delete(dashboards)
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, id)));
   return NextResponse.json({ ok: true });
 }

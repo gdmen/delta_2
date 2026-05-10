@@ -3,12 +3,15 @@ import { db } from "@/db";
 import {
   dailySummaries,
   eventMetrics,
+  events,
   goals,
   metricTypes,
   metrics,
   workoutSets,
 } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface UpdateMetricTypeBody {
   /** Target value. Pass null to clear (== "no target"). */
@@ -28,6 +31,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (!Number.isFinite(id)) {
@@ -58,7 +64,11 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  const result = await db.update(metricTypes).set(updates).where(eq(metricTypes.id, id)).returning({ id: metricTypes.id });
+  const result = await db
+    .update(metricTypes)
+    .set(updates)
+    .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, id)))
+    .returning({ id: metricTypes.id });
   if (result.length === 0) {
     return NextResponse.json({ error: "metric_type not found" }, { status: 404 });
   }
@@ -83,17 +93,49 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   }
 
+  // event_metrics + workout_sets are INHERIT tables (no user_id column);
+  // scope by joining through events.user_id.
+  const ownedEventIds = db
+    .select({ id: events.id })
+    .from(events)
+    .where(userScope(user.id).events);
+
   const [m, ws, em, g] = await Promise.all([
-    db.select({ c: sql<number>`count(*)` }).from(metrics).where(eq(metrics.metricTypeId, id)),
-    db.select({ c: sql<number>`count(*)` }).from(workoutSets).where(eq(workoutSets.exerciseMetricTypeId, id)),
-    db.select({ c: sql<number>`count(*)` }).from(eventMetrics).where(eq(eventMetrics.metricTypeId, id)),
-    db.select({ c: sql<number>`count(*)` }).from(goals).where(eq(goals.metricTypeId, id)),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(metrics)
+      .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, id))),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(workoutSets)
+      .where(
+        and(
+          eq(workoutSets.exerciseMetricTypeId, id),
+          inArray(workoutSets.eventId, ownedEventIds),
+        ),
+      ),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(eventMetrics)
+      .where(
+        and(
+          eq(eventMetrics.metricTypeId, id),
+          inArray(eventMetrics.eventId, ownedEventIds),
+        ),
+      ),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(goals)
+      .where(and(userScope(user.id).goals, eq(goals.metricTypeId, id))),
   ]);
   const counts = {
     metrics: Number(m[0]?.c ?? 0),
@@ -116,11 +158,15 @@ export async function DELETE(
   // checked above — those rows are derived/regenerable. Clean them up
   // as part of the delete so the FK doesn't 500 us when the user
   // deletes a metric_type that has summaries but no live metrics.
-  await db.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, id));
+  await db
+    .delete(dailySummaries)
+    .where(
+      and(userScope(user.id).dailySummaries, eq(dailySummaries.metricTypeId, id)),
+    );
 
   const result = await db
     .delete(metricTypes)
-    .where(eq(metricTypes.id, id))
+    .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, id)))
     .returning({ id: metricTypes.id });
   if (result.length === 0) {
     return NextResponse.json({ error: "metric_type not found" }, { status: 404 });

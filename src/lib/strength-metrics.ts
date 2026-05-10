@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { workoutSets, events, sports, metricTypes } from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { userScope } from "./auth/scope";
 import {
   BIG_THREE_DEFAULT_NAMES,
   type Lift,
@@ -107,7 +108,8 @@ const FALLBACK_COLOR = "#737373"; // neutral-500 — used when sport row missing
  * sport_id; falls back to neutral when no match has a sport linked.
  */
 export async function getBigThreeStats(
-  names: LiftNames = BIG_THREE_DEFAULT_NAMES,
+  names: LiftNames,
+  userId: number,
 ): Promise<BigThreeStats> {
   const targetNames = [names.squat, names.bench, names.deadlift]
     .map((s) => s.trim())
@@ -116,6 +118,8 @@ export async function getBigThreeStats(
     return { color: FALLBACK_COLOR, lifts: emptyStats() };
   }
 
+  // INHERIT scoping: workout_sets has no user_id; restrict via the join
+  // through events.user_id. metric_types is owned, scoped on its userId.
   const rows = await db
     .select({
       exerciseName: metricTypes.name,
@@ -132,10 +136,16 @@ export async function getBigThreeStats(
     // Case-insensitive match on the configured exercise names. SQLite's
     // built-in NOCASE collation matches lower-cased input regardless of
     // the stored row's case.
-    .where(sql`LOWER(${metricTypes.name}) IN (${sql.join(
-      targetNames.map((n) => sql`${n.toLowerCase()}`),
-      sql`, `,
-    )})`)
+    .where(
+      and(
+        userScope(userId).events,
+        userScope(userId).metricTypes,
+        sql`LOWER(${metricTypes.name}) IN (${sql.join(
+          targetNames.map((n) => sql`${n.toLowerCase()}`),
+          sql`, `,
+        )})`,
+      ),
+    )
     .orderBy(desc(events.startedAt), desc(workoutSets.setNumber));
 
   const byLift: Record<Lift, typeof rows> = { squat: [], bench: [], deadlift: [] };
@@ -154,7 +164,7 @@ export async function getBigThreeStats(
     const sportRow = await db
       .select({ color: sports.color })
       .from(sports)
-      .where(eq(sports.id, firstSportId))
+      .where(and(userScope(userId).sports, eq(sports.id, firstSportId)))
       .limit(1);
     if (sportRow[0]) color = sportRow[0].color;
   }

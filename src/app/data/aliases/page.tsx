@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { metricTypeAliases, metricTypes } from "@/db/schema";
 import { asc, eq } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ export const dynamic = "force-dynamic";
  * deep-links to /data/merges filtered to that alias.
  */
 export default async function AliasesPage() {
+  const user = await requireUserOrSignin();
   const rows = await db
     .select({
       alias: metricTypeAliases.alias,
@@ -25,6 +28,7 @@ export default async function AliasesPage() {
     })
     .from(metricTypeAliases)
     .innerJoin(metricTypes, eq(metricTypeAliases.canonicalMetricTypeId, metricTypes.id))
+    .where(userScope(user.id).metricTypeAliases)
     .orderBy(asc(metricTypeAliases.alias));
 
   return (

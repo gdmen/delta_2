@@ -65,7 +65,7 @@ async function loadSqlite(path: string): Promise<SqliteDb> {
   let Database: typeof import("better-sqlite3");
   try {
     Database = (await import("better-sqlite3")).default as unknown as typeof import("better-sqlite3");
-  } catch (err) {
+  } catch {
     throw new Error(
       "better-sqlite3 not installed. Run: npm install --save-dev better-sqlite3 @types/better-sqlite3",
     );

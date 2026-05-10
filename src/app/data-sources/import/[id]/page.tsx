@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { importSources } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { SourceDataBrowser } from "@/components/source-data-browser";
 import { SourceSyncBehavior } from "@/components/source-sync-behavior";
 import { WipeSourceButton } from "@/components/wipe-source-button";
 import { DeleteSourceButton } from "@/components/delete-source-button";
 import { ImportClient } from "./import-client";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +18,16 @@ export default async function ImportSourcePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const user = await requireUserOrSignin();
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) notFound();
 
-  const rows = await db.select().from(importSources).where(eq(importSources.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(importSources)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
+    .limit(1);
   if (rows.length === 0) notFound();
   const src = rows[0];
 

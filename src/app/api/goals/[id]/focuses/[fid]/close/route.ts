@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { focuses, goalJournalEntries } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { focuses, goalJournalEntries, goals } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { generateCloseFocusVerdict } from "@/lib/coach/close-focus-verdict";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/goals/:id/focuses/:fid/close
@@ -27,6 +29,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; fid: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr, fid: fidStr } = await params;
   const goalId = Number(idStr);
   const focusId = Number(fidStr);
@@ -37,11 +42,22 @@ export async function POST(
     return NextResponse.json({ error: "invalid focus id" }, { status: 400 });
   }
 
-  // Confirm the focus exists on this goal before doing any work.
+  // Confirm the focus exists on this goal AND that the goal belongs to this
+  // user. focuses is INHERIT — scope through goals.user_id.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(user.id).goals);
   const existing = await db
     .select({ id: focuses.id, status: focuses.status })
     .from(focuses)
-    .where(and(eq(focuses.id, focusId), eq(focuses.goalId, goalId)))
+    .where(
+      and(
+        eq(focuses.id, focusId),
+        eq(focuses.goalId, goalId),
+        inArray(focuses.goalId, ownedGoalIds),
+      ),
+    )
     .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "focus not found on this goal" }, { status: 404 });
@@ -64,7 +80,7 @@ export async function POST(
   await db
     .update(focuses)
     .set({ status, endDate: closeDate })
-    .where(eq(focuses.id, focusId));
+    .where(and(eq(focuses.id, focusId), inArray(focuses.goalId, ownedGoalIds)));
 
   // STEP 2: best-effort verdict generation. Pass the just-closed focus to
   // the verdict generator (it'll re-read the focus row to pick up the new
@@ -72,6 +88,7 @@ export async function POST(
   const verdictResult = await generateCloseFocusVerdict({
     goalId,
     focusId,
+    userId: user.id,
   });
 
   if (!verdictResult.ok) {

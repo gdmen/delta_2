@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { metrics } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface UpdateMetricBody {
   value?: number;
@@ -12,6 +14,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -40,7 +45,10 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  await db.update(metrics).set(updates).where(eq(metrics.id, id));
+  await db
+    .update(metrics)
+    .set(updates)
+    .where(and(userScope(user.id).metrics, eq(metrics.id, id)));
   return NextResponse.json({ ok: true });
 }
 
@@ -48,9 +56,14 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  await db.delete(metrics).where(eq(metrics.id, id));
+  await db
+    .delete(metrics)
+    .where(and(userScope(user.id).metrics, eq(metrics.id, id)));
   return NextResponse.json({ ok: true });
 }

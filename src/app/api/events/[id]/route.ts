@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { events } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { events, sports } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface UpdateEventBody {
   sportId?: number;
@@ -15,6 +17,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -30,6 +35,18 @@ export async function PATCH(
   if (body.sportId !== undefined) {
     if (typeof body.sportId !== "number") {
       return NextResponse.json({ error: "sportId must be a number" }, { status: 400 });
+    }
+    // FK injection guard — same shape as POST /api/events. Without
+    // this check, a PATCH could rewrite the event to point at a
+    // foreign owner's sport, which would then surface in the JOIN
+    // on the listing page.
+    const ownsSport = await db
+      .select({ id: sports.id })
+      .from(sports)
+      .where(and(eq(sports.id, body.sportId), userScope(user.id).sports))
+      .limit(1);
+    if (ownsSport.length === 0) {
+      return NextResponse.json({ error: "sportId not found" }, { status: 400 });
     }
     updates.sportId = body.sportId;
   }
@@ -56,7 +73,10 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  await db.update(events).set(updates).where(eq(events.id, id));
+  await db
+    .update(events)
+    .set(updates)
+    .where(and(userScope(user.id).events, eq(events.id, id)));
   return NextResponse.json({ ok: true });
 }
 
@@ -64,10 +84,15 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   // Cascades to workout_sets and event_metrics via FK ON DELETE CASCADE.
-  await db.delete(events).where(eq(events.id, id));
+  await db
+    .delete(events)
+    .where(and(userScope(user.id).events, eq(events.id, id)));
   return NextResponse.json({ ok: true });
 }

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { dashboards, dashboardWidgets } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { updateWidgetInput, serializeConfig } from "@/lib/dashboards/validation";
 import { lookupWidget } from "@/lib/widgets/registry";
 import { readJson } from "@/lib/dashboards/request";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 interface Ctx {
   params: Promise<{ id: string; wid: string }>;
@@ -16,6 +18,9 @@ function parseId(raw: string): number | null {
 }
 
 export async function PATCH(req: Request, { params }: Ctx) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idRaw, wid: widRaw } = await params;
   const dashboardId = parseId(idRaw);
   const widgetId = parseId(widRaw);
@@ -34,10 +39,21 @@ export async function PATCH(req: Request, { params }: Ctx) {
   }
   const input = parsed.data;
 
+  // dashboard_widgets is INHERIT — scope through this user's dashboards.
+  const ownedDashboardIds = db
+    .select({ id: dashboards.id })
+    .from(dashboards)
+    .where(userScope(user.id).dashboards);
   const existing = await db
     .select()
     .from(dashboardWidgets)
-    .where(and(eq(dashboardWidgets.id, widgetId), eq(dashboardWidgets.dashboardId, dashboardId)))
+    .where(
+      and(
+        eq(dashboardWidgets.id, widgetId),
+        eq(dashboardWidgets.dashboardId, dashboardId),
+        inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
+      ),
+    )
     .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "Widget not found." }, { status: 404 });
@@ -81,18 +97,26 @@ export async function PATCH(req: Request, { params }: Ctx) {
   const updated = await db
     .update(dashboardWidgets)
     .set(patch)
-    .where(eq(dashboardWidgets.id, widgetId))
+    .where(
+      and(
+        eq(dashboardWidgets.id, widgetId),
+        inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
+      ),
+    )
     .returning();
 
   await db
     .update(dashboards)
-    .set({ updatedAt: sql`(datetime('now'))` })
-    .where(eq(dashboards.id, dashboardId));
+    .set({ updatedAt: new Date().toISOString() })
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ widget: updated[0] });
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idRaw, wid: widRaw } = await params;
   const dashboardId = parseId(idRaw);
   const widgetId = parseId(widRaw);
@@ -100,20 +124,37 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     return NextResponse.json({ error: "Invalid id." }, { status: 400 });
   }
 
+  const ownedDashboardIds = db
+    .select({ id: dashboards.id })
+    .from(dashboards)
+    .where(userScope(user.id).dashboards);
   const existing = await db
     .select({ id: dashboardWidgets.id })
     .from(dashboardWidgets)
-    .where(and(eq(dashboardWidgets.id, widgetId), eq(dashboardWidgets.dashboardId, dashboardId)))
+    .where(
+      and(
+        eq(dashboardWidgets.id, widgetId),
+        eq(dashboardWidgets.dashboardId, dashboardId),
+        inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
+      ),
+    )
     .limit(1);
   if (existing.length === 0) {
     return NextResponse.json({ error: "Widget not found." }, { status: 404 });
   }
 
-  await db.delete(dashboardWidgets).where(eq(dashboardWidgets.id, widgetId));
+  await db
+    .delete(dashboardWidgets)
+    .where(
+      and(
+        eq(dashboardWidgets.id, widgetId),
+        inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
+      ),
+    );
   await db
     .update(dashboards)
-    .set({ updatedAt: sql`(datetime('now'))` })
-    .where(eq(dashboards.id, dashboardId));
+    .set({ updatedAt: new Date().toISOString() })
+    .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ ok: true });
 }

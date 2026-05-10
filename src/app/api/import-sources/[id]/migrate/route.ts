@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { importSources, metrics, metricTypes } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/import-sources/[id]/migrate
@@ -17,11 +19,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-  const srcRows = await db.select().from(importSources).where(eq(importSources.id, id)).limit(1);
+  const srcRows = await db
+    .select()
+    .from(importSources)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
+    .limit(1);
   if (srcRows.length === 0) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
@@ -41,12 +50,16 @@ export async function POST(
     // Resolve "to" type: exact match first. Create if missing (no rows to
     // inherit unit/frequency from here, use reasonable defaults).
     let toRow = (
-      await db.select({ id: metricTypes.id }).from(metricTypes).where(eq(metricTypes.name, r.to)).limit(1)
+      await db
+        .select({ id: metricTypes.id })
+        .from(metricTypes)
+        .where(and(userScope(user.id).metricTypes, eq(metricTypes.name, r.to)))
+        .limit(1)
     )[0];
     if (!toRow) {
       const ins = await db
         .insert(metricTypes)
-        .values({ name: r.to, unit: "", frequencyHint: "daily" })
+        .values({ userId: user.id, name: r.to, unit: "", frequencyHint: "daily" })
         .returning({ id: metricTypes.id });
       toRow = ins[0];
     }
@@ -55,7 +68,8 @@ export async function POST(
     // variant metric-resolver falls back to.
     const candidates = await db
       .select({ id: metricTypes.id, name: metricTypes.name })
-      .from(metricTypes);
+      .from(metricTypes)
+      .where(userScope(user.id).metricTypes);
     const fromEntries = candidates.filter(
       (c) => c.name === r.from || c.name === `${sourceTag}:${r.from}`
     );
@@ -67,7 +81,13 @@ export async function POST(
       const updated = await db
         .update(metrics)
         .set({ metricTypeId: toRow.id })
-        .where(and(eq(metrics.source, sourceTag), eq(metrics.metricTypeId, fe.id)))
+        .where(
+          and(
+            userScope(user.id).metrics,
+            eq(metrics.source, sourceTag),
+            eq(metrics.metricTypeId, fe.id),
+          ),
+        )
         .returning({ id: metrics.id });
       moved += updated.length;
 
@@ -78,9 +98,11 @@ export async function POST(
         const remaining = await db
           .select({ c: sql<number>`count(*)` })
           .from(metrics)
-          .where(eq(metrics.metricTypeId, fe.id));
+          .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, fe.id)));
         if (Number(remaining[0]?.c ?? 0) === 0) {
-          await db.delete(metricTypes).where(eq(metricTypes.id, fe.id));
+          await db
+            .delete(metricTypes)
+            .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, fe.id)));
           removedOrphan = true;
         }
       }

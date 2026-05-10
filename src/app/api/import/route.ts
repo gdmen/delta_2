@@ -18,7 +18,7 @@ import {
   dailySummaries,
   mergeLog,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
 import {
   buildMetricTypeCache,
@@ -33,6 +33,8 @@ import {
   type WorkoutSetInput,
 } from "@/lib/ingest-service";
 import { isStatus } from "@/lib/enums";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * POST /api/import
@@ -64,6 +66,9 @@ import { isStatus } from "@/lib/enums";
  * All handlers are idempotent: re-importing the same file is a no-op.
  * Unknown metric names auto-register via the metric-resolver under
  * `custom:<rawName>` so they're visible but don't collide with canonicals.
+ *
+ * Per-user: every CSV is imported into the requesting user's tenant. All
+ * catalog/data writes carry user_id; all dedupe lookups are user-scoped.
  */
 
 interface TableResult {
@@ -78,6 +83,10 @@ function emptyResult(): TableResult {
 }
 
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const userId = user.id;
+
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
@@ -149,50 +158,51 @@ export async function POST(request: NextRequest) {
 
   // --- sports.csv ----------------------------------------------------------
   if (csvs["sports.csv"]) {
-    out.sports = await importSportsTable(csvs["sports.csv"]);
+    out.sports = await importSportsTable(csvs["sports.csv"], userId);
   }
 
   // --- metric_types.csv ----------------------------------------------------
   if (csvs["metric_types.csv"]) {
-    out.metric_types = await importMetricTypes(csvs["metric_types.csv"]);
+    out.metric_types = await importMetricTypes(csvs["metric_types.csv"], userId);
   }
 
   // --- metric_type_aliases.csv ---------------------------------------------
   if (csvs["metric_type_aliases.csv"]) {
-    out.metric_type_aliases = await importMetricTypeAliases(csvs["metric_type_aliases.csv"]);
+    out.metric_type_aliases = await importMetricTypeAliases(csvs["metric_type_aliases.csv"], userId);
   }
 
   // --- import_sources.csv --------------------------------------------------
   if (csvs["import_sources.csv"]) {
-    out.import_sources = await importImportSources(csvs["import_sources.csv"]);
+    out.import_sources = await importImportSources(csvs["import_sources.csv"], userId);
   }
 
   // --- source_settings.csv -------------------------------------------------
   if (csvs["source_settings.csv"]) {
-    out.source_settings = await importSourceSettings(csvs["source_settings.csv"]);
+    out.source_settings = await importSourceSettings(csvs["source_settings.csv"], userId);
   }
 
   // --- goals.csv -----------------------------------------------------------
   if (csvs["goals.csv"]) {
-    out.goals = await importGoals(csvs["goals.csv"]);
+    out.goals = await importGoals(csvs["goals.csv"], userId);
   }
 
   // --- focuses.csv ---------------------------------------------------------
   if (csvs["focuses.csv"]) {
-    out.focuses = await importFocuses(csvs["focuses.csv"]);
+    out.focuses = await importFocuses(csvs["focuses.csv"], userId);
   }
 
   // --- goal_journal_entries.csv -------------------------------------------
   if (csvs["goal_journal_entries.csv"]) {
     out.goal_journal_entries = await importGoalJournalEntries(
       csvs["goal_journal_entries.csv"],
+      userId,
     );
   }
 
   // --- dashboards.csv ------------------------------------------------------
   // Dashboards run before dashboard_widgets so the parent rows exist.
   if (csvs["dashboards.csv"]) {
-    out.dashboards = await importDashboards(csvs["dashboards.csv"]);
+    out.dashboards = await importDashboards(csvs["dashboards.csv"], userId);
   }
 
   // --- dashboard_widgets.csv -----------------------------------------------
@@ -200,17 +210,17 @@ export async function POST(request: NextRequest) {
   // prior wipe will append duplicate widgets — the documented round-trip is
   // wipe + import, not import-on-top-of.
   if (csvs["dashboard_widgets.csv"]) {
-    out.dashboard_widgets = await importDashboardWidgets(csvs["dashboard_widgets.csv"]);
+    out.dashboard_widgets = await importDashboardWidgets(csvs["dashboard_widgets.csv"], userId);
   }
 
   // --- metrics.csv ---------------------------------------------------------
   if (csvs["metrics.csv"]) {
-    out.metrics = await importMetrics(csvs["metrics.csv"]);
+    out.metrics = await importMetrics(csvs["metrics.csv"], userId);
   }
 
   // --- events.csv ----------------------------------------------------------
   if (csvs["events.csv"]) {
-    out.events = await importEvents(csvs["events.csv"]);
+    out.events = await importEvents(csvs["events.csv"], userId);
   }
 
   // --- event_metrics.csv ---------------------------------------------------
@@ -218,7 +228,7 @@ export async function POST(request: NextRequest) {
   // strategy as workout_sets: event_source_id first, then (started_at,
   // sport, type) natural key, else auto-create a barebones parent event.
   if (csvs["event_metrics.csv"]) {
-    out.event_metrics = await importEventMetrics(csvs["event_metrics.csv"]);
+    out.event_metrics = await importEventMetrics(csvs["event_metrics.csv"], userId);
   }
 
   // --- workout_sets.csv ----------------------------------------------------
@@ -226,21 +236,21 @@ export async function POST(request: NextRequest) {
   // both). When users import workout_sets.csv alone, we try to find existing
   // events by their natural key; if missing, we error on that row.
   if (csvs["workout_sets.csv"]) {
-    out.workout_sets = await importWorkoutSets(csvs["workout_sets.csv"]);
+    out.workout_sets = await importWorkoutSets(csvs["workout_sets.csv"], userId);
   }
 
   // --- coach_calls.csv -----------------------------------------------------
   // Operational history. Runs after goals so the goal_id FK can be resolved
   // by natural key (sport, metric, deadline).
   if (csvs["coach_calls.csv"]) {
-    out.coach_calls = await importCoachCalls(csvs["coach_calls.csv"]);
+    out.coach_calls = await importCoachCalls(csvs["coach_calls.csv"], userId);
   }
 
   // --- reconcile_log.csv ---------------------------------------------------
   // Runs after metric_types so the metric_type_id reference resolves by name.
   // Tolerates an empty `metric` column (matches the schema's nullable FK).
   if (csvs["reconcile_log.csv"]) {
-    out.reconcile_log = await importReconcileLog(csvs["reconcile_log.csv"]);
+    out.reconcile_log = await importReconcileLog(csvs["reconcile_log.csv"], userId);
   }
 
   // --- daily_summaries.csv -------------------------------------------------
@@ -248,7 +258,7 @@ export async function POST(request: NextRequest) {
   // refreshes the cached values; also regenerates organically from raw
   // metrics, so importing this is purely a recovery-time-saver.
   if (csvs["daily_summaries.csv"]) {
-    out.daily_summaries = await importDailySummaries(csvs["daily_summaries.csv"]);
+    out.daily_summaries = await importDailySummaries(csvs["daily_summaries.csv"], userId);
   }
 
   // --- merge_log.csv -------------------------------------------------------
@@ -258,7 +268,7 @@ export async function POST(request: NextRequest) {
   // the canonical-id pre-check (correct failure mode). canonical_id is
   // re-resolved by canonical_name when possible.
   if (csvs["merge_log.csv"]) {
-    out.merge_log = await importMergeLog(csvs["merge_log.csv"]);
+    out.merge_log = await importMergeLog(csvs["merge_log.csv"], userId);
   }
 
   return NextResponse.json(out);
@@ -268,8 +278,8 @@ export async function POST(request: NextRequest) {
 // metrics.csv
 // -----------------------------------------------------------------------------
 
-async function importMetrics(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+async function importMetrics(text: string, userId: number): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "metrics.csv",
     text,
@@ -309,6 +319,7 @@ async function importMetrics(text: string): Promise<TableResult> {
       });
 
       const status = await upsertMetric({
+        userId,
         metricTypeId,
         value,
         recordedAt,
@@ -325,8 +336,8 @@ async function importMetrics(text: string): Promise<TableResult> {
 // events.csv
 // -----------------------------------------------------------------------------
 
-async function importEvents(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
+async function importEvents(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
   return processCsv(
     "events.csv",
     text,
@@ -361,6 +372,7 @@ async function importEvents(text: string): Promise<TableResult> {
         .from(events)
         .where(
           and(
+            userScope(userId).events,
             eq(events.startedAt, startedAt),
             eq(events.sportId, sportId),
             eq(events.type, type),
@@ -368,11 +380,15 @@ async function importEvents(text: string): Promise<TableResult> {
         )
         .limit(1);
       if (natural.length > 0 && !natural[0].sourceId) {
-        await db.update(events).set({ sourceId }).where(eq(events.id, natural[0].id));
+        await db
+          .update(events)
+          .set({ sourceId })
+          .where(and(userScope(userId).events, eq(events.id, natural[0].id)));
         return "skipped";
       }
 
       const { status } = await upsertEvent({
+        userId,
         sportId,
         type,
         durationMinutes: duration,
@@ -390,9 +406,9 @@ async function importEvents(text: string): Promise<TableResult> {
 // event_metrics.csv
 // -----------------------------------------------------------------------------
 
-async function importEventMetrics(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importEventMetrics(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "event_metrics.csv",
     text,
@@ -415,6 +431,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
       if (!sportId) throw new Error(`unknown sport "${sportName}"`);
 
       let parentId = await resolveEventId({
+        userId,
         sourceId: eventSourceId,
         startedAt,
         sportId,
@@ -423,6 +440,7 @@ async function importEventMetrics(text: string): Promise<TableResult> {
       if (parentId === null) {
         const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
+          userId,
           sportId,
           type: eventType,
           durationMinutes: null,
@@ -455,9 +473,9 @@ async function importEventMetrics(text: string): Promise<TableResult> {
 // workout_sets.csv
 // -----------------------------------------------------------------------------
 
-async function importWorkoutSets(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importWorkoutSets(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "workout_sets.csv",
     text,
@@ -481,6 +499,7 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
       if (!sportId) throw new Error(`unknown sport "${sportName}"`);
 
       let parentId = await resolveEventId({
+        userId,
         sourceId: eventSourceId,
         startedAt,
         sportId,
@@ -489,6 +508,7 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
       if (parentId === null) {
         const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
+          userId,
           sportId,
           type: eventType,
           durationMinutes: null,
@@ -538,8 +558,11 @@ async function importWorkoutSets(text: string): Promise<TableResult> {
 // helpers
 // -----------------------------------------------------------------------------
 
-async function loadSportCache(): Promise<Map<string, number>> {
-  const rows = await db.select({ id: sports.id, name: sports.name }).from(sports);
+async function loadSportCache(userId: number): Promise<Map<string, number>> {
+  const rows = await db
+    .select({ id: sports.id, name: sports.name })
+    .from(sports)
+    .where(userScope(userId).sports);
   return new Map(rows.map((r) => [r.name, r.id]));
 }
 
@@ -590,22 +613,24 @@ async function processCsv(
 // Foundational catalog + user targets — all use processCsv for boilerplate.
 // -----------------------------------------------------------------------------
 
-async function importSportsTable(text: string): Promise<TableResult> {
+async function importSportsTable(text: string, userId: number): Promise<TableResult> {
   return processCsv("sports.csv", text, ["name", "color"], async (row, idx) => {
     const name = row[idx.get("name")!];
     const color = row[idx.get("color")!];
     if (!name || !color) throw new Error("missing required field");
+    // Per-user uniqueness on (user_id, name). Conflict target updated
+    // accordingly so the same sport name in different users coexists.
     const inserted = await db
       .insert(sports)
-      .values({ name, color })
-      .onConflictDoNothing()
+      .values({ userId, name, color })
+      .onConflictDoNothing({ target: [sports.userId, sports.name] })
       .returning({ id: sports.id });
     return inserted.length > 0 ? "accepted" : "skipped";
   });
 }
 
-async function importMetricTypes(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
+async function importMetricTypes(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
   return processCsv(
     "metric_types.csv",
     text,
@@ -634,15 +659,14 @@ async function importMetricTypes(text: string): Promise<TableResult> {
       const sportId = sportName ? sportCache.get(sportName) ?? null : null;
       if (sportName && !sportId) throw new Error(`unknown sport "${sportName}"`);
 
-      // Upsert on the unique name index so re-import refreshes target /
-      // higher_is_better on existing rows (insert-only would skip them
-      // and the user's "import to restore my targets" flow would silently
-      // fail). Only update mutable config fields — never touch identity.
+      // Upsert on the unique (user_id, name) index so re-import refreshes
+      // target / higher_is_better on existing rows. Only update mutable
+      // config fields — never touch identity.
       const inserted = await db
         .insert(metricTypes)
-        .values({ name, unit, frequencyHint: freqStr, sportId, target, higherIsBetter })
+        .values({ userId, name, unit, frequencyHint: freqStr, sportId, target, higherIsBetter })
         .onConflictDoUpdate({
-          target: metricTypes.name,
+          target: [metricTypes.userId, metricTypes.name],
           set: { unit, frequencyHint: freqStr, sportId, target, higherIsBetter },
         })
         .returning({ id: metricTypes.id });
@@ -651,8 +675,8 @@ async function importMetricTypes(text: string): Promise<TableResult> {
   );
 }
 
-async function importMetricTypeAliases(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+async function importMetricTypeAliases(text: string, userId: number): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "metric_type_aliases.csv",
     text,
@@ -667,7 +691,7 @@ async function importMetricTypeAliases(text: string): Promise<TableResult> {
       }
       const inserted = await db
         .insert(metricTypeAliases)
-        .values({ alias, canonicalMetricTypeId: canonicalId })
+        .values({ userId, alias, canonicalMetricTypeId: canonicalId })
         .onConflictDoNothing()
         .returning({ alias: metricTypeAliases.alias });
       return inserted.length > 0 ? "accepted" : "skipped";
@@ -675,7 +699,7 @@ async function importMetricTypeAliases(text: string): Promise<TableResult> {
   );
 }
 
-async function importImportSources(text: string): Promise<TableResult> {
+async function importImportSources(text: string, userId: number): Promise<TableResult> {
   return processCsv(
     "import_sources.csv",
     text,
@@ -690,7 +714,7 @@ async function importImportSources(text: string): Promise<TableResult> {
       }
       const inserted = await db
         .insert(importSources)
-        .values({ name, kind, mapping })
+        .values({ userId, name, kind, mapping })
         .onConflictDoNothing()
         .returning({ id: importSources.id });
       return inserted.length > 0 ? "accepted" : "skipped";
@@ -698,7 +722,7 @@ async function importImportSources(text: string): Promise<TableResult> {
   );
 }
 
-async function importSourceSettings(text: string): Promise<TableResult> {
+async function importSourceSettings(text: string, userId: number): Promise<TableResult> {
   return processCsv(
     "source_settings.csv",
     text,
@@ -712,25 +736,25 @@ async function importSourceSettings(text: string): Promise<TableResult> {
       const existing = await db
         .select({ reconcileEnabled: sourceSettings.reconcileEnabled })
         .from(sourceSettings)
-        .where(eq(sourceSettings.source, source))
+        .where(and(userScope(userId).sourceSettings, eq(sourceSettings.source, source)))
         .limit(1);
       if (existing.length === 0) {
-        await db.insert(sourceSettings).values({ source, reconcileEnabled });
+        await db.insert(sourceSettings).values({ userId, source, reconcileEnabled });
         return "accepted";
       }
       if (existing[0].reconcileEnabled === reconcileEnabled) return "skipped";
       await db
         .update(sourceSettings)
         .set({ reconcileEnabled, updatedAt: new Date().toISOString() })
-        .where(eq(sourceSettings.source, source));
+        .where(and(userScope(userId).sourceSettings, eq(sourceSettings.source, source)));
       return "updated";
     },
   );
 }
 
-async function importGoals(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importGoals(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "goals.csv",
     text,
@@ -754,12 +778,14 @@ async function importGoals(text: string): Promise<TableResult> {
       if (!sportId) throw new Error(`unknown sport "${sportName}"`);
       const metricTypeId = typeCache.byName.get(metricName);
       if (metricTypeId === undefined) throw new Error(`unknown metric "${metricName}"`);
-      // Natural-key dedupe: (sportId, metricTypeId, deadline).
+      // Natural-key dedupe: (sportId, metricTypeId, deadline). Scoped
+      // by user_id so two users with similar goals don't collide.
       const existing = await db
         .select({ id: goals.id })
         .from(goals)
         .where(
           and(
+            userScope(userId).goals,
             eq(goals.sportId, sportId),
             eq(goals.metricTypeId, metricTypeId),
             eq(goals.deadline, deadline),
@@ -768,6 +794,7 @@ async function importGoals(text: string): Promise<TableResult> {
         .limit(1);
       if (existing.length > 0) return "skipped";
       await db.insert(goals).values({
+        userId,
         sportId,
         metricTypeId,
         targetValue: target,
@@ -779,9 +806,14 @@ async function importGoals(text: string): Promise<TableResult> {
   );
 }
 
-async function importFocuses(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importFocuses(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
+  // focuses is INHERIT — restrict via this user's goals.
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   return processCsv(
     "focuses.csv",
     text,
@@ -825,6 +857,7 @@ async function importFocuses(text: string): Promise<TableResult> {
         .from(goals)
         .where(
           and(
+            userScope(userId).goals,
             eq(goals.sportId, goalSportId),
             eq(goals.metricTypeId, goalMetricTypeId),
             eq(goals.deadline, goalDeadline),
@@ -838,7 +871,8 @@ async function importFocuses(text: string): Promise<TableResult> {
       }
       const goalId = g[0].id;
 
-      // Natural-key dedupe: (goalId, name, startDate).
+      // Natural-key dedupe: (goalId, name, startDate). Restrict to focuses
+      // on this user's goals.
       const existing = await db
         .select({ id: focuses.id })
         .from(focuses)
@@ -847,6 +881,7 @@ async function importFocuses(text: string): Promise<TableResult> {
             eq(focuses.goalId, goalId),
             eq(focuses.name, name),
             eq(focuses.startDate, startDate),
+            inArray(focuses.goalId, ownedGoalIds),
           ),
         )
         .limit(1);
@@ -867,9 +902,13 @@ async function importFocuses(text: string): Promise<TableResult> {
   );
 }
 
-async function importGoalJournalEntries(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importGoalJournalEntries(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(userId).goals);
   return processCsv(
     "goal_journal_entries.csv",
     text,
@@ -905,6 +944,7 @@ async function importGoalJournalEntries(text: string): Promise<TableResult> {
         .from(goals)
         .where(
           and(
+            userScope(userId).goals,
             eq(goals.sportId, goalSportId),
             eq(goals.metricTypeId, goalMetricTypeId),
             eq(goals.deadline, goalDeadline),
@@ -929,6 +969,7 @@ async function importGoalJournalEntries(text: string): Promise<TableResult> {
               eq(focuses.goalId, goalId),
               eq(focuses.name, verdictFocusName),
               eq(focuses.startDate, verdictFocusStartDate),
+              inArray(focuses.goalId, ownedGoalIds),
             ),
           )
           .limit(1);
@@ -943,15 +984,18 @@ async function importGoalJournalEntries(text: string): Promise<TableResult> {
 
       // Dedupe by (goal_id, content, created_at) if created_at was exported;
       // otherwise (goal_id, content) — covers the common re-import case.
+      // Restrict to journal entries on this user's goals.
       const dedupeConditions = createdAt
         ? [
             eq(goalJournalEntries.goalId, goalId),
             eq(goalJournalEntries.content, content),
             eq(goalJournalEntries.createdAt, createdAt),
+            inArray(goalJournalEntries.goalId, ownedGoalIds),
           ]
         : [
             eq(goalJournalEntries.goalId, goalId),
             eq(goalJournalEntries.content, content),
+            inArray(goalJournalEntries.goalId, ownedGoalIds),
           ];
       const existing = await db
         .select({ id: goalJournalEntries.id })
@@ -972,12 +1016,12 @@ async function importGoalJournalEntries(text: string): Promise<TableResult> {
 }
 
 /**
- * dashboards.csv: keyed by slug (UNIQUE on the table). INSERT OR IGNORE so
- * re-importing the same export is a no-op. is_system + seeded_id are preserved
- * from the export, which keeps the seed migration's idempotency intact.
+ * dashboards.csv: keyed by (userId, slug). INSERT OR IGNORE so re-importing
+ * the same export is a no-op. is_system + seeded_id are preserved from the
+ * export, which keeps the seed migration's idempotency intact.
  */
-async function importDashboards(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
+async function importDashboards(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
   return processCsv(
     "dashboards.csv",
     text,
@@ -1002,6 +1046,7 @@ async function importDashboards(text: string): Promise<TableResult> {
       const inserted = await db
         .insert(dashboards)
         .values({
+          userId,
           slug,
           name,
           icon: icon || null,
@@ -1018,33 +1063,32 @@ async function importDashboards(text: string): Promise<TableResult> {
 }
 
 /**
- * dashboard_widgets.csv: parent dashboard resolved by slug. Idempotent
- * on (dashboard_id, widget_type, position) — that triple uniquely
- * identifies a widget within a dashboard since `position` is the
- * render-order key the editor maintains. Re-importing the same bundle
- * is now a no-op instead of duplicating every widget.
- *
- * The dedupe is application-side rather than a UNIQUE index because
- * widget_type isn't a stable user identity: a user could legitimately
- * have two metric_block widgets at different positions, and they
- * differ only by config. The (dashboard, type, position) key lines
- * up exactly with what the export emits, which is the round-trip we
- * care about.
+ * dashboard_widgets.csv: parent dashboard resolved by (userId, slug).
+ * Idempotent on (dashboard_id, widget_type, position) within the user's
+ * dashboards. dashboard_widgets is INHERIT — never write to dashboards
+ * outside this user's tenant.
  */
-async function importDashboardWidgets(text: string): Promise<TableResult> {
-  // Build a slug -> id cache so we don't roundtrip per row.
-  const dashRows = await db.select({ id: dashboards.id, slug: dashboards.slug }).from(dashboards);
+async function importDashboardWidgets(text: string, userId: number): Promise<TableResult> {
+  // Build a slug -> id cache so we don't roundtrip per row. Scoped by user.
+  const dashRows = await db
+    .select({ id: dashboards.id, slug: dashboards.slug })
+    .from(dashboards)
+    .where(userScope(userId).dashboards);
   const dashCache = new Map(dashRows.map((r) => [r.slug, r.id]));
 
   // Pre-load existing widgets keyed by (dashboard_id, widget_type, position)
-  // so per-row checks are in-memory.
-  const existing = await db
-    .select({
-      dashboardId: dashboardWidgets.dashboardId,
-      widgetType: dashboardWidgets.widgetType,
-      position: dashboardWidgets.position,
-    })
-    .from(dashboardWidgets);
+  // so per-row checks are in-memory. Restricted to this user's dashboards.
+  const ownedDashboardIds = dashRows.map((r) => r.id);
+  const existing = ownedDashboardIds.length > 0
+    ? await db
+        .select({
+          dashboardId: dashboardWidgets.dashboardId,
+          widgetType: dashboardWidgets.widgetType,
+          position: dashboardWidgets.position,
+        })
+        .from(dashboardWidgets)
+        .where(inArray(dashboardWidgets.dashboardId, ownedDashboardIds))
+    : [];
   const existingKeys = new Set(
     existing.map((r) => `${r.dashboardId}|${r.widgetType}|${r.position}`),
   );
@@ -1115,9 +1159,9 @@ async function importDashboardWidgets(text: string): Promise<TableResult> {
  * (sport, metric, deadline) natural key; missing or unresolvable = NULL
  * (matches the schema's set-null on goal delete).
  */
-async function importCoachCalls(text: string): Promise<TableResult> {
-  const sportCache = await loadSportCache();
-  const typeCache = await buildMetricTypeCache();
+async function importCoachCalls(text: string, userId: number): Promise<TableResult> {
+  const sportCache = await loadSportCache(userId);
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "coach_calls.csv",
     text,
@@ -1149,6 +1193,7 @@ async function importCoachCalls(text: string): Promise<TableResult> {
             .from(goals)
             .where(
               and(
+                userScope(userId).goals,
                 eq(goals.sportId, sportId),
                 eq(goals.metricTypeId, metricTypeId),
                 eq(goals.deadline, goalDeadline),
@@ -1160,12 +1205,13 @@ async function importCoachCalls(text: string): Promise<TableResult> {
       }
 
       // Soft uniqueness check (no DB constraint to lean on). Cheap because
-      // ts is indexed.
+      // ts is indexed. Scoped by user_id.
       const existing = await db
         .select({ id: coachCalls.id })
         .from(coachCalls)
         .where(
           and(
+            userScope(userId).coachCalls,
             eq(coachCalls.ts, ts),
             eq(coachCalls.endpoint, endpoint),
             eq(coachCalls.model, model),
@@ -1176,6 +1222,7 @@ async function importCoachCalls(text: string): Promise<TableResult> {
       if (existing.length > 0) return "skipped";
 
       await db.insert(coachCalls).values({
+        userId,
         ts,
         endpoint,
         goalId,
@@ -1201,8 +1248,8 @@ async function importCoachCalls(text: string): Promise<TableResult> {
  * metric_type that may have been merged away (the schema's metric_type_id
  * has no FK for that reason); we resolve when possible, NULL otherwise.
  */
-async function importReconcileLog(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+async function importReconcileLog(text: string, userId: number): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "reconcile_log.csv",
     text,
@@ -1233,6 +1280,7 @@ async function importReconcileLog(text: string): Promise<TableResult> {
         .from(reconcileLog)
         .where(
           and(
+            userScope(userId).reconcileLog,
             eq(reconcileLog.source, source),
             eq(reconcileLog.kind, kind),
             eq(reconcileLog.at, at),
@@ -1244,6 +1292,7 @@ async function importReconcileLog(text: string): Promise<TableResult> {
       if (existing.length > 0) return "skipped";
 
       await db.insert(reconcileLog).values({
+        userId,
         source,
         kind,
         metricTypeId,
@@ -1263,12 +1312,12 @@ async function importReconcileLog(text: string): Promise<TableResult> {
 
 /**
  * Cache of per-day per-metric aggregates. Has a unique index on
- * (date, metric_type_id) so we can upsert directly. Skips rows whose
- * metric doesn't exist locally (the cache will rebuild from raw metrics
- * on the next aggregation pass).
+ * (user_id, date, metric_type_id) so we can upsert directly. Skips rows
+ * whose metric doesn't exist locally for this user (the cache will
+ * rebuild from raw metrics on the next aggregation pass).
  */
-async function importDailySummaries(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
+async function importDailySummaries(text: string, userId: number): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "daily_summaries.csv",
     text,
@@ -1301,6 +1350,7 @@ async function importDailySummaries(text: string): Promise<TableResult> {
       const inserted = await db
         .insert(dailySummaries)
         .values({
+          userId,
           date,
           metricTypeId,
           avgValue,
@@ -1310,7 +1360,7 @@ async function importDailySummaries(text: string): Promise<TableResult> {
           lastIngestAt: lastIngestAt || null,
         })
         .onConflictDoUpdate({
-          target: [dailySummaries.date, dailySummaries.metricTypeId],
+          target: [dailySummaries.userId, dailySummaries.date, dailySummaries.metricTypeId],
           set: {
             avgValue,
             minValue,
@@ -1340,11 +1390,19 @@ async function importDailySummaries(text: string): Promise<TableResult> {
  *
  * Dedup natural key: (kind, created_at, canonical_name, merged_names).
  * Re-running import on the same bundle is a no-op.
+ *
+ * The exported CSV's user_id column is IGNORED — every imported merge_log
+ * row is attributed to the *requesting* user's tenant (not the exporter's).
+ * Cross-user "import these audit rows as me" is the right semantic for an
+ * import; the exporter's user_id is just bookkeeping.
  */
-async function importMergeLog(text: string): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache();
-  // Build a sport-name → id cache once for the same purpose.
-  const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
+async function importMergeLog(text: string, userId: number): Promise<TableResult> {
+  const typeCache = await buildMetricTypeCache(userId);
+  // Build a sport-name → id cache once for the same purpose, scoped to user.
+  const sportRows = await db
+    .select({ id: sports.id, name: sports.name })
+    .from(sports)
+    .where(userScope(userId).sports);
   const sportCache = new Map(sportRows.map((r) => [r.name, r.id]));
 
   return processCsv(
@@ -1366,7 +1424,6 @@ async function importMergeLog(text: string): Promise<TableResult> {
       const mergedNames = row[idx.get("merged_names")!];
       const payload = row[idx.get("payload")!];
       const undoneAt = idx.has("undone_at") ? row[idx.get("undone_at")!] : "";
-      const userIdRaw = idx.has("user_id") ? row[idx.get("user_id")!] : "";
 
       if (!kindRaw || !createdAt || !canonicalName || !payload) {
         throw new Error("missing required field");
@@ -1387,15 +1444,13 @@ async function importMergeLog(text: string): Promise<TableResult> {
         canonicalId = id ?? (Number(canonicalIdRaw) || 0);
       }
 
-      const userId =
-        userIdRaw === "" ? null : Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : null;
-
-      // Dedup on (kind, created_at, canonical_name, merged_names).
+      // Dedup on (user_id, kind, created_at, canonical_name, merged_names).
       const existing = await db
         .select({ id: mergeLog.id })
         .from(mergeLog)
         .where(
           and(
+            userScope(userId).mergeLog,
             eq(mergeLog.kind, kindRaw),
             eq(mergeLog.createdAt, createdAt),
             eq(mergeLog.canonicalName, canonicalName),
@@ -1406,6 +1461,7 @@ async function importMergeLog(text: string): Promise<TableResult> {
       if (existing.length > 0) return "skipped";
 
       await db.insert(mergeLog).values({
+        userId,
         kind: kindRaw,
         createdAt,
         canonicalId,
@@ -1413,7 +1469,6 @@ async function importMergeLog(text: string): Promise<TableResult> {
         mergedNames,
         payload,
         undoneAt: undoneAt || null,
-        userId,
       });
       return "accepted";
     },

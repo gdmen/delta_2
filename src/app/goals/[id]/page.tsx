@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { goals, metricTypes, sports, metrics, focuses, goalJournalEntries } from "@/db/schema";
-import { eq, asc, desc, sql } from "drizzle-orm";
+import { and, eq, asc, desc, sql } from "drizzle-orm";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
 import { EditableGoalTarget } from "./editable-target";
@@ -14,10 +14,13 @@ import { FocusesTray } from "./focuses-tray";
 import { LlmTray } from "./llm-tray";
 import { buildSignalsBlock, renderSignalsBlock } from "@/lib/coach/suggest-focuses";
 import { getLastSuccessfulCallAt } from "@/lib/coach/track-call";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
 export default async function GoalDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUserOrSignin();
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) notFound();
@@ -38,18 +41,18 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .innerJoin(sports, eq(goals.sportId, sports.id))
-    .where(eq(goals.id, id))
+    .where(and(userScope(user.id).goals, eq(goals.id, id)))
     .limit(1);
 
   if (rows.length === 0) notFound();
   const goal = rows[0];
 
-  const progress = await computeGoalProgress(goal);
+  const progress = await computeGoalProgress(goal, user.id);
 
   const samples = await db
     .select({ value: metrics.value, recordedAt: metrics.recordedAt })
     .from(metrics)
-    .where(eq(metrics.metricTypeId, goal.metricTypeId))
+    .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, goal.metricTypeId)))
     .orderBy(asc(metrics.recordedAt));
 
   const chartData = samples.map((s) => ({
@@ -58,7 +61,9 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
   }));
 
   // Focuses on this goal — newest first per the locked v1 ordering. Priority
-  // ordering is a P2 follow-up (TODOS.md).
+  // ordering is a P2 follow-up (TODOS.md). focuses is INHERIT — already
+  // scoped via the eq(focuses.goalId, goal.id) since `goal` was loaded
+  // from this user's catalog above.
   const goalFocuses = await db
     .select({
       id: focuses.id,
@@ -130,9 +135,9 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
   // Pre-aggregate signals for the LLM-tray loading state. Computed server-
   // side so the user sees concrete numbers during the 3-8s LLM wait, not a
   // generic spinner.
-  const signals = await buildSignalsBlock();
+  const signals = await buildSignalsBlock(user.id);
   const signalsBlock = renderSignalsBlock(signals);
-  const lastSuggestedAt = await getLastSuccessfulCallAt(goal.id, "suggest-focuses");
+  const lastSuggestedAt = await getLastSuccessfulCallAt(goal.id, "suggest-focuses", user.id);
 
   // Catalog passed to the editable-metric dropdown. Filtered + sorted in
   // the client component; we just dump the full list here.
@@ -143,6 +148,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       unit: metricTypes.unit,
     })
     .from(metricTypes)
+    .where(userScope(user.id).metricTypes)
     .orderBy(asc(metricTypes.name));
 
   return (

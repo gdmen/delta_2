@@ -23,7 +23,7 @@ import { coachCardDataDeps } from "./coach-card/data";
  * no entries here.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type DataDepsFn = (config: any) => DataDep[];
+export type DataDepsFn = (config: any, userId: number) => DataDep[];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ValidateFn = (config: any, ctx: { db: DrizzleDb }) => Promise<ValidationResult>;
 

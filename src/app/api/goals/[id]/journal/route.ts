@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { goalJournalEntries, goals } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 // Hard cap so a runaway paste doesn't accidentally land a 10MB row.
 const MAX_CONTENT_BYTES = 50_000;
@@ -10,17 +12,26 @@ const MAX_CONTENT_BYTES = 50_000;
  * GET /api/goals/:id/journal
  * Returns the goal's journal entries, newest first. Lightweight — no joins,
  * the goal page already knows the goal it's on.
+ *
+ * goal_journal_entries is INHERIT — scoped through this user's goals.
  */
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const goalId = Number(idStr);
   if (!Number.isFinite(goalId) || goalId <= 0) {
     return NextResponse.json({ error: "invalid goal id" }, { status: 400 });
   }
 
+  const ownedGoalIds = db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(userScope(user.id).goals);
   const rows = await db
     .select({
       id: goalJournalEntries.id,
@@ -30,7 +41,12 @@ export async function GET(
       linkedMetricTypeId: goalJournalEntries.linkedMetricTypeId,
     })
     .from(goalJournalEntries)
-    .where(eq(goalJournalEntries.goalId, goalId))
+    .where(
+      and(
+        eq(goalJournalEntries.goalId, goalId),
+        inArray(goalJournalEntries.goalId, ownedGoalIds),
+      ),
+    )
     .orderBy(desc(goalJournalEntries.createdAt));
 
   return NextResponse.json(rows);
@@ -46,17 +62,21 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const goalId = Number(idStr);
   if (!Number.isFinite(goalId) || goalId <= 0) {
     return NextResponse.json({ error: "invalid goal id" }, { status: 400 });
   }
 
-  // Confirm the goal exists — surface a clean 404 instead of a FK violation.
+  // Confirm the goal exists AND belongs to this user — surface a clean 404
+  // instead of a FK violation or cross-user write.
   const g = await db
     .select({ id: goals.id })
     .from(goals)
-    .where(eq(goals.id, goalId))
+    .where(and(userScope(user.id).goals, eq(goals.id, goalId)))
     .limit(1);
   if (g.length === 0) {
     return NextResponse.json({ error: "goal not found" }, { status: 404 });

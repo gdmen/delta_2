@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth/config";
 import { upsertMetric } from "@/lib/ingest-service";
 import { ReconcileTracker } from "@/lib/reconcile";
 import {
@@ -175,6 +176,16 @@ const FIELD_TO_RAW: Record<FieldKey, { rawName: string; unit: string }> = {
 const SOURCE_SYSTEM = "bodyspec_dexa";
 
 export async function POST(request: NextRequest) {
+  // /api/ingest/* is exempt from the proxy session-cookie gate; we
+  // call auth() ourselves so the per-user upserts go to the right
+  // person.
+  const session = await auth();
+  const userIdStr = session?.user?.id;
+  const userId = userIdStr ? parseInt(userIdStr, 10) : NaN;
+  if (!Number.isFinite(userId)) {
+    return NextResponse.json({ error: "not signed in" }, { status: 401 });
+  }
+
   let body: SaveBody;
   try {
     body = await request.json();
@@ -186,12 +197,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "scan_date must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const cache = await buildMetricTypeCache();
+  const cache = await buildMetricTypeCache(userId);
   const recordedAt = `${body.scan_date}T12:00:00Z`;
   const saved: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
-  const tracker = new ReconcileTracker();
+  const tracker = new ReconcileTracker(userId);
 
   for (const [field, { rawName, unit }] of Object.entries(FIELD_TO_RAW) as Array<
     [FieldKey, (typeof FIELD_TO_RAW)[FieldKey]]
@@ -222,6 +233,7 @@ export async function POST(request: NextRequest) {
 
       const sourceId = `bodyspec-${body.scan_date}-${rawName}`;
       await upsertMetric({
+        userId,
         metricTypeId: typeId,
         value,
         recordedAt,

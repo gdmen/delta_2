@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { metricTypes } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export async function GET() {
-  const rows = await db.select().from(metricTypes);
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const rows = await db
+    .select()
+    .from(metricTypes)
+    .where(userScope(user.id).metricTypes);
   return NextResponse.json(rows.map((m) => ({
     id: m.id,
     name: m.name,
@@ -25,6 +32,9 @@ export async function GET() {
  * and categorical metrics (bjj_belt) are NOT supported here — see TODOS.md.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -84,7 +94,7 @@ export async function POST(request: NextRequest) {
   const existing = await db
     .select({ id: metricTypes.id })
     .from(metricTypes)
-    .where(eq(metricTypes.name, name))
+    .where(and(userScope(user.id).metricTypes, eq(metricTypes.name, name)))
     .limit(1);
   if (existing.length > 0) {
     return NextResponse.json(
@@ -95,7 +105,7 @@ export async function POST(request: NextRequest) {
 
   const inserted = await db
     .insert(metricTypes)
-    .values({ name, unit, sportId, frequencyHint })
+    .values({ userId: user.id, name, unit, sportId, frequencyHint })
     .returning({
       id: metricTypes.id,
       name: metricTypes.name,

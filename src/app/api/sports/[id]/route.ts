@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, goals, metricTypes, sports } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * DELETE /api/sports/:id
@@ -18,6 +20,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (!Number.isFinite(id)) {
@@ -25,12 +30,18 @@ export async function DELETE(
   }
 
   const [ev, gl, mt] = await Promise.all([
-    db.select({ c: sql<number>`count(*)` }).from(events).where(eq(events.sportId, id)),
-    db.select({ c: sql<number>`count(*)` }).from(goals).where(eq(goals.sportId, id)),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(events)
+      .where(and(userScope(user.id).events, eq(events.sportId, id))),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(goals)
+      .where(and(userScope(user.id).goals, eq(goals.sportId, id))),
     db
       .select({ c: sql<number>`count(*)` })
       .from(metricTypes)
-      .where(eq(metricTypes.sportId, id)),
+      .where(and(userScope(user.id).metricTypes, eq(metricTypes.sportId, id))),
   ]);
   const counts = {
     events: Number(ev[0]?.c ?? 0),
@@ -47,7 +58,7 @@ export async function DELETE(
 
   const result = await db
     .delete(sports)
-    .where(eq(sports.id, id))
+    .where(and(userScope(user.id).sports, eq(sports.id, id)))
     .returning({ id: sports.id });
   if (result.length === 0) {
     return NextResponse.json({ error: "sport not found" }, { status: 404 });

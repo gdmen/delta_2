@@ -13,18 +13,27 @@ import {
   sourceSettings,
   workoutSets,
 } from "@/db/schema";
-import { and, eq, like, ne, not, sql } from "drizzle-orm";
+import { and, eq, inArray, like, ne, not, sql } from "drizzle-orm";
 import type { ImportMapping } from "@/lib/import-mapping";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-  const rows = await db.select().from(importSources).where(eq(importSources.id, id)).limit(1);
+  const rows = await db
+    .select()
+    .from(importSources)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
+    .limit(1);
   if (rows.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const r = rows[0];
@@ -41,6 +50,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -66,7 +78,10 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  await db.update(importSources).set(updates).where(eq(importSources.id, id));
+  await db
+    .update(importSources)
+    .set(updates)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)));
   return NextResponse.json({ ok: true });
 }
 
@@ -95,6 +110,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const { id: idStr } = await params;
   const id = parseInt(idStr, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
@@ -104,7 +122,7 @@ export async function DELETE(
   const rows = await db
     .select({ name: importSources.name })
     .from(importSources)
-    .where(eq(importSources.id, id))
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)))
     .limit(1);
   if (rows.length === 0) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -117,15 +135,15 @@ export async function DELETE(
   const [m] = await db
     .select({ c: sql<number>`count(*)` })
     .from(metrics)
-    .where(eq(metrics.source, sourceTag));
+    .where(and(userScope(user.id).metrics, eq(metrics.source, sourceTag)));
   const [e] = await db
     .select({ c: sql<number>`count(*)` })
     .from(events)
-    .where(eq(events.source, sourceTag));
+    .where(and(userScope(user.id).events, eq(events.source, sourceTag)));
   const [r] = await db
     .select({ c: sql<number>`count(*)` })
     .from(reconcileLog)
-    .where(eq(reconcileLog.source, sourceTag));
+    .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, sourceTag)));
 
   // Delete metrics first (no children). Then events — workout_sets and
   // event_metrics cascade via FK ON DELETE CASCADE on event_id. Then
@@ -133,10 +151,18 @@ export async function DELETE(
   // txn (better-sqlite3-drizzle rejects async tx callbacks); a partial
   // failure leaves the source half-deleted, which the user can fix by
   // retrying — the operations are idempotent.
-  await db.delete(metrics).where(eq(metrics.source, sourceTag));
-  await db.delete(events).where(eq(events.source, sourceTag));
-  await db.delete(reconcileLog).where(eq(reconcileLog.source, sourceTag));
-  await db.delete(sourceSettings).where(eq(sourceSettings.source, sourceTag));
+  await db
+    .delete(metrics)
+    .where(and(userScope(user.id).metrics, eq(metrics.source, sourceTag)));
+  await db
+    .delete(events)
+    .where(and(userScope(user.id).events, eq(events.source, sourceTag)));
+  await db
+    .delete(reconcileLog)
+    .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, sourceTag)));
+  await db
+    .delete(sourceSettings)
+    .where(and(userScope(user.id).sourceSettings, eq(sourceSettings.source, sourceTag)));
 
   // Now sweep `${sourceTag}:%` metric_types. After the deletes above,
   // most should be unreferenced — but a foreign-prefixed alias OR a
@@ -144,10 +170,17 @@ export async function DELETE(
   const candidateTypes = await db
     .select({ id: metricTypes.id, name: metricTypes.name })
     .from(metricTypes)
-    .where(like(metricTypes.name, namePrefixSql));
+    .where(and(userScope(user.id).metricTypes, like(metricTypes.name, namePrefixSql)));
 
   const deletedTypes: string[] = [];
   const keptTypes: { name: string; reason: string }[] = [];
+
+  // event_metrics + workout_sets are INHERIT — restrict by joining
+  // through this user's events.
+  const ownedEventIds = db
+    .select({ id: events.id })
+    .from(events)
+    .where(userScope(user.id).events);
 
   for (const t of candidateTypes) {
     // Refs that would either FK-block the delete or silently break
@@ -155,15 +188,25 @@ export async function DELETE(
     const [goalRef] = await db
       .select({ c: sql<number>`count(*)` })
       .from(goals)
-      .where(eq(goals.metricTypeId, t.id));
+      .where(and(userScope(user.id).goals, eq(goals.metricTypeId, t.id)));
     const [setRef] = await db
       .select({ c: sql<number>`count(*)` })
       .from(workoutSets)
-      .where(eq(workoutSets.exerciseMetricTypeId, t.id));
+      .where(
+        and(
+          eq(workoutSets.exerciseMetricTypeId, t.id),
+          inArray(workoutSets.eventId, ownedEventIds),
+        ),
+      );
     const [emRef] = await db
       .select({ c: sql<number>`count(*)` })
       .from(eventMetrics)
-      .where(eq(eventMetrics.metricTypeId, t.id));
+      .where(
+        and(
+          eq(eventMetrics.metricTypeId, t.id),
+          inArray(eventMetrics.eventId, ownedEventIds),
+        ),
+      );
     // Stray metrics rows from OTHER sources (manual entries against
     // this metric_type, ingest from a different source that aliased to
     // it). Pre-delete pass already cleared the ones tagged with this
@@ -171,7 +214,7 @@ export async function DELETE(
     const [metricRef] = await db
       .select({ c: sql<number>`count(*)` })
       .from(metrics)
-      .where(eq(metrics.metricTypeId, t.id));
+      .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, t.id)));
     // Foreign-prefix aliases pointing at this metric_type as canonical
     // — those came from a merge ("apple_health:body_mass" → this).
     // Cascade-deleting them would silently break HAE routing.
@@ -180,6 +223,7 @@ export async function DELETE(
       .from(metricTypeAliases)
       .where(
         and(
+          userScope(user.id).metricTypeAliases,
           eq(metricTypeAliases.canonicalMetricTypeId, t.id),
           not(like(metricTypeAliases.alias, namePrefixSql)),
           ne(metricTypeAliases.alias, t.name),
@@ -202,12 +246,18 @@ export async function DELETE(
     // — wipe its rows first or the metric_types delete will FK-fail.
     // Self-prefix aliases (e.g. `${sourceTag}:foo` aliased to itself)
     // CASCADE-delete via the alias FK; that's fine.
-    await db.delete(dailySummaries).where(eq(dailySummaries.metricTypeId, t.id));
-    await db.delete(metricTypes).where(eq(metricTypes.id, t.id));
+    await db
+      .delete(dailySummaries)
+      .where(and(userScope(user.id).dailySummaries, eq(dailySummaries.metricTypeId, t.id)));
+    await db
+      .delete(metricTypes)
+      .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, t.id)));
     deletedTypes.push(t.name);
   }
 
-  await db.delete(importSources).where(eq(importSources.id, id));
+  await db
+    .delete(importSources)
+    .where(and(userScope(user.id).importSources, eq(importSources.id, id)));
 
   return NextResponse.json({
     ok: true,

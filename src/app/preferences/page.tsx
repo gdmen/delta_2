@@ -1,10 +1,12 @@
 import { loadUserTimezone } from "@/lib/app-settings";
+import { requireUserOrSignin } from "@/lib/auth/require";
 import { TimezonePicker } from "./timezone-picker";
 
 export const dynamic = "force-dynamic";
 
 export default async function PreferencesPage() {
-  const timezone = await loadUserTimezone();
+  const user = await requireUserOrSignin();
+  const timezone = await loadUserTimezone(user.id);
   // The full IANA list lives in the JS runtime; pass it through so the
   // client doesn't have to re-fetch and we don't ship a bundle of TZ
   // names ourselves. ~600 entries, ~18 KB JSON; fine for a settings page.

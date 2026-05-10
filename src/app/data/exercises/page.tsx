@@ -1,8 +1,10 @@
 import { db } from "@/db";
 import { workoutSets, events, metricTypes } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ExercisesTable } from "./exercises-table";
 import { DataTabShell } from "@/components/data-tab-shell";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +13,12 @@ export const dynamic = "force-dynamic";
  * workout_sets is the partition — only metric_types that actually appear as
  * an exercise show up here. A metric_type that's both sampled (metric_readings)
  * and an exercise (workout_sets) legitimately appears on both tabs.
+ *
+ * INHERIT scoping: workout_sets has no user_id; restrict via events.user_id.
+ * metric_types is OWNED — scope on its userId directly.
  */
 export default async function ExercisesPage() {
+  const user = await requireUserOrSignin();
   const rows = await db
     .select({
       id: metricTypes.id,
@@ -26,6 +32,7 @@ export default async function ExercisesPage() {
     .from(metricTypes)
     .innerJoin(workoutSets, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .leftJoin(events, eq(events.id, workoutSets.eventId))
+    .where(and(userScope(user.id).metricTypes, userScope(user.id).events))
     .groupBy(metricTypes.id)
     .orderBy(sql`COUNT(${workoutSets.id}) DESC`);
 

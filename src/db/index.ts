@@ -37,6 +37,20 @@ export const db = new Proxy({} as PostgresJsDatabase<typeof schema>, {
   },
 });
 
+/**
+ * Eagerly resolve the real `PostgresJsDatabase` (no Proxy). Required
+ * by callers that do runtime introspection on the db object — most
+ * notably @auth/drizzle-adapter, which checks `db.constructor` to
+ * pick its dialect-specific code path. The Proxy fails that check
+ * because its constructor is `Object`, not `PostgresJsDatabase`.
+ *
+ * Throws if DATABASE_URL is unset (never call from a test path that
+ * uses pglite via vi.mock).
+ */
+export function getDb(): PostgresJsDatabase<typeof schema> {
+  return ensureDb();
+}
+
 // Auto-apply pending migrations in dev so a fresh `git pull` + `npm run dev`
 // works without an explicit `npx drizzle-kit migrate`. Production deploys
 // run migrations through scripts/deploy.sh — keep app stopped while

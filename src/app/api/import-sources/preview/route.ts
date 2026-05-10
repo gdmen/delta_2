@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseCsv } from "@/lib/csv";
 import { applyMapping, autoMatchHeaders, type ImportMapping } from "@/lib/import-mapping";
 import { loadUserTimezone } from "@/lib/app-settings";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/import-sources/preview
@@ -18,6 +19,9 @@ import { loadUserTimezone } from "@/lib/app-settings";
  *     first 5 passing rows
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
@@ -50,7 +54,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (mapping) {
-    const tz = await loadUserTimezone();
+    const tz = await loadUserTimezone(user.id);
     const parsed: unknown[] = [];
     const errors: string[] = [];
     let taken = 0;

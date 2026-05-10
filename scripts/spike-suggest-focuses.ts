@@ -162,11 +162,12 @@ async function loadGoal(goalId: number): Promise<GoalContext | null> {
 }
 
 async function buildSignals(): Promise<SignalsBlock> {
+  // Spike scripts run against the bootstrap owner (user id=1).
   const [plateau, rolling, recovery, volume] = await Promise.all([
-    getPlateauSignals(),
-    getRollingAverages(),
-    getRecoveryDebt(),
-    getVolumeTrends(),
+    getPlateauSignals(1),
+    getRollingAverages(1),
+    getRecoveryDebt(1),
+    getVolumeTrends(1),
   ]);
   return {
     generatedAt: new Date().toISOString(),

@@ -1,13 +1,16 @@
 import { db } from "@/db";
 import { events, metrics, metricTypes, sports, workoutSets } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { MetricsTable } from "./metrics-table";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { matchComputed, slugifyExercise } from "@/lib/computed-metrics";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
 export default async function DataPage() {
+  const user = await requireUserOrSignin();
   // Real metric rows per metric_type.
   const realRows = await db
     .select({
@@ -18,7 +21,8 @@ export default async function DataPage() {
       lastAt: sql<string>`max(${metrics.recordedAt})`,
     })
     .from(metricTypes)
-    .leftJoin(metrics, eq(metrics.metricTypeId, metricTypes.id))
+    .leftJoin(metrics, and(userScope(user.id).metrics, eq(metrics.metricTypeId, metricTypes.id)))
+    .where(userScope(user.id).metricTypes)
     .groupBy(metricTypes.id);
 
   // Synthesized rows from workout_sets — same per-rep fanout the
@@ -26,6 +30,7 @@ export default async function DataPage() {
   // exercise-only metric_types (e.g. Flat Barbell Bench Press) report a
   // truthful count instead of 0. last-recorded comes from the parent
   // event's started_at.
+  // INHERIT scoping: workout_sets has no user_id; restrict via events.
   const synthRows = await db
     .select({
       metricTypeId: workoutSets.exerciseMetricTypeId,
@@ -34,6 +39,7 @@ export default async function DataPage() {
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
+    .where(userScope(user.id).events)
     .groupBy(workoutSets.exerciseMetricTypeId);
 
   const synthByType = new Map<number, { count: number; lastAt: string | null }>();
@@ -59,6 +65,7 @@ export default async function DataPage() {
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
+    .where(userScope(user.id).events)
     .groupBy(events.sportId, sports.name);
   const bySport = new Map<string, { days: number; daysWithMinutes: number; lastAt: string | null }>();
   for (const r of sportDayCounts) {
@@ -79,6 +86,7 @@ export default async function DataPage() {
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(metricTypes, eq(metricTypes.id, workoutSets.exerciseMetricTypeId))
+    .where(userScope(user.id).events)
     .groupBy(workoutSets.exerciseMetricTypeId, metricTypes.name);
   const byExerciseSlug = new Map<string, { days: number; lastAt: string | null }>();
   for (const r of exerciseDayCounts) {

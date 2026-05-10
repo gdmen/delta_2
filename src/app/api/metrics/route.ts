@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { upsertMetric, type MetricInput } from "@/lib/ingest-service";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * POST /api/metrics - manually create a single metric row.
@@ -7,6 +8,9 @@ import { upsertMetric, type MetricInput } from "@/lib/ingest-service";
  * Defaults: source="manual", sourceId=null.
  */
 export async function POST(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: Partial<MetricInput>;
   try {
     body = await request.json();
@@ -25,6 +29,7 @@ export async function POST(request: NextRequest) {
   }
 
   const status = await upsertMetric({
+    userId: user.id,
     metricTypeId: body.metricTypeId,
     value: body.value,
     recordedAt: body.recordedAt,

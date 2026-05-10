@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadUserTimezone, saveUserTimezone } from "@/lib/app-settings";
+import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
  * GET /api/app-settings
@@ -8,7 +9,9 @@ import { loadUserTimezone, saveUserTimezone } from "@/lib/app-settings";
  * picked anything.
  */
 export async function GET() {
-  const timezone = await loadUserTimezone();
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+  const timezone = await loadUserTimezone(user.id);
   return NextResponse.json({ timezone });
 }
 
@@ -21,6 +24,9 @@ export async function GET() {
  * - null: clears the override; reads fall back to the runtime default.
  */
 export async function PATCH(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   let body: unknown;
   try {
     body = await request.json();
@@ -46,6 +52,6 @@ export async function PATCH(request: NextRequest) {
       );
     }
   }
-  await saveUserTimezone(timezone);
+  await saveUserTimezone(timezone, user.id);
   return NextResponse.json({ timezone });
 }

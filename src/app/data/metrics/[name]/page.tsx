@@ -9,13 +9,15 @@ import {
   metricTypeAliases,
   workoutSets,
 } from "@/db/schema";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 import { MetricTargetEditor } from "./target-editor";
 import { DeleteMetricTypeButton } from "./delete-button";
 import { PaginationControls } from "@/components/pagination-controls";
 import { describeComputedSource, matchComputed } from "@/lib/computed-metrics";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +34,7 @@ export default async function MetricHistoryPage({
   params: Promise<{ name: string }>;
   searchParams: Promise<SearchParams>;
 }) {
+  const user = await requireUserOrSignin();
   const { name } = await params;
   const sp = await searchParams;
   const decoded = decodeURIComponent(name);
@@ -40,7 +43,7 @@ export default async function MetricHistoryPage({
   const typeRows = await db
     .select()
     .from(metricTypes)
-    .where(eq(metricTypes.name, decoded))
+    .where(and(userScope(user.id).metricTypes, eq(metricTypes.name, decoded)))
     .limit(1);
   if (typeRows.length === 0) notFound();
   const type = typeRows[0];
@@ -48,7 +51,7 @@ export default async function MetricHistoryPage({
   const totalRow = await db
     .select({ c: sql<number>`count(*)` })
     .from(metrics)
-    .where(eq(metrics.metricTypeId, type.id));
+    .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, type.id)));
   const storedCount = Number(totalRow[0]?.c ?? 0);
 
   // Computed metric (read-time synthesized from underlying tables — see
@@ -61,12 +64,22 @@ export default async function MetricHistoryPage({
   // Synthesized rep count derived from workout_sets — one virtual reading
   // per rep, value = workout_sets.weight. Counted via SUM(reps) so the
   // total agrees with what metric-history.ts produces at read time.
+  // INHERIT scoping: workout_sets has no user_id; restrict via events.user_id.
+  const ownedEventIds = db
+    .select({ id: events.id })
+    .from(events)
+    .where(userScope(user.id).events);
   const synthRow = await db
     .select({
       reps: sql<number>`coalesce(sum(${workoutSets.reps}), 0)`,
     })
     .from(workoutSets)
-    .where(eq(workoutSets.exerciseMetricTypeId, type.id));
+    .where(
+      and(
+        eq(workoutSets.exerciseMetricTypeId, type.id),
+        inArray(workoutSets.eventId, ownedEventIds),
+      ),
+    );
   const synthCount = Number(synthRow[0]?.reps ?? 0);
 
   // Total = stored rows + synthesized reps. Pagination is across the
@@ -80,9 +93,28 @@ export default async function MetricHistoryPage({
   // these checks server-side, but we use them here to decide whether
   // to render the delete button at all.
   const [wsRefRow, emRefRow, goalRefRow] = await Promise.all([
-    db.select({ c: sql<number>`count(*)` }).from(workoutSets).where(eq(workoutSets.exerciseMetricTypeId, type.id)),
-    db.select({ c: sql<number>`count(*)` }).from(eventMetrics).where(eq(eventMetrics.metricTypeId, type.id)),
-    db.select({ c: sql<number>`count(*)` }).from(goals).where(eq(goals.metricTypeId, type.id)),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(workoutSets)
+      .where(
+        and(
+          eq(workoutSets.exerciseMetricTypeId, type.id),
+          inArray(workoutSets.eventId, ownedEventIds),
+        ),
+      ),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(eventMetrics)
+      .where(
+        and(
+          eq(eventMetrics.metricTypeId, type.id),
+          inArray(eventMetrics.eventId, ownedEventIds),
+        ),
+      ),
+    db
+      .select({ c: sql<number>`count(*)` })
+      .from(goals)
+      .where(and(userScope(user.id).goals, eq(goals.metricTypeId, type.id))),
   ]);
   const refCounts = {
     metrics: total,
@@ -112,7 +144,7 @@ export default async function MetricHistoryPage({
             sourceId: metrics.sourceId,
           })
           .from(metrics)
-          .where(eq(metrics.metricTypeId, type.id))
+          .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, type.id)))
           .orderBy(desc(metrics.recordedAt))
       : [];
 
@@ -128,7 +160,12 @@ export default async function MetricHistoryPage({
           })
           .from(workoutSets)
           .innerJoin(events, eq(workoutSets.eventId, events.id))
-          .where(eq(workoutSets.exerciseMetricTypeId, type.id))
+          .where(
+            and(
+              userScope(user.id).events,
+              eq(workoutSets.exerciseMetricTypeId, type.id),
+            ),
+          )
           .orderBy(desc(events.startedAt))
       : [];
 
@@ -173,7 +210,12 @@ export default async function MetricHistoryPage({
   const aliases = await db
     .select({ alias: metricTypeAliases.alias })
     .from(metricTypeAliases)
-    .where(eq(metricTypeAliases.canonicalMetricTypeId, type.id))
+    .where(
+      and(
+        userScope(user.id).metricTypeAliases,
+        eq(metricTypeAliases.canonicalMetricTypeId, type.id),
+      ),
+    )
     .orderBy(asc(metricTypeAliases.alias));
 
   const linkWithPage = (p: number) => {

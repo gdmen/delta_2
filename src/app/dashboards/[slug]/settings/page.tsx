@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/db";
-import { sports } from "@/db/schema";
-import { asc } from "drizzle-orm";
+import { sports, dashboardShareTokens } from "@/db/schema";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { loadDashboard } from "@/lib/dashboards/load";
 import { SLUG_PATTERN } from "@/lib/dashboards/slug";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 import { DashboardSettingsForm } from "./DashboardSettingsForm";
 
 export const dynamic = "force-dynamic";
@@ -14,16 +16,32 @@ export default async function DashboardSettingsPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
+  const user = await requireUserOrSignin();
   const { slug } = await params;
   if (!SLUG_PATTERN.test(slug)) notFound();
 
-  const dashboard = await loadDashboard(slug);
+  const dashboard = await loadDashboard(slug, user.id);
   if (!dashboard) notFound();
 
   const sportRows = await db
     .select({ id: sports.id, name: sports.name, color: sports.color })
     .from(sports)
+    .where(userScope(user.id).sports)
     .orderBy(asc(sports.name));
+
+  // Active share token (if any). Direct DB read avoids an internal
+  // HTTP round-trip; the API route uses the same query.
+  const tokenRows = await db
+    .select({ token: dashboardShareTokens.token })
+    .from(dashboardShareTokens)
+    .where(
+      and(
+        eq(dashboardShareTokens.dashboardId, dashboard.id),
+        isNull(dashboardShareTokens.revokedAt),
+      ),
+    )
+    .limit(1);
+  const activeShareToken = tokenRows[0]?.token ?? null;
 
   const backHref = `/dashboards/${slug}`;
 
@@ -42,7 +60,11 @@ export default async function DashboardSettingsPage({
           color, but its URL slug stays put and it can&apos;t be deleted.
         </p>
       )}
-      <DashboardSettingsForm dashboard={dashboard} sports={sportRows} />
+      <DashboardSettingsForm
+        dashboard={dashboard}
+        sports={sportRows}
+        activeShareToken={activeShareToken}
+      />
     </div>
   );
 }

@@ -5,13 +5,25 @@ import { asc, sql } from "drizzle-orm";
 import { createDashboardInput } from "@/lib/dashboards/validation";
 import { slugify } from "@/lib/dashboards/slug";
 import { readJson } from "@/lib/dashboards/request";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 export async function GET() {
-  const rows = await db.select().from(dashboards).orderBy(asc(dashboards.position), asc(dashboards.id));
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
+  const rows = await db
+    .select()
+    .from(dashboards)
+    .where(userScope(user.id).dashboards)
+    .orderBy(asc(dashboards.position), asc(dashboards.id));
   return NextResponse.json({ dashboards: rows });
 }
 
 export async function POST(req: Request) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const r = await readJson(req);
   if (!r.ok) return r.response;
   const parsed = createDashboardInput.safeParse(r.value);
@@ -35,15 +47,16 @@ export async function POST(req: Request) {
   // Position defaults to "one past the current max" computed atomically via
   // SQL subquery so two simultaneous creates can't collide on the same value.
   // COALESCE handles the empty-table case by returning -1, so the first row
-  // gets 0.
+  // gets 0. Restrict to this user so users don't share position pools.
   const positionExpr = input.position !== undefined
     ? sql`${input.position}`
-    : sql`(SELECT COALESCE(MAX(${dashboards.position}), -1) + 1 FROM ${dashboards})`;
+    : sql`(SELECT COALESCE(MAX(${dashboards.position}), -1) + 1 FROM ${dashboards} WHERE ${dashboards.userId} = ${user.id})`;
 
   try {
     const inserted = await db
       .insert(dashboards)
       .values({
+        userId: user.id,
         slug,
         name: input.name,
         icon: input.icon,

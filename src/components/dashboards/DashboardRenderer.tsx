@@ -8,6 +8,8 @@ import { lookupWidget } from "@/lib/widgets/registry";
 import { lookupDataDeps } from "@/lib/widgets/server-registry";
 import { collectDataDeps, runDataDeps } from "@/lib/widgets/data-deps";
 import type { DataDep } from "@/lib/widgets/types";
+import { requireUserOrSignin } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 import { DashboardGrid } from "./DashboardGrid";
 import { WidgetSlot } from "./WidgetSlot";
 import { DashboardEmptyState } from "./DashboardEmptyState";
@@ -35,16 +37,32 @@ export async function DashboardRenderer({
   slug,
   edit = false,
   debug = process.env.NODE_ENV !== "production",
+  shareMode,
 }: {
   slug: string;
   edit?: boolean;
   debug?: boolean;
+  /**
+   * When set, skip requireUserOrSignin and use the given user id
+   * directly. Used by /share/[token] to render the OWNER's data
+   * without an auth check (the token IS the auth). When shareMode is
+   * present, edit affordances are forced off.
+   */
+  shareMode?: { ownerId: number };
 }) {
-  const dashboard = await loadDashboard(slug);
+  let userId: number;
+  if (shareMode) {
+    userId = shareMode.ownerId;
+    edit = false; // share pages are always read-only
+  } else {
+    const user = await requireUserOrSignin();
+    userId = user.id;
+  }
+  const dashboard = await loadDashboard(slug, userId);
   if (!dashboard) notFound();
 
-  const widgets = await loadWidgets(dashboard.id);
-  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w));
+  const widgets = await loadWidgets(dashboard.id, userId);
+  const parsedWidgets: ParsedWidget[] = widgets.map((w) => parseWidget(w, userId));
 
   const data = await runDataDeps(collectDataDeps(parsedWidgets.map((p) => p.deps)));
 
@@ -70,10 +88,12 @@ export async function DashboardRenderer({
       db
         .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
         .from(metricTypes)
+        .where(userScope(userId).metricTypes)
         .orderBy(asc(metricTypes.name)),
       db
         .select({ id: sports.id, name: sports.name, color: sports.color })
         .from(sports)
+        .where(userScope(userId).sports)
         .orderBy(asc(sports.name)),
     ]);
     return (
@@ -87,30 +107,35 @@ export async function DashboardRenderer({
     );
   }
 
+  // Share-mode renders never include edit affordances. The /share/[token]
+  // page provides its own header (owner attribution + dashboard title), so
+  // the renderer also drops its own h1 to avoid a duplicate.
   return (
     <div>
-      {dashboard.name !== "Today" ? (
-        <div className="flex items-baseline justify-between mb-6">
-          <h1 className="text-2xl font-semibold">{dashboard.name}</h1>
-          <div className="flex items-center gap-3">
-            <Link href={editHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+      {!shareMode && (
+        dashboard.name !== "Today" ? (
+          <div className="flex items-baseline justify-between mb-6">
+            <h1 className="text-2xl font-semibold">{dashboard.name}</h1>
+            <div className="flex items-center gap-3">
+              <Link href={editHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+                Edit
+              </Link>
+              <Link href={settingsHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+                Settings
+              </Link>
+            </div>
+          </div>
+        ) : (
+          // Today keeps the headerless look. Edit + Settings float top-right.
+          <div className="flex justify-end gap-3 mb-2">
+            <Link href={editHref} className="text-[0.75rem] text-muted hover:text-foreground">
               Edit
             </Link>
-            <Link href={settingsHref} className="text-[0.8125rem] text-muted hover:text-foreground">
+            <Link href={settingsHref} className="text-[0.75rem] text-muted hover:text-foreground">
               Settings
             </Link>
           </div>
-        </div>
-      ) : (
-        // Today keeps the headerless look. Edit + Settings float top-right.
-        <div className="flex justify-end gap-3 mb-2">
-          <Link href={editHref} className="text-[0.75rem] text-muted hover:text-foreground">
-            Edit
-          </Link>
-          <Link href={settingsHref} className="text-[0.75rem] text-muted hover:text-foreground">
-            Settings
-          </Link>
-        </div>
+        )
       )}
       {widgets.length === 0 ? (
         <DashboardEmptyState settingsHref={settingsHref} editHref={editHref} />
@@ -134,7 +159,7 @@ export async function DashboardRenderer({
   );
 }
 
-function parseWidget(widget: WidgetRow): ParsedWidget {
+function parseWidget(widget: WidgetRow, userId: number): ParsedWidget {
   const def = lookupWidget(widget.widgetType);
   if (!def) {
     return { widget, parsed: null, parseError: null, deps: [] };
@@ -146,7 +171,7 @@ function parseWidget(widget: WidgetRow): ParsedWidget {
       widget,
       parsed,
       parseError: null,
-      deps: dataDeps?.(parsed) ?? [],
+      deps: dataDeps?.(parsed, userId) ?? [],
     };
   } catch (err) {
     return {

@@ -34,6 +34,7 @@ describe("upsertMetric persists alias", () => {
 
     await upsertMetric(
       {
+        userId: 1,
         metricTypeId: inserted[0].id,
         value: 70,
         recordedAt: "2026-01-01T00:00:00Z",

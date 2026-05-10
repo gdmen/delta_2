@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { mergeLog } from "@/db/schema";
 import { desc } from "drizzle-orm";
+import { requireUserOr401 } from "@/lib/auth/require";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * GET /api/merges?limit=N
@@ -21,6 +23,9 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
 export async function GET(request: NextRequest) {
+  const { user, error } = await requireUserOr401();
+  if (error) return error;
+
   const limitRaw = request.nextUrl.searchParams.get("limit");
   let limit = DEFAULT_LIMIT;
   if (limitRaw !== null) {
@@ -42,6 +47,7 @@ export async function GET(request: NextRequest) {
       userId: mergeLog.userId,
     })
     .from(mergeLog)
+    .where(userScope(user.id).mergeLog)
     .orderBy(desc(mergeLog.createdAt))
     .limit(limit);
 

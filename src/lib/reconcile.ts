@@ -7,6 +7,7 @@ import {
   reconcileLog,
 } from "@/db/schema";
 import { and, eq, gte, lte, notInArray, sql } from "drizzle-orm";
+import { userScope } from "@/lib/auth/scope";
 
 /**
  * Reconcile: after an ingest batch upserts its rows, delete other rows
@@ -20,11 +21,12 @@ import { and, eq, gte, lte, notInArray, sql } from "drizzle-orm";
  *     [after, now] reconciles all events of source='strava' in that range.
  *
  * Workflow:
- *   1. Ingest handler creates a ReconcileTracker.
+ *   1. Ingest handler creates a ReconcileTracker(userId).
  *   2. As each metric/event upserts, it records the sourceId + timestamp.
  *   3. After the loop, the handler calls tracker.apply(source).
  *      - If reconcile is off, returns early.
- *      - Otherwise deletes + logs per-type / per-entity.
+ *      - Otherwise deletes + logs per-type / per-entity, all scoped by
+ *        the tracker's owning userId.
  */
 
 export interface ReconcileSummary {
@@ -53,6 +55,11 @@ interface EventBucket {
 export class ReconcileTracker {
   private metricsByType = new Map<number, MetricBucket>();
   private eventBucket: EventBucket | null = null;
+  private userId: number;
+
+  constructor(userId: number) {
+    this.userId = userId;
+  }
 
   recordMetric(metricTypeId: number, sourceId: string | null | undefined, recordedAt: string): void {
     if (!sourceId) return; // can't reconcile against rows with no source_id
@@ -101,7 +108,12 @@ export class ReconcileTracker {
     const settings = await db
       .select({ enabled: sourceSettings.reconcileEnabled })
       .from(sourceSettings)
-      .where(eq(sourceSettings.source, source))
+      .where(
+        and(
+          userScope(this.userId).sourceSettings,
+          eq(sourceSettings.source, source),
+        ),
+      )
       .limit(1);
 
     const enabled = settings[0]?.enabled === true;
@@ -118,6 +130,7 @@ export class ReconcileTracker {
         .delete(metrics)
         .where(
           and(
+            userScope(this.userId).metrics,
             eq(metrics.source, source),
             eq(metrics.metricTypeId, metricTypeId),
             gte(metrics.recordedAt, bucket.minAt),
@@ -131,9 +144,10 @@ export class ReconcileTracker {
         const typeRow = await db
           .select({ name: metricTypes.name })
           .from(metricTypes)
-          .where(eq(metricTypes.id, metricTypeId))
+          .where(and(userScope(this.userId).metricTypes, eq(metricTypes.id, metricTypeId)))
           .limit(1);
         await db.insert(reconcileLog).values({
+          userId: this.userId,
           source,
           kind: "metric",
           metricTypeId,
@@ -158,6 +172,7 @@ export class ReconcileTracker {
         .delete(events)
         .where(
           and(
+            userScope(this.userId).events,
             eq(events.source, source),
             gte(events.startedAt, this.eventBucket.minAt),
             lte(events.startedAt, this.eventBucket.maxAt),
@@ -168,6 +183,7 @@ export class ReconcileTracker {
 
       if (deleted.length > 0) {
         await db.insert(reconcileLog).values({
+          userId: this.userId,
           source,
           kind: "event",
           metricTypeId: null,
@@ -202,7 +218,7 @@ export interface LastReconcile {
  * A "batch" = all reconcile_log rows with the same `at` timestamp (the ingest
  * handler writes them back-to-back in a single call, so they share a second).
  */
-export async function getLastReconcile(source: string): Promise<LastReconcile | null> {
+export async function getLastReconcile(source: string, userId: number): Promise<LastReconcile | null> {
   const rows = await db
     .select({
       id: reconcileLog.id,
@@ -214,7 +230,7 @@ export async function getLastReconcile(source: string): Promise<LastReconcile | 
     })
     .from(reconcileLog)
     .leftJoin(metricTypes, eq(reconcileLog.metricTypeId, metricTypes.id))
-    .where(eq(reconcileLog.source, source))
+    .where(and(userScope(userId).reconcileLog, eq(reconcileLog.source, source)))
     .orderBy(sql`${reconcileLog.at} desc`)
     .limit(50);
 
