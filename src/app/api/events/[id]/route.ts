@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { events } from "@/db/schema";
+import { events, sports } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
@@ -35,6 +35,18 @@ export async function PATCH(
   if (body.sportId !== undefined) {
     if (typeof body.sportId !== "number") {
       return NextResponse.json({ error: "sportId must be a number" }, { status: 400 });
+    }
+    // FK injection guard — same shape as POST /api/events. Without
+    // this check, a PATCH could rewrite the event to point at a
+    // foreign owner's sport, which would then surface in the JOIN
+    // on the listing page.
+    const ownsSport = await db
+      .select({ id: sports.id })
+      .from(sports)
+      .where(and(eq(sports.id, body.sportId), userScope(user.id).sports))
+      .limit(1);
+    if (ownsSport.length === 0) {
+      return NextResponse.json({ error: "sportId not found" }, { status: 400 });
     }
     updates.sportId = body.sportId;
   }

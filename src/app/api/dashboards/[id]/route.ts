@@ -59,7 +59,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
       .update(dashboards)
       .set({
         ...parsed.data,
-        updatedAt: sql`(datetime('now'))`,
+        updatedAt: new Date().toISOString(),
       })
       .where(and(userScope(user.id).dashboards, eq(dashboards.id, id)))
       .returning();

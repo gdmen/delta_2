@@ -10,22 +10,17 @@ import { hashPassword } from "@/lib/auth/password";
  * Body: { code, email, password, displayName }
  *
  * Custom sign-up route for the credentials provider — Auth.js
- * doesn't ship one (it's not part of the OAuth-flavored spec). Steps:
+ * doesn't ship one (it's not part of the OAuth-flavored spec).
  *
- *   1. Validate body shape (email format, password length 8-256,
- *      displayName non-empty).
- *   2. Atomic-claim the invite code via UPDATE...WHERE used_by_user_id
- *      IS NULL + rowCount === 1. The "atomic-claim before user
- *      creation" ordering matters for double-submit safety: if two
- *      tabs claim the same code at once, exactly one wins and the
- *      other gets a "code already used" error WITHOUT a phantom
- *      half-created user row.
- *   3. Check email isn't already taken (race-loseable but the unique
- *      constraint catches it; we check for the friendly error first).
- *   4. Hash password (argon2id, OWASP 2024 params).
- *   5. INSERT users row.
- *   6. Backfill the invite_codes.used_by_user_id with the new user's
- *      id. (Step 2 set used_at; this fills the FK once we have the id.)
+ * Atomicity model (post adversarial-review MEDIUM-1 fix):
+ *   - Hash the password BEFORE the transaction (argon2 is slow and
+ *     allocates 19 MiB; doing it inside the tx would hold a row
+ *     lock for ~150ms).
+ *   - Run claim + user-insert + invite-backfill in a single Postgres
+ *     transaction. If anything fails (email collision, FK error,
+ *     etc.) the tx rolls back and the invite returns to unused
+ *     atomically — no window where another tab sees the code as
+ *     "spent" for a partial signup that didn't actually succeed.
  *
  * Returns the new user's id + email on success. The client then
  * follows up with /api/auth/signin/credentials to issue the JWT
@@ -69,102 +64,96 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "display name required" }, { status: 400 });
   }
 
-  // ---------------------------------------------------------------
-  // Step 2: atomic claim of the invite code. The UPDATE returns 0 rows
-  // if the code is already used (or doesn't exist, or expired) — we
-  // check rowCount instead of doing a SELECT-then-UPDATE which is a
-  // TOCTOU race.
-  //
-  // Note we set used_at NOW but leave used_by_user_id NULL until we
-  // have the new user's id (filled in step 6). The non-null used_at
-  // is what locks the code; the FK fill is bookkeeping.
-  // ---------------------------------------------------------------
-  const claim = await db
-    .update(inviteCodes)
-    .set({ usedAt: new Date().toISOString() })
-    .where(
-      sql`${inviteCodes.code} = ${code} AND ${inviteCodes.usedAt} IS NULL AND (${inviteCodes.expiresAt} IS NULL OR ${inviteCodes.expiresAt} > ${new Date().toISOString()})`,
-    )
-    .returning({ code: inviteCodes.code });
-
-  if (claim.length === 0) {
-    return NextResponse.json(
-      { error: "invite code is invalid, expired, or already used" },
-      { status: 400 },
-    );
-  }
-
-  // ---------------------------------------------------------------
-  // Step 3: friendly check on email collision (the unique constraint
-  // on users.email backstops this).
-  // ---------------------------------------------------------------
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
-  if (existing.length > 0) {
-    // Roll back the invite claim — they can try again with a different
-    // email, or the actual user can sign in.
-    await db
-      .update(inviteCodes)
-      .set({ usedAt: null })
-      .where(eq(inviteCodes.code, code));
-    return NextResponse.json(
-      { error: "email already in use" },
-      { status: 400 },
-    );
-  }
-
-  // ---------------------------------------------------------------
-  // Step 4-5: hash password + create user.
-  // ---------------------------------------------------------------
+  // Hash OUTSIDE the tx — argon2id at OWASP-2024 params takes ~150ms
+  // and allocates 19 MiB. Holding a tx for that long would block
+  // concurrent invite-code claims for no good reason.
   let passwordHash: string;
   try {
     passwordHash = await hashPassword(password);
   } catch (err) {
-    // Roll back the invite claim.
-    await db
-      .update(inviteCodes)
-      .set({ usedAt: null })
-      .where(eq(inviteCodes.code, code));
     return NextResponse.json(
       { error: `password hashing failed: ${err instanceof Error ? err.message : String(err)}` },
       { status: 500 },
     );
   }
 
-  let inserted: { id: number; email: string | null }[];
+  // Single tx: atomic claim, user insert, invite backfill. If any
+  // step throws, Postgres rolls the whole thing back — the invite
+  // returns to "unused," no half-created user, no rolled-back state
+  // for another tab to race against.
+  type SignupOk = { ok: true; userId: number; email: string | null };
+  type SignupErr = { ok: false; status: number; error: string };
+
+  let result: SignupOk | SignupErr;
   try {
-    inserted = await db
-      .insert(users)
-      .values({ email, displayName, passwordHash, createdAt: new Date().toISOString() })
-      .returning({ id: users.id, email: users.email });
+    result = await db.transaction(async (tx) => {
+      const claim = await tx
+        .update(inviteCodes)
+        .set({ usedAt: new Date().toISOString() })
+        .where(
+          sql`${inviteCodes.code} = ${code} AND ${inviteCodes.usedAt} IS NULL AND (${inviteCodes.expiresAt} IS NULL OR ${inviteCodes.expiresAt} > ${new Date().toISOString()})`,
+        )
+        .returning({ code: inviteCodes.code });
+      if (claim.length === 0) {
+        return {
+          ok: false as const,
+          status: 400,
+          error: "invite code is invalid, expired, or already used",
+        };
+      }
+
+      // Friendly pre-check for email collision; the unique index on
+      // users.email backstops it if a concurrent request races us.
+      const existing = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      if (existing.length > 0) {
+        // Throw so the tx rolls back — releases the invite claim.
+        throw new Error("__EMAIL_TAKEN__");
+      }
+
+      const inserted = await tx
+        .insert(users)
+        .values({
+          email,
+          displayName,
+          passwordHash,
+          createdAt: new Date().toISOString(),
+        })
+        .returning({ id: users.id, email: users.email });
+      const newUser = inserted[0];
+
+      await tx
+        .update(inviteCodes)
+        .set({ usedByUserId: newUser.id })
+        .where(eq(inviteCodes.code, code));
+
+      return { ok: true as const, userId: newUser.id, email: newUser.email };
+    });
   } catch (err) {
-    // Most likely a unique constraint violation on email (race we
-    // checked but lost). Roll back the invite claim and report.
-    await db
-      .update(inviteCodes)
-      .set({ usedAt: null })
-      .where(eq(inviteCodes.code, code));
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "__EMAIL_TAKEN__") {
+      return NextResponse.json({ error: "email already in use" }, { status: 400 });
+    }
+    // Unique-constraint race or other Postgres error. The tx already
+    // rolled back, so the invite is still unused.
+    if (msg.includes("unique") || msg.includes("duplicate")) {
+      return NextResponse.json({ error: "email already in use" }, { status: 400 });
+    }
     return NextResponse.json(
-      { error: `user creation failed: ${err instanceof Error ? err.message : String(err)}` },
+      { error: `signup failed: ${msg}` },
       { status: 500 },
     );
   }
 
-  const newUser = inserted[0];
-
-  // ---------------------------------------------------------------
-  // Step 6: backfill the invite-code FK with the new user's id.
-  // ---------------------------------------------------------------
-  await db
-    .update(inviteCodes)
-    .set({ usedByUserId: newUser.id })
-    .where(eq(inviteCodes.code, code));
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
 
   return NextResponse.json({
     ok: true,
-    user: { id: newUser.id, email: newUser.email },
+    user: { id: result.userId, email: result.email },
   });
 }

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { oauthStates } from "@/db/schema";
 import { auth } from "@/lib/auth/config";
 import { getEnv, StravaNotConfiguredError } from "@/lib/strava/client";
+import { publicOrigin } from "@/lib/auth/public-origin";
 
 /**
  * GET /api/ingest/strava/connect
@@ -61,16 +62,19 @@ export async function GET(request: NextRequest) {
   // negligible in any realistic horizon).
   await db.insert(oauthStates).values({ state, userId, expiresAt });
 
-  // The redirect URI has to match the Authorization Callback Domain in Strava's app settings.
-  // Behind Nginx (our prod setup), request.nextUrl.origin resolves to the internal
-  // http://localhost:3000 because Next.js doesn't automatically trust X-Forwarded-*
-  // headers. We respect them explicitly here so the redirect_uri we hand to Strava
-  // is the public HTTPS origin. Falls back to the incoming URL for local dev.
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  const host = forwardedHost ?? request.headers.get("host") ?? request.nextUrl.host;
-  const proto = forwardedProto ?? request.nextUrl.protocol.replace(":", "");
-  const origin = `${proto}://${host}`;
+  // Resolve the public origin from X-Forwarded-* but gate against
+  // ALLOWED_PUBLIC_HOSTS so a spoofed header can't redirect Strava's
+  // auth code to an attacker-controlled host. See public-origin.ts.
+  let origin: string;
+  try {
+    origin = publicOrigin(request);
+  } catch (err) {
+    console.error("[strava/connect] publicOrigin rejected:", err);
+    return NextResponse.json(
+      { error: "host not allowed for OAuth redirect" },
+      { status: 500 },
+    );
+  }
   const redirectUri = `${origin}/api/ingest/strava/callback`;
 
   const authUrl = new URL("https://www.strava.com/oauth/authorize");

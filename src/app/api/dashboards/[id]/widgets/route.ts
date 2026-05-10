@@ -105,7 +105,7 @@ export async function POST(req: Request, { params }: Ctx) {
   // Bump the dashboard's updated_at so list views reflect the change.
   await db
     .update(dashboards)
-    .set({ updatedAt: sql`(datetime('now'))` })
+    .set({ updatedAt: new Date().toISOString() })
     .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ widget: inserted[0] }, { status: 201 });

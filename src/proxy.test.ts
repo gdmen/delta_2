@@ -184,5 +184,45 @@ describe("proxy auth gate", () => {
       // match, no cookie present → 401.
       expect(res.status).toBe(401);
     });
+
+    // Adversarial review MEDIUM-6: pin the encoded-sequence behavior
+    // against a Next regression. WHATWG URL parsing should decode +
+    // collapse these BEFORE the proxy sees them; if a future Next
+    // upgrade changes that, this test screams.
+    it("percent-encoded traversal: /share/foo/%2E%2E/api/users/me", () => {
+      const res = proxy(makeRequest("/share/foo/%2E%2E/api/users/me"));
+      // Decoded + collapsed → `/share/api/users/me` (no nested route,
+      // 404s downstream, but the proxy correctly considers it exempt).
+      // Exit code 200 means the proxy passed it through; whatever
+      // happens downstream is the route layer's job.
+      expect(res.status).toBe(200);
+    });
+
+    it("double-encoded traversal: /share/foo/%252E%252E/api/users/me", () => {
+      // %25 is "%", so %252E is "%2E" as a literal. After ONE level
+      // of decoding the path contains literal `%2E%2E`, which is
+      // NOT a traversal sequence to the WHATWG URL parser. Treated
+      // as a normal path segment — exempt under /share/, no further
+      // collapse.
+      const res = proxy(makeRequest("/share/foo/%252E%252E/api/users/me"));
+      expect(res.status).toBe(200);
+    });
+
+    it("traversal that escapes /share/: /share/%2E%2E/api/users/me", () => {
+      // Single-encoded, decodes to `/share/../api/users/me` then
+      // collapses to `/api/users/me`. Should NOT be exempt.
+      const res = proxy(makeRequest("/share/%2E%2E/api/users/me"));
+      expect(res.status).toBe(401);
+    });
+
+    it("traversal with backslash variant: /share\\..\\api/users/me", () => {
+      // Backslash is NOT a path separator in URL pathname under
+      // WHATWG; it's just another character. Should stay as
+      // `/share\\..\\api/users/me`, prefix-match `/share/`? No —
+      // because the prefix is `/share/` (with slash), this path
+      // doesn't match. Falls through to the auth gate → 401.
+      const res = proxy(makeRequest("/share\\..\\api/users/me"));
+      expect(res.status).toBe(401);
+    });
   });
 });

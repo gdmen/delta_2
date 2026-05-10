@@ -574,6 +574,131 @@ function rowsFrom<T>(body: unknown): T[] {
 });
 
 // ============================================================================
+// FK-injection class: Bob references Alice's owned FK ids on create/update
+// ============================================================================
+//
+// Adversarial review CRITICAL-3 finding: routes that accept foreign-key
+// ids (sportId, metricTypeId) from the request body but only filter the
+// PARENT table by user_id let Bob attach to Alice's sport / metric_type.
+// The reads then JOIN sports/metricTypes and render Alice's name/color
+// in Bob's UI — cross-user data leak through a fanout that the existing
+// harness didn't cover.
+
+describe("cross-user isolation harness — FK-injection class", () => {
+  it("POST /api/goals refuses Alice's sportId from Bob's session", async () => {
+    asBob();
+    const goalsRoute = await import("@/app/api/goals/route");
+    // Bob owns a sport/metric_type too so we can craft a body where
+    // ONLY the sportId is foreign — proves the check fires per-field.
+    const db = ctx.getDb();
+    const [bobSport] = await db
+      .insert(sports)
+      .values({ userId: 20, name: "bob-sport", color: "#bbb" })
+      .returning({ id: sports.id });
+    const [bobMt] = await db
+      .insert(metricTypes)
+      .values({ userId: 20, name: "bob-metric", unit: "kg" })
+      .returning({ id: metricTypes.id });
+
+    // Bob's metric, Alice's sport → reject.
+    const res = await goalsRoute.POST(
+      req("http://test/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metricTypeId: bobMt.id,
+          sportId: fx.aliceSportId,
+          targetValue: 1,
+          deadline: "2027-01-01",
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+
+    // Bob's sport, Alice's metric → reject.
+    const res2 = await goalsRoute.POST(
+      req("http://test/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metricTypeId: fx.aliceMetricTypeId,
+          sportId: bobSport.id,
+          targetValue: 1,
+          deadline: "2027-01-01",
+        }),
+      }),
+    );
+    expect(res2.status).toBe(400);
+
+    // Both foreign → reject.
+    const res3 = await goalsRoute.POST(
+      req("http://test/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metricTypeId: fx.aliceMetricTypeId,
+          sportId: fx.aliceSportId,
+          targetValue: 1,
+          deadline: "2027-01-01",
+        }),
+      }),
+    );
+    expect(res3.status).toBe(400);
+  });
+
+  it("POST /api/events refuses Alice's sportId from Bob's session", async () => {
+    asBob();
+    const eventsRoute = await import("@/app/api/events/route");
+    const res = await eventsRoute.POST(
+      req("http://test/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sportId: fx.aliceSportId,
+          type: "lift",
+        }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH /api/events/[id] refuses retargeting Bob's event onto Alice's sport", async () => {
+    asBob();
+    const db = ctx.getDb();
+    // Bob needs an event of his own to PATCH.
+    const [bobSport] = await db
+      .insert(sports)
+      .values({ userId: 20, name: "bob-sport-2", color: "#bb2" })
+      .returning({ id: sports.id });
+    const [bobEvent] = await db
+      .insert(events)
+      .values({
+        userId: 20,
+        sportId: bobSport.id,
+        type: "lift",
+        startedAt: "2026-01-01T00:00:00Z",
+      })
+      .returning({ id: events.id });
+
+    const eventsIdRoute = await import("@/app/api/events/[id]/route");
+    const res = await eventsIdRoute.PATCH(
+      req("http://test/", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sportId: fx.aliceSportId }),
+      }),
+      { params: Promise.resolve({ id: String(bobEvent.id) }) },
+    );
+    expect(res.status).toBe(400);
+
+    // Bob's event still points at his own sport — the rejected PATCH
+    // didn't sneak a partial update through.
+    const after = await db.select().from(events).where(eq(events.id, bobEvent.id));
+    expect(after[0].sportId).toBe(bobSport.id);
+  });
+});
+
+// ============================================================================
 // Share-link viewer reads OWNER's data, never the viewer's
 // ============================================================================
 

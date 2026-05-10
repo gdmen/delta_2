@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { oauthStates } from "@/db/schema";
 import { exchangeCode, saveTokens } from "@/lib/strava/client";
+import { publicOrigin as publicOriginOf } from "@/lib/auth/public-origin";
 
 /**
  * GET /api/ingest/strava/callback?code=...&state=...
@@ -30,15 +31,20 @@ export async function GET(request: NextRequest) {
   const state = params.get("state");
   const error = params.get("error");
 
-  // Respect forwarded headers (Nginx sets these) so we redirect back to the
-  // public origin rather than internal localhost:3000.
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  const host = forwardedHost ?? request.headers.get("host") ?? request.nextUrl.host;
-  const proto = forwardedProto ?? request.nextUrl.protocol.replace(":", "");
-  const publicOrigin = `${proto}://${host}`;
+  // Resolve the public origin via ALLOWED_PUBLIC_HOSTS-gated helper.
+  // Spoofed X-Forwarded-Host can't redirect the user off-site here.
+  let origin: string;
+  try {
+    origin = publicOriginOf(request);
+  } catch (err) {
+    console.error("[strava/callback] publicOrigin rejected:", err);
+    return NextResponse.json(
+      { error: "host not allowed for OAuth redirect" },
+      { status: 500 },
+    );
+  }
 
-  const destUrl = new URL("/data-sources/strava", publicOrigin);
+  const destUrl = new URL("/data-sources/strava", origin);
 
   if (error) {
     destUrl.searchParams.set("status", "error");

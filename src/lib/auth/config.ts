@@ -2,7 +2,7 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, getDb } from "@/db";
 import {
@@ -12,6 +12,8 @@ import {
   verificationTokens,
 } from "@/db/schema";
 import { verifyPassword } from "./password";
+import { denylist } from "./denylist";
+import { recordSigninAttempt } from "./rate-limit";
 
 /**
  * Auth.js v5 configuration. Two providers (credentials + Google) on
@@ -89,11 +91,22 @@ export const authConfig: NextAuthConfig = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(rawCreds) {
+      async authorize(rawCreds, request) {
         const email = typeof rawCreds.email === "string" ? rawCreds.email : "";
         const password =
           typeof rawCreds.password === "string" ? rawCreds.password : "";
         if (!email || !password) return null;
+
+        // Rate limit BEFORE the DB read and BEFORE argon2.verify.
+        // Per-email + per-IP independent buckets; either tripping
+        // returns null (generic "invalid credentials"). The
+        // x-forwarded-for header is set by the proxy in front;
+        // fall back to whatever Node sees if absent.
+        const fwd = request?.headers?.get?.("x-forwarded-for") ?? "";
+        const ip = fwd.split(",")[0]?.trim() || null;
+        if (!recordSigninAttempt(email, ip)) {
+          return null;
+        }
 
         const found = await db
           .select({
@@ -171,32 +184,96 @@ export const authConfig: NextAuthConfig = {
     },
     /**
      * Session callback shapes what `auth()` returns to server
-     * components. We surface the userId only — everything else
-     * (displayName, isOwner) is fetched on demand via requireUser()
-     * to avoid stale data.
+     * components. We surface the userId, the JWT `jti` (for
+     * denylist checks + signout), and `pwv` (for the
+     * kill-all-sessions invariant). Everything else (displayName,
+     * isOwner) is fetched on demand via requireUser() to avoid
+     * stale data.
      */
     async session({ session, token }) {
       if (token.sub && session.user) {
         session.user.id = token.sub;
       }
+      // The next-auth.d.ts augmentation tells TS these are valid
+      // session fields. At runtime they're just object props.
+      if (typeof token.jti === "string") session.jti = token.jti;
+      if (typeof token.pwv === "number") session.pwv = token.pwv;
+      // iat is stamped by Auth.js at JWT issue. Exposed so
+      // /api/users/me can gate the Google-only "set a password"
+      // path on JWT freshness (re-auth required within 5 min).
+      if (typeof token.iat === "number") session.iat = token.iat;
       return session;
     },
     /**
-     * Allow sign-in. The Google-OAuth invite-claim atomicity (per the
-     * eng-review HIGH finding) is wired in a later phase via the
-     * /api/auth/signup/google route + cookie-stashed invite code.
-     * Today this just blocks an OAuth sign-in if no users row exists
-     * yet — the adapter would create one but we want the bootstrap
-     * owner row to exist first.
+     * Sign-in gate. The credentials provider already filtered through
+     * authorize() above. This callback's job is the Google branch:
+     * the adversarial review's HIGH-3 finding was that any Google
+     * account could register without an invite, because the adapter
+     * happily creates+links on first sign-in.
+     *
+     * Conservative gate: only allow Google sign-in for users who
+     * ALREADY have an accounts row binding their Google
+     * providerAccountId to a Delta users row. New Google sign-ups
+     * go through the invite-gated /signup form (email + password)
+     * until phase 5 wires the cookie-stashed invite-claim flow for
+     * Google sign-up specifically.
+     *
+     * Effect: existing Google-linked users sign in normally. Anyone
+     * with a Google account who isn't already linked gets bounced
+     * to /signin?error=oauth (no row created, no orphan).
      */
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        // TODO(pr2-phase-5): wire the invite-code claim here.
-        // For now, allow Google sign-in to any existing user (the
-        // adapter creates+links accounts row automatically).
+        const providerAccountId = account.providerAccountId;
+        if (!providerAccountId) return false;
+        try {
+          const linked = await db
+            .select({ userId: accounts.userId })
+            .from(accounts)
+            .where(
+              and(
+                eq(accounts.provider, "google"),
+                eq(accounts.providerAccountId, providerAccountId),
+              ),
+            )
+            .limit(1);
+          if (linked.length === 0) {
+            // No existing link — refuse. Auth.js will NOT create the
+            // users / accounts rows when signIn returns false, so no
+            // orphan rows to clean up.
+            return false;
+          }
+          return true;
+        } catch (err) {
+          // Fail closed on DB errors during the linkage check.
+          console.error("[auth.signIn] google linkage check failed:", err);
+          return false;
+        }
       }
       // Credentials path already filtered through authorize() above.
       return Boolean(user);
+    },
+  },
+  events: {
+    /**
+     * Belt-and-suspenders denylist insert. The custom POST route at
+     * /api/auth/signout already denylists, but Auth.js's default GET
+     * signout (re-exported via [...nextauth]) would bypass it. This
+     * hook fires on EVERY signOut Auth.js performs, regardless of
+     * which surface triggered it.
+     */
+    async signOut(message) {
+      try {
+        const token = "token" in message ? message.token : null;
+        const jti = typeof token?.jti === "string" ? token.jti : "";
+        const sub = typeof token?.sub === "string" ? token.sub : "";
+        const userId = parseInt(sub, 10);
+        if (jti && Number.isFinite(userId)) {
+          await denylist(jti, userId);
+        }
+      } catch (err) {
+        console.error("[auth.events.signOut] denylist insert failed:", err);
+      }
     },
   },
   pages: {

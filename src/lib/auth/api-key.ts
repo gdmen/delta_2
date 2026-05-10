@@ -83,6 +83,10 @@ export async function validateUserApiKey(
         and(
           eq(ingestConfigs.source, "apple_health"),
           eq(ingestConfigs.lookupHash, hash),
+          // Honor the enabled flag — an admin (or the user) can set
+          // enabled=false to suspend HAE ingest without deleting
+          // the row. Without this filter, the flag is decorative.
+          eq(ingestConfigs.enabled, true),
         ),
       )
       .limit(1);
@@ -115,9 +119,15 @@ export async function validateUserApiKey(
   let plaintext: string;
   try {
     plaintext = decrypt(row.encryptedValue);
-  } catch {
+  } catch (err) {
     // Decryption failed — possibly a key-rotation event or tampering.
-    // Generic 401, log somewhere if instrumented.
+    // Generic 401 to the caller (no oracle); log loudly so the
+    // operator can distinguish "user rotated and forgot to update
+    // the Shortcut" from "someone tampered with the ciphertext."
+    console.error(
+      `[hae/validate] decrypt failed for user_id ${row.userId}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return {
       userId: null,
       error: NextResponse.json({ error: "Invalid API key" }, { status: 401 }),
@@ -161,6 +171,8 @@ export async function generateAndSaveHaeKey(
     .limit(1);
 
   if (existing.length === 0) {
+    // First-time row: default enabled=true is fine — the user just
+    // generated this key, they want ingest on.
     await db.insert(ingestConfigs).values({
       userId,
       source: "apple_health",
@@ -169,9 +181,12 @@ export async function generateAndSaveHaeKey(
       enabled: true,
     });
   } else {
+    // Regenerate path: preserve the existing enabled flag. If an
+    // admin or the user disabled ingest, regenerating the key
+    // shouldn't silently re-enable it.
     await db
       .update(ingestConfigs)
-      .set({ encryptedValue, lookupHash: hash, enabled: true })
+      .set({ encryptedValue, lookupHash: hash })
       .where(
         and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "apple_health")),
       );

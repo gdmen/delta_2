@@ -69,6 +69,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // FK injection guard. Without these per-user checks, any caller
+  // can attach a goal to ANY metric_type or sport id — the SELECT
+  // JOIN on /goals would then leak the foreign owner's metric/sport
+  // name + color into the caller's UI. The schema FKs alone don't
+  // enforce per-user ownership; the queries do.
+  const ownsMt = await db
+    .select({ id: metricTypes.id })
+    .from(metricTypes)
+    .where(and(eq(metricTypes.id, body.metricTypeId), userScope(user.id).metricTypes))
+    .limit(1);
+  if (ownsMt.length === 0) {
+    return NextResponse.json({ error: "metricTypeId not found" }, { status: 400 });
+  }
+  const ownsSport = await db
+    .select({ id: sports.id })
+    .from(sports)
+    .where(and(eq(sports.id, body.sportId), userScope(user.id).sports))
+    .limit(1);
+  if (ownsSport.length === 0) {
+    return NextResponse.json({ error: "sportId not found" }, { status: 400 });
+  }
+
   const result = await db.insert(goals).values({
     userId: user.id,
     metricTypeId: body.metricTypeId,

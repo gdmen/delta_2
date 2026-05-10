@@ -31,9 +31,23 @@ export default async function SignInPage({
  * but we still belt-and-suspenders so an attacker can't craft a
  * `?from=https://evil.example.com/phish` link that bounces a freshly-
  * signed-in user off-site.
+ *
+ * The naive `startsWith("/") && !startsWith("//")` check (what we
+ * shipped first) has a real bypass: WHATWG URL parsing in Chrome and
+ * Safari normalizes backslashes to forward slashes, so `/\evil.com`
+ * passes the check then becomes `//evil.com` (protocol-relative
+ * external redirect) at navigation time. Parse the URL against a
+ * sentinel origin instead and assert the result's origin matches —
+ * any path that normalizes off-site fails this check.
  */
 function safeRedirect(from?: string): string {
   if (!from) return "/";
-  if (!from.startsWith("/") || from.startsWith("//")) return "/";
-  return from;
+  try {
+    const SENTINEL = "http://delta.internal";
+    const u = new URL(from, SENTINEL);
+    if (u.origin !== SENTINEL) return "/";
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return "/";
+  }
 }

@@ -71,11 +71,18 @@ export async function loadTokens(userId: number): Promise<StravaTokens | null> {
   try {
     const plaintext = decrypt(blob);
     return JSON.parse(plaintext) as StravaTokens;
-  } catch {
+  } catch (err) {
     // Either decrypt failed (tampered or wrong key) or JSON parse
     // failed (legacy un-encrypted row from before this commit).
     // Returning null surfaces as "Strava not connected" — user
-    // re-OAuths and the row gets rewritten as encrypted.
+    // re-OAuths and the row gets rewritten as encrypted. Log so
+    // tampering doesn't go silent: a normal "user is just not
+    // connected" hits the rows.length === 0 branch above, never
+    // this one.
+    console.error(
+      `[strava/loadTokens] decrypt/parse failed for user ${userId}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   }
 }

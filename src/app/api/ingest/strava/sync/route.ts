@@ -217,11 +217,22 @@ async function ingestOne(
 
 /**
  * GET /api/ingest/strava/sync
- * Returns connection status + last sync time.
+ * Returns connection status + last sync time FOR THE CALLER.
+ *
+ * Hardcoded user_id=1 was the bug shipped in PR2 phase 4 — the proxy
+ * exempts /api/ingest/* from the cookie gate (so the HAE bearer path
+ * works), which made this GET an unauthenticated cross-user oracle
+ * for the owner's Strava identity. Now requires a session and scopes
+ * both the token-load AND the lastSyncAt SELECT to the caller.
  */
 export async function GET() {
-  
-  const tokens = await loadTokens(1);
+  const session = await auth();
+  const userId = session?.user?.id ? parseInt(session.user.id, 10) : NaN;
+  if (!Number.isFinite(userId)) {
+    return NextResponse.json({ error: "not signed in" }, { status: 401 });
+  }
+
+  const tokens = await loadTokens(userId);
   if (!tokens) {
     return NextResponse.json({ connected: false });
   }
@@ -229,7 +240,9 @@ export async function GET() {
   const rows = await db
     .select({ lastSyncAt: ingestConfigs.lastSyncAt })
     .from(ingestConfigs)
-    .where(eq(ingestConfigs.source, "strava"))
+    .where(
+      and(eq(ingestConfigs.userId, userId), eq(ingestConfigs.source, "strava")),
+    )
     .limit(1);
 
   return NextResponse.json({

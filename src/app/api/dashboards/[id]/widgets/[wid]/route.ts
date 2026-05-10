@@ -107,7 +107,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
 
   await db
     .update(dashboards)
-    .set({ updatedAt: sql`(datetime('now'))` })
+    .set({ updatedAt: new Date().toISOString() })
     .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ widget: updated[0] });
@@ -153,7 +153,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     );
   await db
     .update(dashboards)
-    .set({ updatedAt: sql`(datetime('now'))` })
+    .set({ updatedAt: new Date().toISOString() })
     .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
 
   return NextResponse.json({ ok: true });

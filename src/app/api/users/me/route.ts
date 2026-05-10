@@ -4,9 +4,14 @@ import { db } from "@/db";
 import { users, ingestConfigs, coachCalls } from "@/db/schema";
 import { createHash } from "node:crypto";
 import { requireUserOr401 } from "@/lib/auth/require";
+import { auth } from "@/lib/auth/config";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { generateAndSaveHaeKey } from "@/lib/auth/api-key";
 import { generateBearerToken } from "@/lib/auth/secrets";
+
+// Re-auth freshness window for the Google-only "Set a password" path.
+// The token's `iat` must be at most this old. Plan called for 5 min.
+const RECENT_OAUTH_WINDOW_S = 5 * 60;
 
 /**
  * /api/users/me — the signed-in user's own profile.
@@ -100,9 +105,36 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+    } else if (currentHash === "!") {
+      // Un-bootstrapped owner placeholder. The bootstrap script
+      // (scripts/admin-bootstrap-owner.ts) is the supported path
+      // for replacing the '!' placeholder. Refuse from the web
+      // route — a hijacked session for this row would otherwise
+      // get persistent credentials without any current-password
+      // proof.
+      return NextResponse.json(
+        { error: "owner has not been bootstrapped — run scripts/admin-bootstrap-owner.ts" },
+        { status: 400 },
+      );
+    } else {
+      // currentHash IS NULL → Google-only user adding a password.
+      // The eng-review HIGH-4 finding: without re-auth a session
+      // hijack on a Google user instantly grants persistent
+      // credentials access. Require fresh OAuth (token iat within
+      // RECENT_OAUTH_WINDOW_S of now).
+      const session = await auth();
+      const iat = typeof session?.iat === "number" ? session.iat : 0;
+      const ageS = Math.floor(Date.now() / 1000) - iat;
+      if (!iat || ageS > RECENT_OAUTH_WINDOW_S) {
+        return NextResponse.json(
+          {
+            error:
+              "re-auth required — sign out, sign back in with Google, then retry within 5 minutes",
+          },
+          { status: 403 },
+        );
+      }
     }
-    // else: Google-only or un-bootstrapped owner — no current
-    // password to verify (covered by TODO above).
 
     const newHash = await hashPassword(newPassword);
     await db

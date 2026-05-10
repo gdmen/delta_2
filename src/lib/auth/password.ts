@@ -34,7 +34,19 @@ const TEST_OPTIONS: argon2.Options = {
 };
 
 function options(): argon2.Options {
-  return process.env.LOW_MEMORY_ARGON_FOR_TESTS ? TEST_OPTIONS : PROD_OPTIONS;
+  // LOW_MEMORY_ARGON_FOR_TESTS is a dev/CI convenience to skip the
+  // 19 MiB argon2 work in tests. If it leaks into prod (operator
+  // sets it during a deploy debug session and forgets), passwords
+  // get re-hashed at weak parameters on rotation. Refuse to honor
+  // it under NODE_ENV=production. Production = the only place this
+  // env-var matters; dev/test = legitimate.
+  if (
+    process.env.LOW_MEMORY_ARGON_FOR_TESTS &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    return TEST_OPTIONS;
+  }
+  return PROD_OPTIONS;
 }
 
 export async function hashPassword(plaintext: string): Promise<string> {

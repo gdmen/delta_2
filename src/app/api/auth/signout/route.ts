@@ -11,27 +11,30 @@ import { denylist } from "@/lib/auth/denylist";
  * (or extracted before sign-out) would still be honored by
  * `requireUser()` until JWT TTL expires.
  *
- * TODO(pr2-phase-5): we don't currently have access to the raw jti
- * here — Auth.js's `auth()` returns the decoded session, not the
- * underlying token. Surface jti on the session callback in
- * config.ts so this route can read it. For now we just call
- * Auth.js's signOut which clears the cookie; the denylist insert
- * is a stub that will be wired once jti is exposed.
+ * Belt-and-suspenders: Auth.js's default GET signout path at
+ * /api/auth/signout (re-exported via the [...nextauth] handler)
+ * would bypass this route. The `events.signOut` hook in config.ts
+ * catches that case by denylisting on every Auth.js signOut,
+ * regardless of HTTP method, so the kill-switch holds even when
+ * the user is sent through Auth.js's own form.
  */
 
 export async function POST() {
   const session = await auth();
-  // TODO: read jti from the JWT (currently not surfaced on session).
-  // When wired:
-  //   const jti = session?.jti as string | undefined;
-  //   const userId = parseInt(session?.user?.id ?? "", 10);
-  //   if (jti && Number.isFinite(userId)) await denylist(jti, userId);
-  void denylist; // keep import live until wired
 
-  // Auth.js's signOut clears the cookie. With redirect: false it
-  // returns void, so we hand the client a clean 200 + null body and
-  // let the client navigate.
   if (session) {
+    const jti = typeof session.jti === "string" ? session.jti : "";
+    const userId = parseInt(session.user?.id ?? "", 10);
+    if (jti && Number.isFinite(userId)) {
+      // Don't let a denylist write failure block the signOut.
+      // events.signOut in config.ts also denylists, so either
+      // path lands the row.
+      try {
+        await denylist(jti, userId);
+      } catch (err) {
+        console.error("[signout] denylist insert failed:", err);
+      }
+    }
     await signOut({ redirect: false });
   }
 
