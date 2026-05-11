@@ -60,7 +60,6 @@ export function MetricsGridComponent({
               title={c.title ?? c.metric}
               metricName={c.metric}
               series={s}
-              window={c.windowDays ? `${c.windowDays}d` : undefined}
               headline={c.headline}
               xMin={sharedRange?.min}
               xMax={sharedRange?.max}

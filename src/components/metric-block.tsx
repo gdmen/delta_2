@@ -10,7 +10,6 @@ export function MetricBlock({
   title,
   metricName,
   series,
-  window,
   headline = "latest",
   xMin,
   xMax,
@@ -24,11 +23,10 @@ export function MetricBlock({
   /** Series carries unit + target + higherIsBetter (sourced from
    * metric_types). Widgets pass it through unchanged. */
   series: Series;
-  /** Human label for the delta window, e.g. "30d". Defaults to "all time". */
-  window?: string;
   /** "latest" = last sample value + first→last delta (default). "avg" = mean
    * of all samples in `series`. Pick "avg" for windowed compliance dashboards
-   * (sleep avg this week). */
+   * (sleep avg this week). The window itself is conveyed by the chart's
+   * x-axis below — the headline group intentionally doesn't repeat it. */
   headline?: "latest" | "avg";
   /** Shared X-axis range, in epoch ms — for aligning multiple blocks. */
   xMin?: number;
@@ -41,7 +39,6 @@ export function MetricBlock({
   const latest = series.samples[series.samples.length - 1]?.value;
   const first = series.samples[0]?.value;
   const delta = latest !== undefined && first !== undefined ? latest - first : null;
-  const deltaLabel = window ?? "all time";
 
   const avg =
     series.samples.length > 0
@@ -112,9 +109,7 @@ export function MetricBlock({
         {hasData && (
           <div className="flex items-baseline gap-3">
             {headline === "avg" ? (
-              <span className="font-mono text-[0.75rem] text-muted">
-                {window ?? "all time"} avg
-              </span>
+              <span className="font-mono text-[0.75rem] text-muted">avg</span>
             ) : (
               delta !== null &&
               series.samples.length > 1 && (
@@ -124,7 +119,7 @@ export function MetricBlock({
                   }`}
                 >
                   {delta > 0 ? "+" : ""}
-                  {delta.toFixed(decimals)} / {deltaLabel}
+                  {delta.toFixed(decimals)}
                 </span>
               )
             )}

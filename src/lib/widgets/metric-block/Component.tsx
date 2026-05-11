@@ -27,7 +27,6 @@ export function MetricBlockComponent({
       title={config.title ?? config.metric}
       metricName={config.metric}
       series={series}
-      window={config.windowDays ? `${config.windowDays}d` : undefined}
       headline={config.headline}
     />
   );
