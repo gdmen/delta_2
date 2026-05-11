@@ -46,6 +46,19 @@ import { recordSigninAttempt } from "./rate-limit";
  */
 
 export const authConfig: NextAuthConfig = {
+  // Auth.js v5 defaults to refusing requests whose Host header it
+  // can't verify (`UntrustedHost` — guards against host-header
+  // attacks that build OAuth redirect-URIs from arbitrary hosts).
+  // We sit behind nginx, which proxies `Host: delta.garymenezes.com`
+  // → `localhost:3000`. Without trustHost, Auth.js sees both the
+  // forwarded canonical host AND `localhost:3000` and refuses both.
+  //
+  // Safe to enable here because the proxy layer (src/proxy.ts +
+  // src/lib/auth/public-origin.ts) already gates host resolution
+  // against ALLOWED_PUBLIC_HOSTS. Defense-in-depth, not
+  // defense-by-default-deny.
+  trustHost: true,
+
   // The drizzle adapter needs the db handle and the four standard
   // tables. We pass them explicitly because our schema lives in
   // src/db/schema.ts and the adapter doesn't know where to find it.
