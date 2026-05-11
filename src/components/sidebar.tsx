@@ -75,12 +75,13 @@ export function Sidebar({ dashboards, user }: SidebarProps) {
 
       <nav
         className={`
-          fixed top-0 left-0 h-screen overflow-y-auto py-5 z-50
+          fixed top-0 h-screen overflow-y-auto py-5 z-50
           w-[260px] md:w-[200px]
-          border-r border-border bg-background
+          right-0 md:right-auto md:left-0
+          border-l md:border-l-0 md:border-r border-border bg-background
           transition-transform duration-200
           flex flex-col
-          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+          ${mobileOpen ? "translate-x-0" : "translate-x-full"}
           md:translate-x-0
         `}
         aria-label="Primary"
