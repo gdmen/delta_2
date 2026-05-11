@@ -77,7 +77,7 @@ export function MetricBlock({
           : "text-accent-red";
 
   return (
-    <div>
+    <div className="@container/metric-block">
       {/*
        * Header layout:
        *
@@ -87,14 +87,19 @@ export function MetricBlock({
        * inseparable headline group on the left. Target lives in its
        * own flex child on the right.
        *
-       * `flex-wrap` on the OUTER container lets the target drop to a
-       * second line when the row is narrow:
+       * Wrapping behavior is driven by a CONTAINER QUERY on this
+       * block's own width, not by per-row flex-wrap that responds to
+       * the row's content. That matters when several blocks share a
+       * grid: at the same container width they ALL wrap together,
+       * not whichever ones have the longest content. A 28rem
+       * threshold (covers "WATER 100.6fl_oz_us avg" + a target pill
+       * with comfortable gap) keeps the headline single-line at
+       * desktop column widths and drops target to its own line at
+       * mobile + narrow editor columns.
        *
-       *   line 1   [LABEL] [value] [avg|delta]
-       *   line 2   [target]
-       *
-       * The headline group's own contents never wrap among themselves
-       * — "WATER 100.6fl_oz_us avg" stays glued.
+       *   wide   (>= 28rem):   [LABEL] [value] [avg]    [target]
+       *   narrow (< 28rem):    [LABEL] [value] [avg]
+       *                        [target]
        */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3">
         <div className="flex items-baseline gap-x-3 min-w-0">
@@ -143,7 +148,7 @@ export function MetricBlock({
             ))}
         </div>
         {hasData && target !== undefined && (
-          <span className="font-mono text-[0.75rem] text-muted">
+          <span className="font-mono text-[0.75rem] text-muted @max-[28rem]/metric-block:basis-full">
             target {target}
             {unit}
           </span>
