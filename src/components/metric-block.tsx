@@ -79,15 +79,22 @@ export function MetricBlock({
   return (
     <div>
       {/*
-       * Header layout: the label + primary value form one group
-       * pinned to the left/right ends of the top line; metadata pills
-       * (delta-vs-window, target) live in a separate flex group that
-       * wraps below the headline group when the widget is narrow.
+       * Header layout:
        *
-       * The `flex-wrap` is on the OUTER container so the metadata
-       * group as a whole drops to a second line, but the label+value
-       * inside the headline group are non-wrappable — they stay
-       * glued ("WATER 100.6fl_oz_us" never breaks across lines).
+       *   line 1   [LABEL] [value] [avg|delta]      [target]
+       *
+       * The label, primary value, and avg/delta indicator form one
+       * inseparable headline group on the left. Target lives in its
+       * own flex child on the right.
+       *
+       * `flex-wrap` on the OUTER container lets the target drop to a
+       * second line when the row is narrow:
+       *
+       *   line 1   [LABEL] [value] [avg|delta]
+       *   line 2   [target]
+       *
+       * The headline group's own contents never wrap among themselves
+       * — "WATER 100.6fl_oz_us avg" stays glued.
        */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3">
         <div className="flex items-baseline gap-x-3 min-w-0">
@@ -118,10 +125,8 @@ export function MetricBlock({
           ) : (
             <span className="font-mono text-[0.875rem] text-muted">No data</span>
           )}
-        </div>
-        {hasData && (
-          <div className="flex items-baseline gap-3">
-            {headline === "avg" ? (
+          {hasData &&
+            (headline === "avg" ? (
               <span className="font-mono text-[0.75rem] text-muted">avg</span>
             ) : (
               delta !== null &&
@@ -135,14 +140,13 @@ export function MetricBlock({
                   {delta.toFixed(decimals)}
                 </span>
               )
-            )}
-            {target !== undefined && (
-              <span className="font-mono text-[0.75rem] text-muted">
-                target {target}
-                {unit}
-              </span>
-            )}
-          </div>
+            ))}
+        </div>
+        {hasData && target !== undefined && (
+          <span className="font-mono text-[0.75rem] text-muted">
+            target {target}
+            {unit}
+          </span>
         )}
       </div>
       <MetricTrend
