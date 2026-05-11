@@ -74,55 +74,68 @@ export function MetricBlock({
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
-          {metricName ? (
-            <Link
-              href={`/data/metrics/${encodeURIComponent(metricName)}`}
-              className="hover:text-foreground"
-              title="Edit metric (target, direction, history)"
-            >
-              {title}
-            </Link>
-          ) : (
-            title
-          )}
-        </h3>
-        <div className="flex items-baseline gap-3">
+      {/*
+       * Header layout: the label + primary value form one group
+       * pinned to the left/right ends of the top line; metadata pills
+       * (delta-vs-window, target) live in a separate flex group that
+       * wraps below the headline group when the widget is narrow.
+       *
+       * The `flex-wrap` is on the OUTER container so the metadata
+       * group as a whole drops to a second line, but the label+value
+       * inside the headline group are non-wrappable — they stay
+       * glued ("WATER 100.6fl_oz_us" never breaks across lines).
+       */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3">
+        <div className="flex items-baseline gap-x-3 min-w-0">
+          <h3 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
+            {metricName ? (
+              <Link
+                href={`/data/metrics/${encodeURIComponent(metricName)}`}
+                className="hover:text-foreground"
+                title="Edit metric (target, direction, history)"
+              >
+                {title}
+              </Link>
+            ) : (
+              title
+            )}
+          </h3>
           {hasData ? (
-            <>
-              <span className={`font-mono text-[1.25rem] font-medium ${headlineColor}`}>
-                {headlineValue.toFixed(decimals)}
-                {unit}
-              </span>
-              {headline === "avg" ? (
-                <span className="font-mono text-[0.75rem] text-muted">
-                  {window ?? "all time"} avg
-                </span>
-              ) : (
-                delta !== null &&
-                series.samples.length > 1 && (
-                  <span
-                    className={`font-mono text-[0.75rem] ${
-                      delta > 0 ? "text-accent-green" : delta < 0 ? "text-accent-orange" : "text-muted"
-                    }`}
-                  >
-                    {delta > 0 ? "+" : ""}
-                    {delta.toFixed(decimals)} / {deltaLabel}
-                  </span>
-                )
-              )}
-              {target !== undefined && (
-                <span className="font-mono text-[0.75rem] text-muted">
-                  target {target}
-                  {unit}
-                </span>
-              )}
-            </>
+            <span className={`font-mono text-[1.25rem] font-medium ${headlineColor}`}>
+              {headlineValue.toFixed(decimals)}
+              {unit}
+            </span>
           ) : (
             <span className="font-mono text-[0.875rem] text-muted">No data</span>
           )}
         </div>
+        {hasData && (
+          <div className="flex items-baseline gap-3">
+            {headline === "avg" ? (
+              <span className="font-mono text-[0.75rem] text-muted">
+                {window ?? "all time"} avg
+              </span>
+            ) : (
+              delta !== null &&
+              series.samples.length > 1 && (
+                <span
+                  className={`font-mono text-[0.75rem] ${
+                    delta > 0 ? "text-accent-green" : delta < 0 ? "text-accent-orange" : "text-muted"
+                  }`}
+                >
+                  {delta > 0 ? "+" : ""}
+                  {delta.toFixed(decimals)} / {deltaLabel}
+                </span>
+              )
+            )}
+            {target !== undefined && (
+              <span className="font-mono text-[0.75rem] text-muted">
+                target {target}
+                {unit}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <MetricTrend
         samples={series.samples}
