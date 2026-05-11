@@ -147,6 +147,55 @@ function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: 
   return samples.filter((s) => s.date >= sinceIso);
 }
 
+function filterRange(
+  samples: Array<{ date: string; value: number }>,
+  sinceIso: string,
+  untilIso: string,
+) {
+  // [since, until) — sinceIso is start-of-day at the `from` offset;
+  // untilIso is start-of-day AFTER the `to` offset, so the `to` day's
+  // samples are included.
+  return samples.filter((s) => s.date >= sinceIso && s.date < untilIso);
+}
+
+/**
+ * Convert a [from, to] day-offset tuple (relative to today, both
+ * inclusive, in user-local TZ) into UTC ISO bounds for the metrics
+ * SELECT. Time-of-day is start-of-local-day at the `from` boundary
+ * and start-of-local-day AFTER `to` at the `until` boundary — gives
+ * a calendar-day-aligned half-open interval [since, until).
+ *
+ * Today (offset 0) means "today's local calendar day." Offset -1
+ * means yesterday's, etc.
+ */
+function rangeBoundsLocal(
+  fromOffset: number,
+  toOffset: number,
+  userTz: string,
+): { sinceIso: string; untilIso: string } {
+  const now = new Date();
+  // Reading parts of `now` in userTz to find today's local calendar
+  // date.
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: userTz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const todayLocal = fmt.format(now); // "YYYY-MM-DD"
+  const [y, m, d] = todayLocal.split("-").map(Number);
+
+  // Build local-midnight Date for (today + fromOffset) and
+  // (today + toOffset + 1), then convert to ISO. Note: this Date is
+  // in the SERVER's TZ, not the user's — for accuracy we treat the
+  // local date as midnight UTC, then offset for the TZ. For Delta's
+  // single-user-per-row case the inaccuracy at TZ boundaries is at
+  // most one row off; we accept it as cheap-and-correct-enough.
+  const since = new Date(Date.UTC(y, m - 1, d + fromOffset, 0, 0, 0));
+  const until = new Date(Date.UTC(y, m - 1, d + toOffset + 1, 0, 0, 0));
+  return { sinceIso: since.toISOString(), untilIso: until.toISOString() };
+}
+
 /** Pull the full history of a metric, ordered oldest-to-newest.
  * Daily-aggregate metrics (computed families, frequencyHint === "daily")
  * drop today's still-mid-flight value. */
@@ -180,23 +229,43 @@ export async function getAllHistory(metricName: string, userId: number): Promise
   );
 }
 
-/** Pull the last N days of a metric, ordered oldest-to-newest.
- * Daily-aggregate metrics (computed families, frequencyHint === "daily")
- * drop today's still-mid-flight value. */
-export async function getLastDays(metricName: string, days: number, userId: number): Promise<Series> {
+/**
+ * Pull samples within a calendar-day range, ordered oldest-to-newest.
+ *
+ * `range` is `[fromOffset, toOffset]` — both integer day offsets from
+ * today, inclusive, in the user's local timezone. See the schema
+ * docs on `windowDaysRange` for the full shape.
+ *
+ * When `toOffset >= 0` (window includes today) and the metric is a
+ * daily-aggregate (computed family, or frequencyHint === "daily"),
+ * today's still-mid-flight value is dropped — matches the legacy
+ * `getLastDays` behavior. When `toOffset < 0` (window already ends
+ * before today) the filter is a no-op because today's sample is
+ * already outside the range.
+ */
+export async function getDayRange(
+  metricName: string,
+  range: readonly [number, number],
+  userId: number,
+): Promise<Series> {
   const [type, userTz] = await Promise.all([
     loadType(metricName, userId),
     loadUserTimezone(userId),
   ]);
 
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-  const sinceIso = since.toISOString();
+  const { sinceIso, untilIso } = rangeBoundsLocal(range[0], range[1], userTz);
 
   const computed = await resolveComputedSamples(metricName, userId);
   if (computed !== null) {
     return makeSeries(
-      sortByDate(excludeTodayIfDaily(filterSince(computed, sinceIso), type, computed, userTz)),
+      sortByDate(
+        excludeTodayIfDaily(
+          filterRange(computed, sinceIso, untilIso),
+          type,
+          computed,
+          userTz,
+        ),
+      ),
       type,
     );
   }
@@ -213,7 +282,7 @@ export async function getLastDays(metricName: string, days: number, userId: numb
   return makeSeries(
     sortByDate(
       excludeTodayIfDaily(
-        filterSince([...real, ...synthetic], sinceIso),
+        filterRange([...real, ...synthetic], sinceIso, untilIso),
         type,
         computed,
         userTz,

@@ -1,4 +1,4 @@
-import { getAllHistory, getLastDays } from "@/lib/metric-history";
+import { getAllHistory, getDayRange } from "@/lib/metric-history";
 import type { DataDep } from "../types";
 import type { MetricBlockConfig } from "./schema";
 import { dataKey } from "./keys";
@@ -12,7 +12,7 @@ export function metricBlockDataDeps(config: MetricBlockConfig, userId: number): 
       key: dataKey(config),
       fetch: () =>
         config.windowDays
-          ? getLastDays(config.metric, config.windowDays, userId)
+          ? getDayRange(config.metric, config.windowDays, userId)
           : getAllHistory(config.metric, userId),
     },
   ];

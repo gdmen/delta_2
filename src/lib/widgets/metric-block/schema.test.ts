@@ -18,11 +18,11 @@ describe("metricBlockSchema", () => {
     const parsed = metricBlockSchema.parse({
       metric: "bench_1rm",
       title: "Bench Press 1RM",
-      windowDays: 90,
+      windowDays: [-89, 0],
       headline: "avg",
     });
     expect(parsed.title).toBe("Bench Press 1RM");
-    expect(parsed.windowDays).toBe(90);
+    expect(parsed.windowDays).toEqual([-89, 0]);
     expect(parsed.headline).toBe("avg");
   });
 
@@ -42,12 +42,27 @@ describe("metricBlockSchema", () => {
     expect("fallbackUnit" in parsed).toBe(false);
   });
 
-  it("rejects negative or zero windowDays", () => {
-    expect(() => metricBlockSchema.parse({ metric: "x", windowDays: 0 })).toThrow();
-    expect(() => metricBlockSchema.parse({ metric: "x", windowDays: -7 })).toThrow();
-  });
+  describe("windowDays range shape", () => {
+    it("accepts [from, to] with from <= to", () => {
+      expect(metricBlockSchema.parse({ metric: "x", windowDays: [-6, 0] }).windowDays).toEqual([-6, 0]);
+      expect(metricBlockSchema.parse({ metric: "x", windowDays: [-7, -1] }).windowDays).toEqual([-7, -1]);
+      expect(metricBlockSchema.parse({ metric: "x", windowDays: [0, 0] }).windowDays).toEqual([0, 0]); // today only
+    });
 
-  it("rejects fractional windowDays", () => {
-    expect(() => metricBlockSchema.parse({ metric: "x", windowDays: 1.5 })).toThrow();
+    it("rejects from > to", () => {
+      expect(() => metricBlockSchema.parse({ metric: "x", windowDays: [0, -1] })).toThrow();
+      expect(() => metricBlockSchema.parse({ metric: "x", windowDays: [-3, -7] })).toThrow();
+    });
+
+    it("rejects non-integer offsets", () => {
+      expect(() => metricBlockSchema.parse({ metric: "x", windowDays: [-1.5, 0] })).toThrow();
+    });
+
+    it("rejects scalar (legacy shape) — migration script must run first", () => {
+      // Pre-2026-05-11 widgets stored `windowDays: N`. The migration
+      // script (scripts/migrate-window-days-to-range.ts) rewrites them
+      // before any code path tries to parse them through this schema.
+      expect(() => metricBlockSchema.parse({ metric: "x", windowDays: 7 })).toThrow();
+    });
   });
 });
