@@ -36,12 +36,17 @@ export async function WidgetSlot({
   parseError,
   data,
   debug,
+  shareMode = false,
 }: {
   widget: WidgetRow;
   parsed: unknown;
   parseError: string | null;
   data: WidgetData;
   debug: boolean;
+  /** Forwarded from DashboardRenderer's shareMode prop. Widget
+   * Components that take it use it to suppress in-app navigation
+   * affordances. Defaults to false for the editor / view paths. */
+  shareMode?: boolean;
 }) {
   const fallback = (info: WidgetErrorInfo) => (
     <WidgetErrorFallback info={info} debug={debug} />
@@ -104,7 +109,7 @@ export async function WidgetSlot({
       }}
       debug={debug}
     >
-      <Component config={parsed} data={data} widgetId={widget.id} />
+      <Component config={parsed} data={data} widgetId={widget.id} shareMode={shareMode} />
     </WidgetClientBoundary>
   );
 }

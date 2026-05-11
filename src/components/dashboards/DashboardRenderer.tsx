@@ -72,11 +72,21 @@ export async function DashboardRenderer({
 
   // Each widget renders to a server-side ReactNode keyed by id. In edit
   // mode the EditableWidget wraps these as children; in view mode they
-  // render directly inside WidgetSlot.
+  // render directly inside WidgetSlot. shareMode is forwarded so leaf
+  // widgets can suppress in-app navigation affordances (e.g. the
+  // metric-block title link to /data/metrics/<name>, which would just
+  // bounce share-link viewers to /signin).
   const renderedById: Record<number, React.ReactNode> = {};
   for (const { widget, parsed, parseError } of parsedWidgets) {
     renderedById[widget.id] = (
-      <WidgetSlot widget={widget} parsed={parsed} parseError={parseError} data={data} debug={debug} />
+      <WidgetSlot
+        widget={widget}
+        parsed={parsed}
+        parseError={parseError}
+        data={data}
+        debug={debug}
+        shareMode={!!shareMode}
+      />
     );
   }
 

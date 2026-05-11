@@ -12,9 +12,11 @@ import { cellKey } from "./keys";
 export function MetricsGridComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: MetricsGridConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   if (config.metrics.length === 0) {
     return (
@@ -63,6 +65,7 @@ export function MetricsGridComponent({
               headline={c.headline}
               xMin={sharedRange?.min}
               xMax={sharedRange?.max}
+              shareMode={shareMode}
             />
           );
         })}

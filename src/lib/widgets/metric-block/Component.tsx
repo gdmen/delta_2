@@ -6,9 +6,11 @@ import { dataKey, type Series } from "./keys";
 export function MetricBlockComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: MetricBlockConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   if (!config.metric) {
     return (
@@ -28,6 +30,7 @@ export function MetricBlockComponent({
       metricName={config.metric}
       series={series}
       headline={config.headline}
+      shareMode={shareMode}
     />
   );
 }

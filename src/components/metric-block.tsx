@@ -13,6 +13,7 @@ export function MetricBlock({
   headline = "latest",
   xMin,
   xMax,
+  shareMode = false,
 }: {
   title: string;
   /** Underlying metric_type name. When set, the title becomes a link to
@@ -31,6 +32,12 @@ export function MetricBlock({
   /** Shared X-axis range, in epoch ms — for aligning multiple blocks. */
   xMin?: number;
   xMax?: number;
+  /** True when rendered inside a /share/<token> page. Suppresses the
+   * title→metric-detail Link (that page is private to the owner and
+   * just redirects share viewers to /signin). The widget data layer
+   * already reads the OWNER's data in share mode; this prop only
+   * controls the in-header navigation affordance. */
+  shareMode?: boolean;
 }) {
   const unit = series.unit;
   const target = series.target ?? undefined;
@@ -85,7 +92,13 @@ export function MetricBlock({
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-3">
         <div className="flex items-baseline gap-x-3 min-w-0">
           <h3 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
-            {metricName ? (
+            {/*
+             * Inside a /share/<token> render, the title stays plain
+             * text — the metric-detail page it would otherwise link to
+             * is private to the owner. Share-link viewers clicking it
+             * would just hit the proxy's /signin redirect.
+             */}
+            {metricName && !shareMode ? (
               <Link
                 href={`/data/metrics/${encodeURIComponent(metricName)}`}
                 className="hover:text-foreground"

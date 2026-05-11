@@ -103,7 +103,15 @@ export interface WidgetDef<P = unknown> {
   defaultConfig: P;
   uiMeta?: UIMeta<P>;
   customSettings?: CustomSettings<P>;
-  Component: ComponentType<{ config: P; data: WidgetData; widgetId: number }>;
+  Component: ComponentType<{
+    config: P;
+    data: WidgetData;
+    widgetId: number;
+    /** True when rendering inside a /share/<token> page. Widgets that
+     * link to internal app routes (e.g. metric-block → /data/metrics)
+     * should suppress those affordances. Defaults to false. */
+    shareMode?: boolean;
+  }>;
 }
 
 /**
