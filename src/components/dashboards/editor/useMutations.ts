@@ -50,10 +50,10 @@ export function useMutations(dashboardId: number) {
   }, []);
 
   /**
-   * Centralized fetch with 401 = reload semantics. Any 401 from a mutation
-   * means SITE_PASSWORD lapsed; the page reload triggers the basic-auth
-   * re-prompt. Other errors set the lastError state for the toolbar to
-   * surface.
+   * Centralized fetch with 401 = reload semantics. A 401 from a mutation
+   * means the Auth.js session expired (or was revoked); the page reload
+   * triggers the proxy's redirect to /signin so the user re-authenticates.
+   * Other errors set the lastError state for the toolbar to surface.
    */
   const send = useCallback(
     async (input: string, init: RequestInit): Promise<Response | null> => {

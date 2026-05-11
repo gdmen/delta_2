@@ -114,12 +114,12 @@ else
 fi
 
 step "Smoke test"
-# 401 is healthy when SITE_PASSWORD is set — the Basic Auth gate in
-# src/proxy.ts proves the app is up and responding. Fail only on real
-# outages (5xx, connection refused, etc.).
+# Unauthenticated GET on /: 307 redirect to /signin (the multi-user
+# proxy gate). Any of {200, 307} means the app is up and routing.
+# Real failures are 5xx or connection refused.
 status=$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:3000/ || echo "000")
 case "$status" in
-  200|401) echo "  HTTP $status (healthy)" ;;
+  200|307) echo "  HTTP $status (healthy)" ;;
   *) echo "  HTTP $status (unexpected)"; exit 1 ;;
 esac
 

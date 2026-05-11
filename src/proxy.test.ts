@@ -1,8 +1,6 @@
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "./proxy";
-
-const ORIG_PASSWORD = process.env.SITE_PASSWORD;
 
 function makeRequest(
   path = "/",
@@ -19,27 +17,16 @@ function makeRequest(
   return new NextRequest(`${proto}://localhost${path}`, { headers });
 }
 
-beforeEach(() => {
-  delete process.env.SITE_PASSWORD;
-});
-
 afterEach(() => {
-  if (ORIG_PASSWORD === undefined) {
-    delete process.env.SITE_PASSWORD;
-  } else {
-    process.env.SITE_PASSWORD = ORIG_PASSWORD;
-  }
   vi.unstubAllEnvs();
 });
 
 /**
- * Multi-user proxy gate (post-PR-2). Three modes:
+ * Multi-user proxy gate (post-PR-2). Two modes:
  *
- *   1. SITE_PASSWORD set       → legacy Basic-auth fallback (transition
- *                                 + staging convenience).
- *   2. Auth.js session cookie  → check existence (no validation —
+ *   1. Auth.js session cookie  → check existence (no validation —
  *                                 requireUser does the heavy lifting).
- *   3. Exempt path             → always pass through.
+ *   2. Exempt path             → always pass through.
  *
  * Per the eng-review LOW finding: exemption matching uses the
  * NORMALIZED nextUrl.pathname so `/share/foo/../api/users/me` doesn't
@@ -122,35 +109,6 @@ describe("proxy auth gate", () => {
         }),
       );
       expect(res.status).toBe(401);
-    });
-  });
-
-  describe("legacy SITE_PASSWORD fallback", () => {
-    beforeEach(() => {
-      process.env.SITE_PASSWORD = "secret";
-    });
-
-    it("rejects requests with no Authorization header", () => {
-      const res = proxy(makeRequest("/dashboards/today"));
-      expect(res.status).toBe(401);
-      expect(res.headers.get("www-authenticate")).toContain("Basic");
-    });
-
-    it("rejects wrong password", () => {
-      const auth = Buffer.from("delta:wrong").toString("base64");
-      const res = proxy(makeRequest("/dashboards/today", { headers: { authorization: `Basic ${auth}` } }));
-      expect(res.status).toBe(401);
-    });
-
-    it("accepts correct password regardless of username", () => {
-      const auth = Buffer.from("delta:secret").toString("base64");
-      const res = proxy(makeRequest("/dashboards/today", { headers: { authorization: `Basic ${auth}` } }));
-      expect(res.status).toBe(200);
-    });
-
-    it("exempt paths still pass through under SITE_PASSWORD mode", () => {
-      const res = proxy(makeRequest("/api/ingest/apple-health"));
-      expect(res.status).toBe(200);
     });
   });
 

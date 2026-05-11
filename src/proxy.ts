@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Site-wide auth gate (multi-user, post-PR-2). Replaces the previous
- * single-password Basic-auth setup. The proxy only checks for the
- * EXISTENCE of the Auth.js session cookie — actual validation
+ * Site-wide auth gate (multi-user, post-PR-2). The proxy only checks
+ * for the EXISTENCE of the Auth.js session cookie — actual validation
  * (signature, denylist, password-hash-version) happens inside the
  * route handler via requireUser(). Per the eng-review HIGH finding,
  * keeping the heavy check at the route layer (not middleware) lets
@@ -29,11 +28,6 @@ import type { NextRequest } from "next/server";
  * Unauthenticated requests:
  *   - HTML / page request     - 302 redirect to /signin
  *   - API request             - 401 JSON
- *
- * The legacy SITE_PASSWORD path is preserved as an opt-in fallback
- * (set both vars to use Basic-auth instead of session-cookie). Useful
- * for staging environments or for the initial pre-bootstrap window
- * where no users exist yet.
  */
 
 const EXEMPT_PREFIXES = [
@@ -109,29 +103,7 @@ export function proxy(request: NextRequest) {
     return passthrough();
   }
 
-  // Legacy SITE_PASSWORD path: if set, fall back to Basic-auth. Useful
-  // for the transition window before any user exists, OR for staging
-  // environments that don't want full Auth.js.
-  const password = process.env.SITE_PASSWORD;
-  if (password) {
-    const header = request.headers.get("authorization") ?? "";
-    if (header.startsWith("Basic ")) {
-      const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-      const idx = decoded.indexOf(":");
-      const supplied = idx >= 0 ? decoded.slice(idx + 1) : decoded;
-      if (supplied === password) {
-        return passthrough();
-      }
-    }
-    return new NextResponse("Authentication required", {
-      status: 401,
-      headers: {
-        "WWW-Authenticate": 'Basic realm="Delta", charset="UTF-8"',
-      },
-    });
-  }
-
-  // Auth.js session-cookie path (the one this codepath cares about).
+  // Auth.js session-cookie path.
   const cookieName = sessionCookieName(request.nextUrl.protocol);
   const cookie = request.cookies.get(cookieName);
   if (cookie?.value) {
