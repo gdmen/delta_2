@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { parseSqliteUtc } from "@/lib/sqlite-time";
 
 interface LlmFocus {
   id: number;
@@ -62,7 +61,7 @@ export function LlmTray({
     staleFireRef.current = true;
     const stale =
       !lastSuggestedAt ||
-      Date.now() - parseSqliteUtc(lastSuggestedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
+      Date.now() - new Date(lastSuggestedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
     if (!stale) return;
     void refresh({ ifStale: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,7 +261,7 @@ function parseEvidence(raw: string | null): ParsedEvidence | null {
 }
 
 function formatRelative(iso: string): string {
-  const then = parseSqliteUtc(iso).getTime();
+  const then = new Date(iso).getTime();
   if (isNaN(then)) return iso;
   const diffMs = Date.now() - then;
   const sec = Math.floor(diffMs / 1000);

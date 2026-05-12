@@ -277,36 +277,6 @@ npm run build                   # Production build to .next/
 - `seed.ts` — inserts the 5 sports + all metric types using `ON CONFLICT DO NOTHING`. Safe to re-run; new metric types added over time will be inserted, existing ones untouched.
 - `npm run build` — Next.js production build. Must complete without errors.
 
-**Migrating an existing SQLite prod box to local Postgres** (one-shot
-cutover, only needed if you have a populated `delta2.db` from before the
-Postgres port):
-
-```bash
-# 1. From the OLD box, copy the live SQLite file onto the NEW box:
-scp ubuntu@<old-box>:/opt/delta2/delta2.db /opt/delta2/delta2.db
-
-# 2. Apply the schema to the empty Postgres database:
-cd /opt/delta2 && npx drizzle-kit migrate
-
-# 3. Bring better-sqlite3 in temporarily so the importer can read the .db file:
-npm install --save-dev better-sqlite3 @types/better-sqlite3
-
-# 4. Run the importer. It asserts the destination is empty before writing,
-#    so it cannot clobber a live DB. Inspect the row-count diff at the end —
-#    any non-zero delta means a transform dropped data.
-npx tsx scripts/sqlite-to-postgres-import.ts ./delta2.db
-
-# 5. Uninstall the one-shot dep (do NOT commit it):
-npm uninstall better-sqlite3 @types/better-sqlite3
-
-# 6. Move the SQLite file out of the working tree so it doesn't get rsync'd
-#    or accidentally committed.
-mv delta2.db /opt/delta2-archive/
-```
-
-The importer bumps every identity sequence to `MAX(id) + 1` after insert
-so the first post-cutover write doesn't collide with imported rows.
-
 ### 4. Environment variables
 
 Create `/opt/delta2/.env.local`:
@@ -320,9 +290,9 @@ INGEST_API_KEY=$(openssl rand -hex 32)
 `DATABASE_URL` is plain TCP-localhost — no password, no `sslmode`.
 Postgres binds to localhost only by default and `pg_hba.conf` is patched
 to `trust` localhost connections (see section 2 / bootstrap step 1c).
-That gives every PG client (the app via postgres-js, drizzle-kit, the
-SQLite importer, ad-hoc `psql`) the same passwordless access without
-fighting any one driver's URL parser.
+That gives every PG client (the app via postgres-js, drizzle-kit,
+ad-hoc `psql`) the same passwordless access without fighting any one
+driver's URL parser.
 
 Optional, for the Strava integration:
 
@@ -462,10 +432,8 @@ cd /opt/delta2
 ./scripts/deploy.sh
 ```
 
-It does the sequence below in one go. With the database on RDS we no longer
-need to stop the app to run migrations (the old WAL-lock-contention reason
-went away with SQLite); but we do stop briefly around the build to free RAM
-on small instances and avoid serving half-built bundles:
+It does the sequence below in one go. We stop the app briefly around the
+build to free RAM on small instances and avoid serving half-built bundles:
 
 ```bash
 git fetch && git reset --hard origin/main
@@ -589,7 +557,6 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] `sudo certbot --nginx` completed, `https://delta.garymenezes.com` serves over TLS
 - [ ] Browser smoke test: `/`, `/data-sources`, `/coach/chat` all load
 - [ ] API smoke tests (section 7) all return expected status codes
-- [ ] (Cutover from old SQLite box only) `scripts/sqlite-to-postgres-import.ts` ran clean with zero row-count deltas
 - [ ] Backups configured (see section 11 — at minimum a `pg_dump` cron, restore tested at least once)
 - [ ] A test DEXA PDF uploaded through `/data-sources/bodyspec` round-trips cleanly
 

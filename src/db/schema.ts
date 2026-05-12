@@ -18,10 +18,7 @@ import type { AdapterAccountType } from "next-auth/adapters";
 // in Postgres preserves the existing consumer API exactly — every site that
 // reads `.createdAt` and does `.slice(0, 10)` or hands it to `new Date(…)`
 // keeps working unchanged. A future PR can migrate to native `timestamptz`
-// when it's worth the consumer-side audit. Defaults are populated client-side
-// via `$defaultFn` so we never hit the SQLite-vs-Postgres `datetime('now')`
-// vs `now()::text` format mismatch the old code worked around in
-// `src/lib/sqlite-time.ts`.
+// when it's worth the consumer-side audit.
 const isoNow = () => new Date().toISOString();
 
 // =============================================================================

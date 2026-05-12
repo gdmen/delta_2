@@ -60,12 +60,7 @@ export async function computeGoalProgress(goal: GoalSummary, userId: number): Pr
   const samples = series.samples;
 
   const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();
-  // goal.createdAt: ISO timestamp on Postgres (post-multi-user). The
-  // legacy SQLite format ("YYYY-MM-DD HH:MM:SS") is still tolerated for
-  // any goal rows that haven't been touched since the cutover.
-  const createdAtIso = goal.createdAt.includes("T")
-    ? goal.createdAt
-    : goal.createdAt.replace(" ", "T") + "Z";
+  const createdAtIso = goal.createdAt;
 
   const currentValue = samples.length > 0 ? samples[samples.length - 1].value : null;
   // Start value: the metric value at the moment the goal was created.

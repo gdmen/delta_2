@@ -1,5 +1,4 @@
 import ReactMarkdown from "react-markdown";
-import { parseSqliteUtc } from "@/lib/sqlite-time";
 
 interface JournalEntry {
   id: number;
@@ -66,10 +65,8 @@ export function JournalList({
 
 function formatTimestamp(iso: string): string {
   // The rest of the app uses YYYY-MM-DD HH:mm for journal-style timestamps.
-  // Mono font keeps the columns lined up. parseSqliteUtc handles both ISO
-  // strings (what JS-generated timestamps look like) and the SQLite
-  // `datetime('now')` format (which JS otherwise misparses as local time).
-  const d = parseSqliteUtc(iso);
+  // Mono font keeps the columns lined up.
+  const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   const yy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");

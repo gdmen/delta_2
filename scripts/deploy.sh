@@ -51,10 +51,9 @@ if [[ -f "$REPO_ROOT/.env.local" ]]; then
 fi
 
 # Run migrations while the app is still up — Postgres handles concurrent
-# writes (no SQLite WAL-lock contention to worry about). Migrations are
-# additive in this project (no destructive schema changes mid-deploy)
-# so running against a live app is safe. We DO stop the service later
-# for the build to free RAM on small instances.
+# writes, and migrations are additive in this project (no destructive
+# schema changes mid-deploy) so running against a live app is safe. We
+# DO stop the service later for the build to free RAM on small instances.
 trap 'echo; echo "!!! deploy aborted — starting delta2 anyway"; sudo systemctl start delta2 || true' ERR
 
 step "Running migrations"
