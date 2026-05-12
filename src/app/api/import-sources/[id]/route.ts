@@ -145,119 +145,117 @@ export async function DELETE(
     .from(reconcileLog)
     .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, sourceTag)));
 
-  // Delete metrics first (no children). Then events — workout_sets and
-  // event_metrics cascade via FK ON DELETE CASCADE on event_id. Then
-  // operational + settings rows. Each statement is its own implicit
-  // txn (better-sqlite3-drizzle rejects async tx callbacks); a partial
-  // failure leaves the source half-deleted, which the user can fix by
-  // retrying — the operations are idempotent.
-  await db
-    .delete(metrics)
-    .where(and(userScope(user.id).metrics, eq(metrics.source, sourceTag)));
-  await db
-    .delete(events)
-    .where(and(userScope(user.id).events, eq(events.source, sourceTag)));
-  await db
-    .delete(reconcileLog)
-    .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, sourceTag)));
-  await db
-    .delete(sourceSettings)
-    .where(and(userScope(user.id).sourceSettings, eq(sourceSettings.source, sourceTag)));
-
-  // Now sweep `${sourceTag}:%` metric_types. After the deletes above,
-  // most should be unreferenced — but a foreign-prefixed alias OR a
-  // surviving goal/workout_set/event_metric/metric pin keeps them.
-  const candidateTypes = await db
-    .select({ id: metricTypes.id, name: metricTypes.name })
-    .from(metricTypes)
-    .where(and(userScope(user.id).metricTypes, like(metricTypes.name, namePrefixSql)));
-
+  // The entire delete sequence runs in one transaction so a partial
+  // failure rolls back. Order: metrics/events/reconcile/settings first,
+  // then a sweep of `${sourceTag}:%` metric_types (skipping any with
+  // pinned references from goals/workout_sets/event_metrics/metrics
+  // /foreign aliases), then the import_sources config row itself.
   const deletedTypes: string[] = [];
   const keptTypes: { name: string; reason: string }[] = [];
 
-  // event_metrics + workout_sets are INHERIT — restrict by joining
-  // through this user's events.
-  const ownedEventIds = db
-    .select({ id: events.id })
-    .from(events)
-    .where(userScope(user.id).events);
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(metrics)
+      .where(and(userScope(user.id).metrics, eq(metrics.source, sourceTag)));
+    await tx
+      .delete(events)
+      .where(and(userScope(user.id).events, eq(events.source, sourceTag)));
+    await tx
+      .delete(reconcileLog)
+      .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, sourceTag)));
+    await tx
+      .delete(sourceSettings)
+      .where(and(userScope(user.id).sourceSettings, eq(sourceSettings.source, sourceTag)));
 
-  for (const t of candidateTypes) {
-    // Refs that would either FK-block the delete or silently break
-    // other surfaces (goals, dashboards, foreign aliases).
-    const [goalRef] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(goals)
-      .where(and(userScope(user.id).goals, eq(goals.metricTypeId, t.id)));
-    const [setRef] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(workoutSets)
-      .where(
-        and(
-          eq(workoutSets.exerciseMetricTypeId, t.id),
-          inArray(workoutSets.eventId, ownedEventIds),
-        ),
-      );
-    const [emRef] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(eventMetrics)
-      .where(
-        and(
-          eq(eventMetrics.metricTypeId, t.id),
-          inArray(eventMetrics.eventId, ownedEventIds),
-        ),
-      );
-    // Stray metrics rows from OTHER sources (manual entries against
-    // this metric_type, ingest from a different source that aliased to
-    // it). Pre-delete pass already cleared the ones tagged with this
-    // source.
-    const [metricRef] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(metrics)
-      .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, t.id)));
-    // Foreign-prefix aliases pointing at this metric_type as canonical
-    // — those came from a merge ("apple_health:body_mass" → this).
-    // Cascade-deleting them would silently break HAE routing.
-    const [foreignAlias] = await db
-      .select({ c: sql<number>`count(*)` })
-      .from(metricTypeAliases)
-      .where(
-        and(
-          userScope(user.id).metricTypeAliases,
-          eq(metricTypeAliases.canonicalMetricTypeId, t.id),
-          not(like(metricTypeAliases.alias, namePrefixSql)),
-          ne(metricTypeAliases.alias, t.name),
-        ),
-      );
+    const candidateTypes = await tx
+      .select({ id: metricTypes.id, name: metricTypes.name })
+      .from(metricTypes)
+      .where(and(userScope(user.id).metricTypes, like(metricTypes.name, namePrefixSql)));
 
-    const reasons: string[] = [];
-    if (Number(goalRef?.c ?? 0) > 0) reasons.push(`${goalRef!.c} goal(s)`);
-    if (Number(setRef?.c ?? 0) > 0) reasons.push(`${setRef!.c} workout set(s)`);
-    if (Number(emRef?.c ?? 0) > 0) reasons.push(`${emRef!.c} event metric(s)`);
-    if (Number(metricRef?.c ?? 0) > 0) reasons.push(`${metricRef!.c} metric(s) from other sources`);
-    if (Number(foreignAlias?.c ?? 0) > 0) reasons.push(`${foreignAlias!.c} alias(es) from other sources`);
+    // event_metrics + workout_sets are INHERIT — restrict by joining
+    // through this user's events.
+    const ownedEventIds = tx
+      .select({ id: events.id })
+      .from(events)
+      .where(userScope(user.id).events);
 
-    if (reasons.length > 0) {
-      keptTypes.push({ name: t.name, reason: reasons.join(", ") });
-      continue;
+    for (const t of candidateTypes) {
+      // Refs that would either FK-block the delete or silently break
+      // other surfaces (goals, dashboards, foreign aliases).
+      const [goalRef] = await tx
+        .select({ c: sql<number>`count(*)` })
+        .from(goals)
+        .where(and(userScope(user.id).goals, eq(goals.metricTypeId, t.id)));
+      const [setRef] = await tx
+        .select({ c: sql<number>`count(*)` })
+        .from(workoutSets)
+        .where(
+          and(
+            eq(workoutSets.exerciseMetricTypeId, t.id),
+            inArray(workoutSets.eventId, ownedEventIds),
+          ),
+        );
+      const [emRef] = await tx
+        .select({ c: sql<number>`count(*)` })
+        .from(eventMetrics)
+        .where(
+          and(
+            eq(eventMetrics.metricTypeId, t.id),
+            inArray(eventMetrics.eventId, ownedEventIds),
+          ),
+        );
+      // Stray metrics rows from OTHER sources (manual entries against
+      // this metric_type, ingest from a different source that aliased
+      // to it). Pre-delete pass already cleared the ones tagged with
+      // this source.
+      const [metricRef] = await tx
+        .select({ c: sql<number>`count(*)` })
+        .from(metrics)
+        .where(and(userScope(user.id).metrics, eq(metrics.metricTypeId, t.id)));
+      // Foreign-prefix aliases pointing at this metric_type as canonical
+      // — those came from a merge ("apple_health:body_mass" → this).
+      // Cascade-deleting them would silently break HAE routing.
+      const [foreignAlias] = await tx
+        .select({ c: sql<number>`count(*)` })
+        .from(metricTypeAliases)
+        .where(
+          and(
+            userScope(user.id).metricTypeAliases,
+            eq(metricTypeAliases.canonicalMetricTypeId, t.id),
+            not(like(metricTypeAliases.alias, namePrefixSql)),
+            ne(metricTypeAliases.alias, t.name),
+          ),
+        );
+
+      const reasons: string[] = [];
+      if (Number(goalRef?.c ?? 0) > 0) reasons.push(`${goalRef!.c} goal(s)`);
+      if (Number(setRef?.c ?? 0) > 0) reasons.push(`${setRef!.c} workout set(s)`);
+      if (Number(emRef?.c ?? 0) > 0) reasons.push(`${emRef!.c} event metric(s)`);
+      if (Number(metricRef?.c ?? 0) > 0) reasons.push(`${metricRef!.c} metric(s) from other sources`);
+      if (Number(foreignAlias?.c ?? 0) > 0) reasons.push(`${foreignAlias!.c} alias(es) from other sources`);
+
+      if (reasons.length > 0) {
+        keptTypes.push({ name: t.name, reason: reasons.join(", ") });
+        continue;
+      }
+
+      // Safe to delete. daily_summaries has a NOT NULL FK without
+      // cascade — wipe its rows first or the metric_types delete will
+      // FK-fail. Self-prefix aliases (e.g. `${sourceTag}:foo` aliased
+      // to itself) CASCADE-delete via the alias FK; that's fine.
+      await tx
+        .delete(dailySummaries)
+        .where(and(userScope(user.id).dailySummaries, eq(dailySummaries.metricTypeId, t.id)));
+      await tx
+        .delete(metricTypes)
+        .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, t.id)));
+      deletedTypes.push(t.name);
     }
 
-    // Safe to delete. daily_summaries has a NOT NULL FK without cascade
-    // — wipe its rows first or the metric_types delete will FK-fail.
-    // Self-prefix aliases (e.g. `${sourceTag}:foo` aliased to itself)
-    // CASCADE-delete via the alias FK; that's fine.
-    await db
-      .delete(dailySummaries)
-      .where(and(userScope(user.id).dailySummaries, eq(dailySummaries.metricTypeId, t.id)));
-    await db
-      .delete(metricTypes)
-      .where(and(userScope(user.id).metricTypes, eq(metricTypes.id, t.id)));
-    deletedTypes.push(t.name);
-  }
-
-  await db
-    .delete(importSources)
-    .where(and(userScope(user.id).importSources, eq(importSources.id, id)));
+    await tx
+      .delete(importSources)
+      .where(and(userScope(user.id).importSources, eq(importSources.id, id)));
+  });
 
   return NextResponse.json({
     ok: true,

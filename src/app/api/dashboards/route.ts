@@ -67,9 +67,9 @@ export async function POST(req: Request) {
       .returning();
     return NextResponse.json({ dashboard: inserted[0] }, { status: 201 });
   } catch (err) {
-    // SQLite UNIQUE constraint failure on `dashboards.slug` shows up as a
-    // SqliteError with `code: SQLITE_CONSTRAINT_UNIQUE`.
-    if (err instanceof Error && err.message.includes("UNIQUE")) {
+    // Postgres unique violation = SQLSTATE 23505. postgres-js surfaces the
+    // SQLSTATE as `err.code`; drizzle passes the error through unwrapped.
+    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "23505") {
       return NextResponse.json(
         { error: `Slug "${slug}" already exists. Pick another.` },
         { status: 409 },

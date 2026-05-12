@@ -142,23 +142,20 @@ export async function POST(request: NextRequest) {
   // Delete metrics first (safe; no children). Then events — its children
   // (workout_sets, event_metrics) cascade. Finally reconcile_log. No FKs
   // to disable; everything is naturally ordered child-before-parent or
-  // already protected by the schema's ON DELETE CASCADE.
-  //
-  // Not wrapped in a single transaction on better-sqlite3 because the
-  // drizzle binding rejects async transaction callbacks. Each delete is
-  // its own implicit txn; a partial failure leaves the source in a
-  // half-wiped state which the user can fix by retrying — same surface
-  // the dev-wipe endpoint exposes.
-  await db
-    .delete(metrics)
-    .where(and(userScope(user.id).metrics, eq(metrics.source, source)));
-  // Need to drop event_metrics first if FK isn't ON DELETE CASCADE — schema check below.
-  await db
-    .delete(events)
-    .where(and(userScope(user.id).events, eq(events.source, source)));
-  await db
-    .delete(reconcileLog)
-    .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, source)));
+  // already protected by the schema's ON DELETE CASCADE. All three run
+  // inside one transaction so a partial failure rolls back to the prior
+  // state instead of leaving the source half-wiped.
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(metrics)
+      .where(and(userScope(user.id).metrics, eq(metrics.source, source)));
+    await tx
+      .delete(events)
+      .where(and(userScope(user.id).events, eq(events.source, source)));
+    await tx
+      .delete(reconcileLog)
+      .where(and(userScope(user.id).reconcileLog, eq(reconcileLog.source, source)));
+  });
 
   return NextResponse.json({ source, deleted: before });
 }

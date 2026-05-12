@@ -79,27 +79,26 @@ export async function PATCH(req: Request, { params }: Ctx) {
     );
   }
 
-  // Apply updates one by one. better-sqlite3 + drizzle requires sync txn
-  // callbacks (better-sqlite3 doesn't support async inside transactions) so
-  // we just run them sequentially in autocommit mode — matches the pattern
-  // already established in /api/dev/wipe-data.
-  for (const w of parsed.data.widgets) {
-    await db
-      .update(dashboardWidgets)
-      .set({ gridX: w.gridX, gridY: w.gridY, gridW: w.gridW, gridH: w.gridH })
-      .where(
-        and(
-          eq(dashboardWidgets.id, w.id),
-          eq(dashboardWidgets.dashboardId, dashboardId),
-          inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
-        ),
-      );
-  }
-
-  await db
-    .update(dashboards)
-    .set({ updatedAt: new Date().toISOString() })
-    .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
+  // Atomic layout swap: either all widget positions land or none do. A
+  // partial failure mid-rearrange would leave widgets visually scrambled.
+  await db.transaction(async (tx) => {
+    for (const w of parsed.data.widgets) {
+      await tx
+        .update(dashboardWidgets)
+        .set({ gridX: w.gridX, gridY: w.gridY, gridW: w.gridW, gridH: w.gridH })
+        .where(
+          and(
+            eq(dashboardWidgets.id, w.id),
+            eq(dashboardWidgets.dashboardId, dashboardId),
+            inArray(dashboardWidgets.dashboardId, ownedDashboardIds),
+          ),
+        );
+    }
+    await tx
+      .update(dashboards)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(and(userScope(user.id).dashboards, eq(dashboards.id, dashboardId)));
+  });
 
   return NextResponse.json({ ok: true, updated: parsed.data.widgets.length });
 }

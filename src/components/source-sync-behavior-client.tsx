@@ -136,8 +136,7 @@ function LastReconcileChip({ last }: { last: LastReconcile | null }) {
 }
 
 function formatAt(iso: string): string {
-  // SQLite emits "YYYY-MM-DD HH:MM:SS"; new Date() handles either form.
-  const d = new Date(iso.replace(" ", "T") + (iso.includes("T") ? "" : "Z"));
+  const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
