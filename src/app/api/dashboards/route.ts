@@ -68,8 +68,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ dashboard: inserted[0] }, { status: 201 });
   } catch (err) {
     // Postgres unique violation = SQLSTATE 23505. postgres-js surfaces the
-    // SQLSTATE as `err.code`; drizzle passes the error through unwrapped.
-    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "23505") {
+    // SQLSTATE on the driver-level PostgresError, but drizzle wraps that
+    // inside its own "Failed query: ..." Error and exposes the original
+    // via `.cause`. Walk both so we don't miss either shape.
+    if (isPgCode(err, "23505")) {
       return NextResponse.json(
         { error: `Slug "${slug}" already exists. Pick another.` },
         { status: 409 },
@@ -77,4 +79,13 @@ export async function POST(req: Request) {
     }
     throw err;
   }
+}
+
+function isPgCode(err: unknown, code: string): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    if (typeof cur === "object" && (cur as { code?: string }).code === code) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
 }
