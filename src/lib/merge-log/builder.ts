@@ -28,7 +28,7 @@ import type * as schema from "@/db/schema";
  * the post-A state.
  *
  * `tx` is the postgres-js drizzle transaction object. All queries are
- * awaited (the better-sqlite3 sync `.all()` style is gone).
+ * awaited.
  */
 
 // PgQueryResultHKT is the base HKT that both postgres-js and pglite extend.

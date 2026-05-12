@@ -55,6 +55,6 @@ export const loadAllDashboards = cache(async (userId: number) => {
 
 // Re-export types from row-types.ts so server-side callers don't need to
 // know about the split. Client-side callers import from row-types directly
-// to avoid Turbopack pulling `db` (better-sqlite3 → fs) into the client
+// to avoid Turbopack pulling `db` (postgres-js → net) into the client
 // bundle.
 export type { DashboardRow, WidgetRow } from "./row-types";

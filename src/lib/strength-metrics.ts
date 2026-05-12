@@ -133,9 +133,8 @@ export async function getBigThreeStats(
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
-    // Case-insensitive match on the configured exercise names. SQLite's
-    // built-in NOCASE collation matches lower-cased input regardless of
-    // the stored row's case.
+    // Case-insensitive match on the configured exercise names —
+    // LOWER() on both sides handles mixed-case stored rows.
     .where(
       and(
         userScope(userId).events,

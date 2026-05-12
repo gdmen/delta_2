@@ -131,9 +131,9 @@ async function loadSportId(sportName: string, userId: number): Promise<number | 
 async function sportSessionsCount(sportName: string, userId: number): Promise<Sample[]> {
   const sportId = await loadSportId(sportName, userId);
   if (sportId === null) return [];
-  // Group by calendar date in the started_at string. SQLite's substr is
-  // cheaper here than parsing — recordedAt is always ISO 8601 prefixed
-  // by YYYY-MM-DD.
+  // Group by calendar date in the started_at string. substr is cheaper
+  // here than parsing — recordedAt is always ISO 8601 prefixed by
+  // YYYY-MM-DD.
   const rows = await db
     .select({
       day: sql<string>`substr(${events.startedAt}, 1, 10)`,

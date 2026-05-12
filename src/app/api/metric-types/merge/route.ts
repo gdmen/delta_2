@@ -183,9 +183,8 @@ export async function POST(request: NextRequest) {
       // daily_summaries collision collapse. Raw SQL because drizzle's builder
       // doesn't ergonomically express INSERT-FROM-SELECT + ON CONFLICT with
       // EXCLUDED. Weighted avg: (avg*count + avg2*count2) / sumCount.
-      // Postgres-specific: `LEAST()` / `GREATEST()` for two-argument min/max
-      // (SQLite's `MIN(a, b)` / `MAX(a, b)` are scalar; Postgres reserves
-      // `MIN`/`MAX` for aggregates only).
+      // `LEAST()` / `GREATEST()` for two-argument min/max — Postgres
+      // reserves `MIN`/`MAX` for aggregates only.
       //
       // ON CONFLICT target matches the new (user_id, date, metric_type_id)
       // unique index added in 0001_multi_user. SELECT and existence check

@@ -1,6 +1,6 @@
 /**
  * Pure formatting helper extracted from goal-calc.ts so client components
- * can import it without pulling `db` (and through it, better-sqlite3 and
+ * can import it without pulling `db` (and through it, postgres-js and
  * the rest of the server-only ingest stack) into the client bundle.
  *
  * goal-calc.ts re-exports this for server callers, so existing imports

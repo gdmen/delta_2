@@ -97,8 +97,7 @@ async function seedComputedMetricTypes() {
 // postgres-js keeps an open TCP pool that holds the event loop after
 // the seed promise resolves. Force-exit so the script terminates and
 // `timeout 60 npx tsx src/db/seed.ts` in scripts/deploy.sh doesn't get
-// killed with exit 124. (better-sqlite3 was synchronous and didn't
-// have this problem; this only matters now that we're on Postgres.)
+// killed with exit 124.
 seed()
   .then(() => process.exit(0))
   .catch((err) => {

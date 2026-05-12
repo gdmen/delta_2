@@ -176,8 +176,6 @@ export async function applyMetricTypeUndo(
   // 5. RECOMPUTE daily_summaries from current `metrics` for all touched
   // metric_type ids. Post-merge ingest survives because it's already in
   // `metrics`. We delete + re-aggregate so historical rows don't drift.
-  // `substr(text, 1, 10)` works identically in Postgres and SQLite on a
-  // text column — no port needed.
   const touchedIds = [canonicalId, ...payload.merged.map((m) => m.row.id)];
   await tx
     .delete(dailySummaries)

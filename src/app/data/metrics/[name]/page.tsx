@@ -131,7 +131,7 @@ export default async function MetricHistoryPage({
   // Both rows lists are pulled in full for this page so we can interleave
   // by date in JS. At single-user scales the cost is negligible (largest
   // case is one exercise's full workout_sets fanout: ~7K rows ≈ <100ms).
-  // If this ever bites for performance, push the merge into SQLite via
+  // If this ever bites for performance, push the merge into Postgres via
   // UNION ALL with a recursive-CTE rep expander.
   const storedRows =
     storedCount > 0

@@ -39,23 +39,21 @@ import type { PgTable } from "drizzle-orm/pg-core";
  *   - drizzle migration meta   — the schema stays put; we're wiping rows,
  *                                not schema.
  *
- * Order is leaf-tables-first, FKs disabled for the duration so we don't
- * have to be careful about cycles. Wrapped in a transaction so a failure
- * mid-wipe rolls back to the prior state.
- *
- * AUTOINCREMENT counters in sqlite_sequence are reset so the imported
- * data starts at id=1 cleanly.
+ * Implementation: one `TRUNCATE ... RESTART IDENTITY CASCADE` covering
+ * every table. Single-statement TRUNCATE is atomic (no explicit txn
+ * needed) and CASCADE handles FK dependencies in one shot. Identity
+ * sequences reset so reimported data starts at id=1 cleanly.
  */
 export async function POST() {
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  // Tables in deletion order — children before parents. With FKs OFF the
-  // order doesn't strictly matter, but keeping it leaf-first means the
-  // wipe is also correct if someone flips FKs back on inside the txn.
-  // Imports stay on the schema objects so a deleted table breaks the
-  // build instead of the runtime.
+  // Tables in deletion order — children before parents. TRUNCATE CASCADE
+  // handles ordering for us, but keeping the list leaf-first makes the
+  // pre-wipe row counts read in a sensible order. Imports stay on the
+  // schema objects so a deleted table breaks the build instead of the
+  // runtime.
   const tables: Array<{ name: string; obj: PgTable }> = [
     { name: "workout_sets", obj: workoutSets },
     { name: "event_metrics", obj: eventMetrics },

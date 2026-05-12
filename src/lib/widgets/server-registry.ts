@@ -12,7 +12,7 @@ import { coachCardDataDeps } from "./coach-card/data";
 /**
  * Server-only widget registry: per-widget-type dataDeps + validate hooks.
  * These can't live on the client `WidgetDef` because their data.ts files
- * import `db` (better-sqlite3 → fs), which Turbopack would otherwise drag
+ * import `db` (postgres-js → net), which Turbopack would otherwise drag
  * into the client bundle when the editor lazy-imports the registry.
  *
  * The renderer + mutation routes look up by widget type here for the

@@ -22,9 +22,9 @@ describe("randomColor", () => {
 // auto-create with conflict fallback) is exercised at runtime through
 // the importer integration paths and the sports merge flow. A pure-DB
 // unit test would require a fixture DB; the existing test infra runs
-// against the live SQLite file, so we keep this file focused on the
-// pure helper. Race-safety is verified by code review (the
-// INSERT OR IGNORE + re-query pattern matches metric-resolver.ts:99-115
+// against pglite, so we keep this file focused on the pure helper.
+// Race-safety is verified by code review (the INSERT … ON CONFLICT
+// DO NOTHING + re-query pattern matches metric-resolver.ts:99-115
 // exactly, which has shipped without race issues for months).
 //
 // The `vi` import is kept to make extending this file with mock-driven

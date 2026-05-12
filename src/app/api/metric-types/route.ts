@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
       ? b.frequencyHint
       : "daily";
 
-  // Pre-check uniqueness for a clean 409 instead of a raw SQLITE_CONSTRAINT.
+  // Pre-check uniqueness for a clean 409 instead of a raw 23505.
   const existing = await db
     .select({ id: metricTypes.id })
     .from(metricTypes)

@@ -5,7 +5,7 @@ import { MetricStripSettings } from "./Settings";
 
 // dataDeps lives in src/lib/widgets/server-registry.ts so client-side
 // editor code (lazy-imported by DashboardRenderer) doesn't pull `db`
-// → better-sqlite3 → fs into its bundle.
+// → postgres-js → net into its bundle.
 export const metricStripWidget = defineWidget<MetricStripConfig>({
   type: "metric_strip",
   name: "Metric strip",

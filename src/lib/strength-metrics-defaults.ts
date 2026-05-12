@@ -3,7 +3,7 @@
  * widget schema (loaded into the editor's client bundle via the
  * widget registry) can import them without dragging
  * `src/lib/strength-metrics.ts`'s `import { db } from "@/db"` into
- * the browser — better-sqlite3 isn't browser-safe.
+ * the browser — postgres-js isn't browser-safe.
  */
 
 export type Lift = "squat" | "bench" | "deadlift";

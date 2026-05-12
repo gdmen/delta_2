@@ -146,8 +146,8 @@ export default async function DataPage() {
       const synth = synthByType.get(t.id);
       const realCount = Number(t.count);
       const synthCount = synth?.count ?? 0;
-      // Pick the more recent of the two timestamps. SQLite returns ISO-ish
-      // strings for both so lexicographic compare is correct.
+      // Pick the more recent of the two timestamps. Both columns store
+      // ISO 8601 strings, so lexicographic compare is correct.
       const realLast = t.lastAt;
       const synthLast = synth?.lastAt ?? null;
       const lastAt =

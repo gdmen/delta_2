@@ -32,7 +32,7 @@ export default async function AllEventsPage({
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   // Build WHERE from date range + optional text match. `started_at` is stored
-  // as ISO with time; day-boundary ISO strings work with SQLite's text-string
+  // as ISO with time; day-boundary ISO strings work with text-string
   // comparison. Text match is OR across sport name, event type, source, notes.
   const conditions = [userScope(user.id).events];
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));

@@ -65,9 +65,9 @@ export async function PATCH(
       );
     }
     // Verify the metric_type exists. The goals table has a FK on
-    // metricTypeId so a bad id would 500 from SQLite; better to 400 here
-    // with a useful message. Scope by user_id so a probe with another
-    // user's metric_type returns the same not-found.
+    // metricTypeId so a bad id would 500 on the insert; better to 400
+    // here with a useful message. Scope by user_id so a probe with
+    // another user's metric_type returns the same not-found.
     const exists = await db
       .select({ id: metricTypes.id })
       .from(metricTypes)
