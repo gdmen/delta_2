@@ -54,8 +54,10 @@ export function LlmTray({
 
   // Fire stale-on-load once. Even if the page rerenders, the ref stops a
   // second fire within the same mount. Also flips `mounted` so the
-  // relative time label can render with a live Date.now().
+  // relative time label can render with a live Date.now() — the
+  // canonical hydration-gate setState pattern, hence the lint disable.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     if (staleFireRef.current) return;
     staleFireRef.current = true;

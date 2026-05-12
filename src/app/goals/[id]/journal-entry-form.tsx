@@ -34,8 +34,13 @@ export function JournalEntryForm({ goalId }: { goalId: number }) {
   const draftKey = `goal-journal-draft-${goalId}`;
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Restore draft on mount.
+  // Restore draft on mount. The setMounted flip is the canonical hydration
+  // gate — server renders with mounted=false so the UI matches the empty
+  // pre-restore state, then the client flips to true after reading
+  // localStorage. Disabling the new react-hooks rule here intentionally;
+  // see https://react.dev/reference/react/useEffect for the pattern.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
     try {
       const saved = window.localStorage.getItem(draftKey);

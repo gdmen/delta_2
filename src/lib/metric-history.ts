@@ -143,10 +143,6 @@ function sortByDate(samples: Array<{ date: string; value: number }>) {
   return samples.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-function filterSince(samples: Array<{ date: string; value: number }>, sinceIso: string) {
-  return samples.filter((s) => s.date >= sinceIso);
-}
-
 function filterRange(
   samples: Array<{ date: string; value: number }>,
   sinceIso: string,

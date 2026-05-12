@@ -100,12 +100,15 @@ export function useMutations(dashboardId: number) {
       entry.pending = { ...(entry.pending ?? {}), ...patch };
       setStatus("saving");
 
-      // (Re-)arm the debounce timer.
+      // (Re-)arm the debounce timer. flushOne is declared below — the
+      // closure captures it lexically and the timer always fires after
+      // the component has mounted, so the runtime reference is fine.
       if (entry.pendingTimer) clearTimeout(entry.pendingTimer);
+      // eslint-disable-next-line react-hooks/immutability
       entry.pendingTimer = setTimeout(() => flushOne(widgetId), AUTOSAVE_DEBOUNCE_MS);
     },
-    // flushOne is defined below; recreating it is fine because the queue
-    // state lives in a ref, not in the function closure.
+    // flushOne is defined below; recreating is fine because queue state
+    // lives in a ref, not in the function closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
