@@ -24,6 +24,7 @@ async function fetchGoal(goalId: number, userId: number): Promise<GoalBarData | 
     .select({
       id: goals.id,
       metricTypeId: goals.metricTypeId,
+      name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
@@ -42,6 +43,7 @@ async function fetchGoal(goalId: number, userId: number): Promise<GoalBarData | 
   const g = rows[0];
   return {
     id: g.id,
+    name: g.name,
     metricName: g.metricName,
     metricUnit: g.metricUnit,
     targetValue: g.targetValue,

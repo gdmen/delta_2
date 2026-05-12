@@ -4,6 +4,7 @@ import { goals, metricTypes, sports, metrics, focuses, goalJournalEntries } from
 import { and, eq, asc, desc, sql } from "drizzle-orm";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
+import { EditableGoalName } from "./editable-name";
 import { EditableGoalTarget } from "./editable-target";
 import { EditableGoalDeadline } from "./editable-deadline";
 import { EditableGoalMetric } from "./editable-metric";
@@ -29,6 +30,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
     .select({
       id: goals.id,
       metricTypeId: goals.metricTypeId,
+      name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
@@ -161,7 +163,14 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
             style={{ backgroundColor: goal.sportColor }}
           />
           <div className="min-w-0 flex-1">
-            <div className="mb-1">
+            <div className="mb-2">
+              <EditableGoalName
+                goalId={goal.id}
+                initialName={goal.name}
+                placeholder={`${goal.metricName} ${goal.targetValue}${goal.metricUnit}`}
+              />
+            </div>
+            <div className="mb-1 text-[0.75rem] text-muted uppercase tracking-wider font-mono">
               <EditableGoalMetric
                 goalId={goal.id}
                 sportName={goal.sportName}

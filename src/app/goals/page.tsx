@@ -2,7 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { goals, metricTypes, sports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
-import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
+import { computeGoalProgress, displayGoalName, formatRate } from "@/lib/goal-calc";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
@@ -14,6 +14,7 @@ export default async function GoalsListPage() {
     .select({
       id: goals.id,
       metricTypeId: goals.metricTypeId,
+      name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
@@ -68,6 +69,7 @@ export default async function GoalsListPage() {
 
 interface GoalRow {
   id: number;
+  name: string | null;
   metricName: string;
   metricUnit: string;
   sportName: string;
@@ -118,7 +120,7 @@ function GoalGroup({ title, items, dim = false }: { title: string; items: GoalRo
                   style={{ backgroundColor: g.sportColor }}
                 />
                 <span className="text-[0.875rem] font-medium truncate">
-                  {g.metricName} {g.targetValue}{g.metricUnit}
+                  {displayGoalName(g)}
                 </span>
               </div>
               <span className="font-mono text-[0.6875rem] text-muted whitespace-nowrap">

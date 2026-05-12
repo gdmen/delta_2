@@ -21,6 +21,7 @@ async function fetchLatest(userId: number): Promise<CoachCardData | null> {
       endpoint: coachCalls.endpoint,
       status: coachCalls.status,
       goalId: coachCalls.goalId,
+      goalCustomName: goals.name,
       metricName: metricTypes.name,
       targetValue: goals.targetValue,
       metricUnit: metricTypes.unit,
@@ -34,10 +35,12 @@ async function fetchLatest(userId: number): Promise<CoachCardData | null> {
 
   if (rows.length === 0) return null;
   const r = rows[0];
-  const goalName =
+  // Custom name wins. Fall back to the derived `<metric> <target><unit>`.
+  const derived =
     r.metricName && r.targetValue !== null && r.metricUnit !== null
       ? `${r.metricName} ${r.targetValue}${r.metricUnit}`
       : null;
+  const goalName = r.goalCustomName?.trim() || derived;
   return {
     ts: r.ts,
     endpoint: r.endpoint,

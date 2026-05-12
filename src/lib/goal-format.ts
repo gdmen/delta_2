@@ -15,6 +15,16 @@ export function formatRate(rate: number | null, unit: string): string {
   return `${sign}${rate.toFixed(decimals)} ${unit}/wk`;
 }
 
+/** Derive the default fallback label when no custom name is set. */
+export function defaultGoalLabel(g: { metricName: string; targetValue: number; metricUnit: string }): string {
+  return `${g.metricName} ${g.targetValue}${g.metricUnit}`;
+}
+
+/** Pick the custom name if set, else fall back to the derived label. */
+export function displayGoalName(g: { name: string | null; metricName: string; targetValue: number; metricUnit: string }): string {
+  return g.name?.trim() || defaultGoalLabel(g);
+}
+
 export interface GoalProgress {
   currentValue: number | null;
   startValue: number | null;

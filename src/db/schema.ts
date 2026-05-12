@@ -360,6 +360,10 @@ export const goals = pgTable("goals", {
     .notNull()
     .references(() => metricTypes.id),
   sportId: integer("sport_id").notNull().references(() => sports.id),
+  // Optional user-facing label. When null, every UI surface falls back
+  // to the derived `<metric> <target><unit>` string so legacy rows look
+  // unchanged. Editable from /goals/[id].
+  name: text("name"),
   targetValue: doublePrecision("target_value").notNull(),
   deadline: text("deadline").notNull(),
   status: text("status", { enum: ["active", "completed", "abandoned"] })

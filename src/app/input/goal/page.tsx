@@ -18,6 +18,7 @@ interface MetricType {
 
 interface Goal {
   id: number;
+  name: string | null;
   metricName: string;
   metricUnit: string;
   sportName: string;
@@ -36,6 +37,7 @@ export default function GoalInputPage() {
 
   const [sportId, setSportId] = useState<number | null>(null);
   const [metricTypeId, setMetricTypeId] = useState<number | null>(null);
+  const [name, setName] = useState("");
   const [targetValue, setTargetValue] = useState("");
   const [deadline, setDeadline] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -104,12 +106,14 @@ export default function GoalInputPage() {
       body: JSON.stringify({
         sportId,
         metricTypeId: effectiveMetricTypeId,
+        name: name.trim() || null,
         targetValue: parseFloat(targetValue),
         deadline,
       }),
     });
 
     if (res.ok) {
+      setName("");
       setTargetValue("");
       setDeadline("");
       setMetricTypeId(null);
@@ -143,6 +147,20 @@ export default function GoalInputPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className="block text-[0.75rem] text-muted mb-1">
+            Name <span className="text-muted">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. First 500lb deadlift"
+            maxLength={120}
+            className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground"
+          />
         </div>
 
         <div>
@@ -240,10 +258,10 @@ function GoalList({ title, items, dim = false, emptyMessage }: { title: string; 
                 />
                 <div className="min-w-0">
                   <div className="text-[0.875rem] font-medium">
-                    {g.metricName} {g.targetValue}{g.metricUnit}
+                    {g.name?.trim() || `${g.metricName} ${g.targetValue}${g.metricUnit}`}
                   </div>
                   <div className="font-mono text-[0.6875rem] text-muted">
-                    {g.sportName.toUpperCase()} · by {g.deadline} · {daysLeft}d left
+                    {g.sportName.toUpperCase()} · {g.metricName} {g.targetValue}{g.metricUnit} · by {g.deadline} · {daysLeft}d left
                   </div>
                 </div>
               </div>

@@ -11,11 +11,15 @@ interface UpdateGoalBody {
   deadline?: string; // YYYY-MM-DD
   status?: Status;
   metricTypeId?: number;
+  /** Pass `""` or `null` to clear, any other string to set. */
+  name?: string | null;
   // Only meaningful when status is set to "abandoned". If true, every active
   // focus pointing at this goal is also moved to "abandoned" in the same
   // request so callers don't have to orchestrate two PATCHes.
   abandonLinkedFocuses?: boolean;
 }
+
+const MAX_GOAL_NAME = 120;
 
 export async function PATCH(
   request: NextRequest,
@@ -80,6 +84,23 @@ export async function PATCH(
       );
     }
     updates.metricTypeId = body.metricTypeId;
+  }
+  if (body.name !== undefined) {
+    if (body.name === null) {
+      updates.name = null;
+    } else {
+      if (typeof body.name !== "string") {
+        return NextResponse.json({ error: "name must be a string" }, { status: 400 });
+      }
+      const trimmed = body.name.trim();
+      if (trimmed.length > MAX_GOAL_NAME) {
+        return NextResponse.json(
+          { error: `name must be ≤ ${MAX_GOAL_NAME} characters` },
+          { status: 400 },
+        );
+      }
+      updates.name = trimmed.length > 0 ? trimmed : null;
+    }
   }
 
   if (Object.keys(updates).length === 0) {

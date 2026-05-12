@@ -2,7 +2,12 @@ import { getAllHistory } from "./metric-history";
 import type { GoalProgress } from "./goal-format";
 
 // Re-export so server callers don't need to know about the split.
-export { formatRate, type GoalProgress } from "./goal-format";
+export {
+  formatRate,
+  defaultGoalLabel,
+  displayGoalName,
+  type GoalProgress,
+} from "./goal-format";
 
 export interface GoalSummary {
   id: number;
@@ -11,10 +16,13 @@ export interface GoalSummary {
   metricUnit: string;
   sportName: string;
   sportColor: string;
+  /** User-facing name. Null = display the derived `<metric> <target><unit>` string. */
+  name: string | null;
   targetValue: number;
   deadline: string;
   createdAt: string;
 }
+
 
 // GoalProgress lives in ./goal-format (re-exported above) so client
 // components can import its type without pulling db into their bundle.

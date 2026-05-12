@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { GoalBar } from "@/components/goal-bar";
-import { formatRate } from "@/lib/goal-format";
+import { displayGoalName, formatRate } from "@/lib/goal-format";
 import { isDataDepError, type WidgetData } from "../types";
 import type { GoalListConfig } from "./schema";
 import { dataKey, type GoalRow } from "./keys";
@@ -54,7 +54,7 @@ export function GoalListComponent({
           return (
             <GoalBar
               key={g.id}
-              name={`${g.metricName} ${g.targetValue}${g.metricUnit}`}
+              name={displayGoalName(g)}
               deadline={g.deadline}
               daysLeft={p.daysRemaining}
               progress={p.progress}

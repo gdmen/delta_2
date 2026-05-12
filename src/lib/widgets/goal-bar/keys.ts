@@ -7,6 +7,8 @@ export function dataKey(config: GoalBarConfig): string {
 
 export interface GoalBarData {
   id: number;
+  /** User-facing name. Null = display the derived label instead. */
+  name: string | null;
   metricName: string;
   metricUnit: string;
   targetValue: number;

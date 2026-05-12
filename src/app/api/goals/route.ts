@@ -19,6 +19,7 @@ export async function GET() {
       sportId: goals.sportId,
       sportName: sports.name,
       sportColor: sports.color,
+      name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
@@ -49,7 +50,10 @@ interface CreateGoalBody {
   sportId: number;
   targetValue: number;
   deadline: string; // YYYY-MM-DD
+  name?: string | null;
 }
+
+const MAX_GOAL_NAME = 120;
 
 export async function POST(request: NextRequest) {
   const { user, error } = await requireUserOr401();
@@ -91,10 +95,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "sportId not found" }, { status: 400 });
   }
 
+  // Optional name. Empty string and whitespace-only normalize to null so
+  // the UI consistently falls back to the derived `<metric> <target><unit>`.
+  let name: string | null = null;
+  if (body.name !== undefined && body.name !== null) {
+    if (typeof body.name !== "string") {
+      return NextResponse.json({ error: "name must be a string" }, { status: 400 });
+    }
+    const trimmed = body.name.trim();
+    if (trimmed.length > MAX_GOAL_NAME) {
+      return NextResponse.json(
+        { error: `name must be ≤ ${MAX_GOAL_NAME} characters` },
+        { status: 400 },
+      );
+    }
+    name = trimmed.length > 0 ? trimmed : null;
+  }
+
   const result = await db.insert(goals).values({
     userId: user.id,
     metricTypeId: body.metricTypeId,
     sportId: body.sportId,
+    name,
     targetValue: body.targetValue,
     deadline: body.deadline,
   }).returning({ id: goals.id });

@@ -7,6 +7,8 @@ export function dataKey(config: GoalListConfig): string {
 
 export interface GoalRow {
   id: number;
+  /** User-facing name. Null = display the derived label instead. */
+  name: string | null;
   metricName: string;
   metricUnit: string;
   targetValue: number;

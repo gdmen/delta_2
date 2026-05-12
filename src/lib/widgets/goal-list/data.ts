@@ -27,6 +27,7 @@ async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalR
     .select({
       id: goals.id,
       metricTypeId: goals.metricTypeId,
+      name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       createdAt: goals.createdAt,
@@ -43,6 +44,7 @@ async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalR
   return Promise.all(
     rows.map(async (g) => ({
       id: g.id,
+      name: g.name,
       metricName: g.metricName,
       metricUnit: g.metricUnit,
       targetValue: g.targetValue,

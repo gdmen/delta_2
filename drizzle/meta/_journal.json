@@ -15,6 +15,13 @@
       "when": 1778349600000,
       "tag": "0001_multi_user",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779062400000,
+      "tag": "0002_goals_name",
+      "breakpoints": true
     }
   ]
 }

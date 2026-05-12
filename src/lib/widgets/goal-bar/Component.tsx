@@ -1,5 +1,5 @@
 import { GoalBar } from "@/components/goal-bar";
-import { formatRate } from "@/lib/goal-format";
+import { displayGoalName, formatRate } from "@/lib/goal-format";
 import { isDataDepError, type WidgetData } from "../types";
 import type { GoalBarConfig } from "./schema";
 import { dataKey, type GoalBarData } from "./keys";
@@ -40,7 +40,7 @@ export function GoalBarComponent({
           : "critical";
   return (
     <GoalBar
-      name={`${g.metricName} ${g.targetValue}${g.metricUnit}`}
+      name={displayGoalName(g)}
       deadline={g.deadline}
       daysLeft={p.daysRemaining}
       progress={p.progress}
