@@ -7,9 +7,11 @@ import { dataKey, type GoalBarData } from "./keys";
 export function GoalBarComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: GoalBarConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   if (!config.goalId) {
     return (
@@ -45,7 +47,7 @@ export function GoalBarComponent({
       actualRate={formatRate(p.actualRatePerWeek, g.metricUnit)}
       requiredRate={formatRate(p.requiredRatePerWeek, g.metricUnit)}
       status={uiStatus}
-      href={`/goals/${g.id}`}
+      href={shareMode ? undefined : `/goals/${g.id}`}
       sportColor={g.sportColor}
     />
   );

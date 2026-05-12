@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { MaybeLink } from "@/components/maybe-link";
 import { isDataDepError, type WidgetData } from "../types";
 import type { SessionsListConfig } from "./schema";
 import { dataKey, type SessionRow } from "./keys";
@@ -6,9 +6,11 @@ import { dataKey, type SessionRow } from "./keys";
 export function SessionsListComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: SessionsListConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   const raw = data.get(dataKey(config));
   const rows: SessionRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as SessionRow[]);
@@ -31,16 +33,16 @@ export function SessionsListComponent({
               key={s.id}
               className="flex items-center justify-between gap-3 py-1.5 border-b border-surface last:border-b-0"
             >
-              <Link
-                href={`/data/events/${s.id}`}
-                className="flex items-center gap-2 min-w-0 hover:text-foreground"
+              <MaybeLink
+                href={shareMode ? undefined : `/data/events/${s.id}`}
+                className={`flex items-center gap-2 min-w-0${shareMode ? "" : " hover:text-foreground"}`}
               >
                 <span
                   className="w-[6px] h-[6px] rounded-full flex-shrink-0"
                   style={{ backgroundColor: s.sportColor }}
                 />
                 <span className="truncate">{s.type}</span>
-              </Link>
+              </MaybeLink>
               <span className="font-mono text-[0.6875rem] text-muted whitespace-nowrap">
                 {s.startedAt.slice(0, 10)}
                 {s.durationMinutes !== null ? ` · ${s.durationMinutes}m` : ""}

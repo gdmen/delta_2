@@ -6,9 +6,11 @@ import { dataKey, type FocusRow } from "./keys";
 export function FocusListComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: FocusListConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   const raw = data.get(dataKey(config));
   const focuses: FocusRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as FocusRow[]);
@@ -37,7 +39,7 @@ export function FocusListComponent({
             weekNumber={f.weekNumber}
             sparklineData={[]}
             valueLabel="-"
-            href={`/goals/${f.goalId}`}
+            href={shareMode ? undefined : `/goals/${f.goalId}`}
           />
         ))
       )}

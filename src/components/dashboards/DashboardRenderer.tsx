@@ -148,7 +148,7 @@ export async function DashboardRenderer({
         )
       )}
       {widgets.length === 0 ? (
-        <DashboardEmptyState settingsHref={settingsHref} editHref={editHref} />
+        <DashboardEmptyState settingsHref={settingsHref} editHref={editHref} shareMode={!!shareMode} />
       ) : (
         <DashboardGrid>
           {parsedWidgets.map(({ widget }) => (

@@ -8,9 +8,11 @@ import { dataKey, type GoalRow } from "./keys";
 export function GoalListComponent({
   config,
   data,
+  shareMode = false,
 }: {
   config: GoalListConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   const raw = data.get(dataKey(config));
   const goals: GoalRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as GoalRow[]);
@@ -28,10 +30,15 @@ export function GoalListComponent({
       </div>
       {goals.length === 0 ? (
         <p className="text-[0.875rem] text-muted py-2">
-          No goals yet.{" "}
-          <Link href="/input/goal" className="text-foreground underline">
-            Create one →
-          </Link>
+          No goals yet.
+          {!shareMode && (
+            <>
+              {" "}
+              <Link href="/input/goal" className="text-foreground underline">
+                Create one →
+              </Link>
+            </>
+          )}
         </p>
       ) : (
         goals.map((g) => {
@@ -54,7 +61,7 @@ export function GoalListComponent({
               actualRate={formatRate(p.actualRatePerWeek, g.metricUnit)}
               requiredRate={formatRate(p.requiredRatePerWeek, g.metricUnit)}
               status={uiStatus}
-              href={`/goals/${g.id}`}
+              href={shareMode ? undefined : `/goals/${g.id}`}
               sportColor={g.sportColor}
             />
           );

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { MaybeLink } from "@/components/maybe-link";
 import { isDataDepError, type WidgetData } from "../types";
 import { DATA_KEY, type CoachCardData } from "./keys";
 import type { CoachCardConfig } from "./schema";
@@ -18,9 +18,11 @@ const ENDPOINT_LABEL: Record<string, string> = {
  */
 export function CoachCardComponent({
   data,
+  shareMode = false,
 }: {
   config: CoachCardConfig;
   data: WidgetData;
+  shareMode?: boolean;
 }) {
   const raw = data.get(DATA_KEY);
   const row: CoachCardData | null =
@@ -55,12 +57,12 @@ export function CoachCardComponent({
               {ENDPOINT_LABEL[row.endpoint] ?? row.endpoint}
             </span>
             {row.goalName && row.goalId !== null && (
-              <Link
-                href={`/goals/${row.goalId}`}
-                className="text-text-secondary hover:text-foreground underline truncate"
+              <MaybeLink
+                href={shareMode ? undefined : `/goals/${row.goalId}`}
+                className={`text-text-secondary truncate${shareMode ? "" : " hover:text-foreground underline"}`}
               >
                 {row.goalName}
-              </Link>
+              </MaybeLink>
             )}
           </div>
           {row.status !== "ok" && (
