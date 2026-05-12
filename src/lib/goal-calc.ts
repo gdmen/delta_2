@@ -60,19 +60,32 @@ export async function computeGoalProgress(goal: GoalSummary, userId: number): Pr
   const samples = series.samples;
 
   const fourWeeksAgo = new Date(now - 4 * MS_PER_WEEK).toISOString();
-  // goal.createdAt is SQLite datetime('now') ("YYYY-MM-DD HH:MM:SS", UTC).
-  // Convert to ISO so lexicographic comparison against sample dates lines
-  // up chronologically.
+  // goal.createdAt: ISO timestamp on Postgres (post-multi-user). The
+  // legacy SQLite format ("YYYY-MM-DD HH:MM:SS") is still tolerated for
+  // any goal rows that haven't been touched since the cutover.
   const createdAtIso = goal.createdAt.includes("T")
     ? goal.createdAt
     : goal.createdAt.replace(" ", "T") + "Z";
 
   const currentValue = samples.length > 0 ? samples[samples.length - 1].value : null;
-  // Start value: earliest sample at or after goal creation, falling back
-  // to the earliest sample overall (useful when a goal was set retroactively).
-  const earliestAfterCreate = samples.find((s) => s.date >= createdAtIso);
-  const earliestOverall = samples[0];
-  const startValue = earliestAfterCreate?.value ?? earliestOverall?.value ?? null;
+  // Start value: the metric value at the moment the goal was created.
+  // Iteratively: the most recent sample on or before `createdAt`
+  // (samples is ASC, so walk backwards to find it). If the goal
+  // pre-dates every sample for this metric, fall back to the first
+  // sample after createdAt — the user's first measurement under the
+  // goal. NO fallback to "earliest sample overall" — that was the
+  // source of the "progress bar treats zero as start" bug: an ancient
+  // near-zero reading would anchor the baseline far below the real
+  // starting point, inflating progress.
+  let valueAtCreate: { value: number } | undefined;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    if (samples[i].date <= createdAtIso) {
+      valueAtCreate = samples[i];
+      break;
+    }
+  }
+  const firstAfterCreate = samples.find((s) => s.date >= createdAtIso);
+  const startValue = valueAtCreate?.value ?? firstAfterCreate?.value ?? null;
   const recentRows = samples.filter((s) => s.date >= fourWeeksAgo);
 
   const direction: "up" | "down" = startValue !== null

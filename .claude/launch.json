@@ -3,8 +3,16 @@
   "configurations": [
     {
       "name": "delta2",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "3001"],
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "PATH=/Users/garymenezes/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/usr/bin:/bin",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "-p",
+        "3001"
+      ],
       "port": 3001
     }
   ]
