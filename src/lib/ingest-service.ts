@@ -1,6 +1,6 @@
 import { db } from "@/db";
-import { metrics, events, workoutSets, dailySummaries, eventMetrics } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { metrics, events, workoutSets, eventMetrics } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import type { AnyPgDb } from "@/db/types";
 
 /**
@@ -60,7 +60,12 @@ export async function upsertMetric(
   // calls flow through the (potentially overridden) `conn`.
   const db = conn;
   if (input.sourceId) {
-    const existing = await db.select({ id: metrics.id })
+    const existing = await db
+      .select({
+        id: metrics.id,
+        recordedAt: metrics.recordedAt,
+        metricTypeId: metrics.metricTypeId,
+      })
       .from(metrics)
       .where(and(eq(metrics.userId, input.userId), eq(metrics.sourceId, input.sourceId)))
       .limit(1);
@@ -69,6 +74,14 @@ export async function upsertMetric(
       await db.update(metrics)
         .set({ value: input.value, recordedAt: input.recordedAt, alias: input.alias })
         .where(and(eq(metrics.userId, input.userId), eq(metrics.sourceId, input.sourceId)));
+
+      // Recompute the new cell. If the source revised the timestamp into
+      // a different calendar day, the old day's cell needs a recompute
+      // too (its rows shifted out).
+      await recomputeDailySummary(input.userId, input.metricTypeId, input.recordedAt, db);
+      if (existing[0].recordedAt.slice(0, 10) !== input.recordedAt.slice(0, 10)) {
+        await recomputeDailySummary(input.userId, existing[0].metricTypeId, existing[0].recordedAt, db);
+      }
       return "skipped";
     }
   }
@@ -83,7 +96,7 @@ export async function upsertMetric(
     alias: input.alias,
   });
 
-  await invalidateDailySummary(input.metricTypeId, input.recordedAt, db, input.userId);
+  await recomputeDailySummary(input.userId, input.metricTypeId, input.recordedAt, db);
   return "accepted";
 }
 
@@ -267,30 +280,65 @@ export async function batchUpsertMetrics(inputs: MetricInput[]): Promise<IngestR
   return result;
 }
 
-async function invalidateDailySummary(
+/**
+ * Recompute the `daily_summaries` cell for one (user, metric_type, date)
+ * tuple from the underlying `metrics` rows. Called after every metric
+ * insert/update/delete so the cache stays consistent.
+ *
+ * Two-step:
+ *  1. INSERT…SELECT GROUP BY → ON CONFLICT DO UPDATE. Fills in the
+ *     correct avg/min/max/count/last_ingest_at when the cell has rows.
+ *  2. DELETE if the cell ended up with zero rows (last entry deleted).
+ *     The INSERT branch returns no rows in that case so the existing
+ *     cached row would otherwise linger with stale values.
+ */
+export async function recomputeDailySummary(
+  userId: number,
   metricTypeId: number,
   recordedAt: string,
   conn: DbLike = db,
-  userId: number,
 ) {
   const db = conn;
   const date = recordedAt.slice(0, 10);
-  const now = new Date().toISOString();
 
-  // ON CONFLICT must target the actual unique index. After the multi-
-  // user migration the index became (user_id, date, metric_type_id) so
-  // the conflict target list now includes user_id.
-  await db
-    .insert(dailySummaries)
-    .values({
-      userId,
-      date,
-      metricTypeId,
-      count: 0,
-      lastIngestAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [dailySummaries.userId, dailySummaries.date, dailySummaries.metricTypeId],
-      set: { lastIngestAt: now },
-    });
+  await db.execute(sql`
+    INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
+    SELECT
+      user_id,
+      substr(recorded_at, 1, 10) AS date,
+      metric_type_id,
+      AVG(value),
+      MIN(value),
+      MAX(value),
+      COUNT(*)::int,
+      MAX(recorded_at)
+    FROM metrics
+    WHERE user_id = ${userId}
+      AND metric_type_id = ${metricTypeId}
+      AND substr(recorded_at, 1, 10) = ${date}
+    GROUP BY user_id, substr(recorded_at, 1, 10), metric_type_id
+    ON CONFLICT (user_id, date, metric_type_id)
+    DO UPDATE SET
+      avg_value = excluded.avg_value,
+      min_value = excluded.min_value,
+      max_value = excluded.max_value,
+      count = excluded.count,
+      last_ingest_at = excluded.last_ingest_at;
+  `);
+
+  // Sweep the cell if the last row for it was just deleted. Cheap —
+  // bounded by the unique index, runs only when the INSERT branch
+  // produced no rows.
+  await db.execute(sql`
+    DELETE FROM daily_summaries
+    WHERE user_id = ${userId}
+      AND metric_type_id = ${metricTypeId}
+      AND date = ${date}
+      AND NOT EXISTS (
+        SELECT 1 FROM metrics
+        WHERE user_id = ${userId}
+          AND metric_type_id = ${metricTypeId}
+          AND substr(recorded_at, 1, 10) = ${date}
+      );
+  `);
 }
