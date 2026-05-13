@@ -1,0 +1,89 @@
+# Auto-deploy to the EC2 prod box on every push to main, after CI passes.
+#
+# Flow:
+#   1. Push to main triggers test.yml (lint + tsc + vitest + migrate + build).
+#   2. On test.yml success, this workflow_run trigger fires.
+#   3. The deploy job SSHs into EC2 and runs `scripts/deploy.sh`.
+#   4. Post-deploy health check curls the public URL and fails if not 200.
+#
+# Two pushes 30s apart -> concurrency cancels the in-flight deploy and runs
+# the newer one. Prod never receives a stale deploy.
+#
+# A leaked DEPLOY_SSH_KEY can only run /opt/delta2/scripts/deploy.sh because
+# the public key's `authorized_keys` entry locks the command server-side.
+#
+# To disable auto-deploy temporarily: comment out the `if:` line and push.
+
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [test]
+    branches: [main]
+    types: [completed]
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Only run when the upstream test workflow succeeded. workflow_run
+    # also fires on failure/cancellation; we gate explicitly to ignore those.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Load SSH key into agent
+        # webfactory/ssh-agent loads the private key into a scoped ssh-agent
+        # that dies with the runner. The key never touches disk.
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Pin EC2 host fingerprint
+        # Pre-seed known_hosts from the captured fingerprint so the SSH
+        # connection fails closed on host swap / MITM. The secret value is
+        # the literal output of `ssh-keyscan -t ed25519,rsa <host>` run from
+        # a trusted machine after eyeballing the EC2 console fingerprint.
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run deploy.sh on EC2
+        # The remote authorized_keys entry has `command="..."` set, so the
+        # actual command sent here is ignored — the server forces
+        # /opt/delta2/scripts/deploy.sh. We still send a no-op command for
+        # clarity in case the lock ever gets relaxed.
+        run: |
+          ssh -o BatchMode=yes \
+              ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+              'scripts/deploy.sh'
+
+      - name: Health-check the public URL
+        # deploy.sh exiting 0 means the script ran, not that the app serves
+        # requests. Six attempts x 10s gives systemd time to bounce the
+        # service and Next.js time to warm up before we fail the job.
+        run: |
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -sf -o /dev/null -w '%{http_code}' "https://${{ secrets.DEPLOY_HOST }}/" || true)
+            if [ "$code" = "200" ]; then
+              echo "Site healthy (200) on attempt $i."
+              exit 0
+            fi
+            echo "Attempt $i: got '$code', retrying in 10s…"
+            sleep 10
+          done
+          echo "Health check failed: site did not return 200 within ~60s."
+          exit 1
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "### Deploy ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.event.workflow_run.head_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Triggered by: ${{ github.event.workflow_run.event }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Host: ${{ secrets.DEPLOY_HOST }}" >> "$GITHUB_STEP_SUMMARY"
