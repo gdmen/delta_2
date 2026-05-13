@@ -15,10 +15,8 @@ const UNIT_STORAGE_KEY = "delta:weight-unit";
 
 export function BigThree({
   stats,
-  sportColor,
 }: {
   stats: Record<LiftStats["lift"], LiftStats>;
-  sportColor: string;
 }) {
   // Initial render (server + first client pass) uses "lb" so the SSR'd
   // HTML matches what hydration produces. After mount we read the saved
@@ -60,7 +58,6 @@ export function BigThree({
           <LiftCard
             key={lift}
             stats={stats[lift]}
-            color={sportColor}
             label={LIFT_LABEL[lift]}
             unit={unit}
           />
@@ -91,12 +88,10 @@ function UnitToggle({ unit, onChange }: { unit: WeightUnit; onChange: (u: Weight
 
 function LiftCard({
   stats,
-  color,
   label,
   unit,
 }: {
   stats: LiftStats;
-  color: string;
   label: string;
   unit: WeightUnit;
 }) {
@@ -105,10 +100,7 @@ function LiftCard({
   return (
     <div className="border border-border rounded p-4 flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
-        <div className="flex items-center gap-2">
-          <span className="w-[6px] h-[6px] rounded-full" style={{ backgroundColor: color }} />
-          <span className="text-[0.875rem] font-semibold">{label}</span>
-        </div>
+        <span className="text-[0.875rem] font-semibold">{label}</span>
         {stats.topSet && (
           <span className="font-mono text-[0.6875rem] text-muted">
             {relativeDays(stats.topSet.date)}
@@ -161,9 +153,9 @@ function LiftCard({
       )}
 
       {/* Trend chart - convert series to display unit on the fly. Line +
-         points stay at the MetricTrend default (foreground / near-black)
-         regardless of sport — the sport-colored dot beside the lift name
-         carries the sport identity; a colored chart on top is just noise. */}
+         points stay at the MetricTrend default (foreground / near-black);
+         the widget is sport-scoped (powerlifting) so a separate color
+         indicator would be redundant. */}
       {stats.history.length >= 2 && (
         <div className="mt-1">
           <div className="font-mono text-[0.625rem] uppercase tracking-wider text-muted mb-1">
