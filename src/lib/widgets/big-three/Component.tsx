@@ -5,9 +5,7 @@ import type { BigThreeConfig } from "./schema";
 
 /**
  * Wraps the existing client-side BigThree component (lb/kg toggle +
- * MetricTrend per lift). Color comes from the powerlifting sport row's
- * `sports.color` — whatever the user picked or had auto-assigned. Falls
- * back to a neutral gray when no powerlifting row exists.
+ * MetricTrend per lift).
  */
 export function BigThreeComponent({
   config,
@@ -22,6 +20,6 @@ export function BigThreeComponent({
       <p className="text-[0.875rem] text-muted py-2">No lift data yet.</p>
     );
   }
-  const { color, lifts } = raw as BigThreeData;
-  return <BigThree stats={lifts} sportColor={color} />;
+  const { lifts } = raw as BigThreeData;
+  return <BigThree stats={lifts} />;
 }

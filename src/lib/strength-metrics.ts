@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { workoutSets, events, sports, metricTypes } from "@/db/schema";
+import { workoutSets, events, metricTypes } from "@/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { userScope } from "./auth/scope";
 import {
@@ -87,25 +87,17 @@ export function oconnorE1RM(weight: number, reps: number): number {
 // -----------------------------------------------------------------------------
 
 export interface BigThreeStats {
-  /** Sport color (hex). Falls back to a neutral muted gray when no
-   * powerlifting sport row exists yet. */
-  color: string;
   lifts: Record<Lift, LiftStats>;
 }
 
-const FALLBACK_COLOR = "#737373"; // neutral-500 — used when sport row missing
-
 /**
- * Returns stats for all three lifts plus a display color. Reads
- * workout_sets via the configured metric_type names — sport-agnostic,
- * so a bench press done in a BJJ session (or any other sport) still
- * counts. Safe when no matching workout_sets exist.
+ * Returns stats for all three lifts. Reads workout_sets via the
+ * configured metric_type names — sport-agnostic, so a bench press done
+ * in a BJJ session (or any other sport) still counts. Safe when no
+ * matching workout_sets exist.
  *
  * `names` lets callers override the canonical exercise name per slot
  * (squat/bench/deadlift). Defaults to BIG_THREE_DEFAULT_NAMES.
- *
- * Color picks up `sports.color` from the first matched metric_type's
- * sport_id; falls back to neutral when no match has a sport linked.
  */
 export async function getBigThreeStats(
   names: LiftNames,
@@ -115,7 +107,7 @@ export async function getBigThreeStats(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (targetNames.length === 0) {
-    return { color: FALLBACK_COLOR, lifts: emptyStats() };
+    return { lifts: emptyStats() };
   }
 
   // INHERIT scoping: workout_sets has no user_id; restrict via the join
@@ -123,7 +115,6 @@ export async function getBigThreeStats(
   const rows = await db
     .select({
       exerciseName: metricTypes.name,
-      sportId: metricTypes.sportId,
       setNumber: workoutSets.setNumber,
       reps: workoutSets.reps,
       weight: workoutSets.weight,
@@ -153,23 +144,7 @@ export async function getBigThreeStats(
     if (lift) byLift[lift].push(r);
   }
 
-  // Color: pick up the sport_id of the first matched metric_type that
-  // has one, look up its color. Lets a single-sport setup still get a
-  // sport-tinted widget; a cross-sport setup gracefully falls back to
-  // neutral.
-  let color = FALLBACK_COLOR;
-  const firstSportId = rows.find((r) => r.sportId !== null)?.sportId;
-  if (firstSportId != null) {
-    const sportRow = await db
-      .select({ color: sports.color })
-      .from(sports)
-      .where(and(userScope(userId).sports, eq(sports.id, firstSportId)))
-      .limit(1);
-    if (sportRow[0]) color = sportRow[0].color;
-  }
-
   return {
-    color,
     lifts: {
       squat: buildLiftStats("squat", byLift.squat),
       bench: buildLiftStats("bench", byLift.bench),
