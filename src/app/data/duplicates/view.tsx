@@ -7,6 +7,7 @@ import type {
   CandidateGroup,
   CandidatePair,
 } from "@/lib/duplicates/detector";
+import { formatShort } from "@/lib/format";
 import {
   CompositeMergeModal,
   type SportOption,
@@ -179,7 +180,7 @@ function PairRow({
   onDismiss: () => void;
   dismissing: boolean;
 }) {
-  const aTime = p.aStartedAt.slice(0, 16).replace("T", " ");
+  const aTime = formatShort(p.aStartedAt);
   return (
     <div className="border border-border rounded px-3 py-2 flex justify-between items-baseline gap-3 font-mono text-[0.75rem]">
       <div className="flex gap-2 items-baseline truncate min-w-0">

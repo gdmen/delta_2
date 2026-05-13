@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CandidatePair } from "@/lib/duplicates/detector";
+import { formatShort } from "@/lib/format";
 import {
   CompositeMergeModal,
   type SportOption,
@@ -125,8 +126,8 @@ function PairCard({
   onDismiss: () => void;
   dismissing: boolean;
 }) {
-  const aTime = p.aStartedAt.slice(0, 16).replace("T", " ");
-  const bTime = p.bStartedAt.slice(0, 16).replace("T", " ");
+  const aTime = formatShort(p.aStartedAt);
+  const bTime = formatShort(p.bStartedAt);
   return (
     <div className="border border-border rounded p-3 space-y-2">
       <div className="text-[0.6875rem] font-mono text-muted">

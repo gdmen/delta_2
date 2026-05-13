@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { userScope } from "@/lib/auth/scope";
+import { formatShort } from "@/lib/format";
 import { UnmergeButton } from "./unmerge-button";
 
 interface CompositeEventRow {
@@ -132,7 +133,7 @@ export async function CompositeView({
           {event.sportName} · {event.type}
           {event.durationMinutes ? ` · ${event.durationMinutes}m` : ""}
           {" · "}
-          starts {event.startedAt.slice(0, 16).replace("T", " ")}
+          starts {formatShort(event.startedAt)}
         </p>
         {event.notes && (
           <p className="mt-2 text-[0.875rem] whitespace-pre-wrap">
@@ -164,7 +165,7 @@ export async function CompositeView({
                 </span>
               </div>
               <span className="text-muted whitespace-nowrap">
-                {m.startedAt.slice(0, 16).replace("T", " ")}
+                {formatShort(m.startedAt)}
                 {m.durationMinutes ? ` · ${m.durationMinutes}m` : ""}
               </span>
             </div>

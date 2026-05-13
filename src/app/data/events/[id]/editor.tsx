@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { utcIsoToLocalInput } from "@/lib/format";
 
 interface Event {
   id: number;
@@ -57,7 +58,7 @@ export function EventEditor({
   const [header, setHeader] = useState({
     sportId: event.sportId,
     type: event.type,
-    startedAt: event.startedAt.slice(0, 16),
+    startedAt: utcIsoToLocalInput(event.startedAt),
     durationMinutes: event.durationMinutes?.toString() ?? "",
     notes: event.notes ?? "",
   });
