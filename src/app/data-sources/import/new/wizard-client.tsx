@@ -140,7 +140,20 @@ export function WizardClient() {
       if (csvFile) {
         const fd = new FormData();
         fd.append("file", csvFile);
-        await fetch(`/api/import-sources/${json.id}/import`, { method: "POST", body: fd });
+        // Server returns an SSE stream; drain it so the import actually
+        // finishes before we navigate. Detailed progress UI lives on
+        // the destination page — we just need to wait here.
+        const importRes = await fetch(`/api/import-sources/${json.id}/import`, {
+          method: "POST",
+          body: fd,
+        });
+        if (importRes.body) {
+          const reader = importRes.body.getReader();
+          while (true) {
+            const { done } = await reader.read();
+            if (done) break;
+          }
+        }
       }
       router.push(`/data-sources/import/${json.id}`);
     } catch (err) {

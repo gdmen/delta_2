@@ -25,6 +25,12 @@ import {
 import { loadUserTimezone } from "@/lib/app-settings";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
+import { makeSseStream, sseHeaders } from "@/lib/sse-stream";
+
+type ImportEvent = "start" | "progress" | "done" | "error";
+
+const PROGRESS_EMIT_MIN_ROWS = 500;
+const PROGRESS_EMIT_MIN_MS = 250;
 
 /**
  * POST /api/import-sources/[id]/import
@@ -89,41 +95,74 @@ export async function POST(
   // -> underscores. So "TeamBuildr" -> "teambuildr" in the `source` column.
   const sourceTag = source.name.toLowerCase().replace(/\s+/g, "_");
 
-  const result: TableResult = { accepted: 0, skipped: 0, updated: 0, errors: [] };
+  // Stream progress via SSE. All setup that can fail with a clean JSON
+  // error happens above this point; once the stream opens, we're
+  // committed to the event-stream protocol.
+  const stream = makeSseStream<ImportEvent>(async (emit) => {
+    const result: TableResult = { accepted: 0, skipped: 0, updated: 0, errors: [] };
 
-  const typeCache = await buildMetricTypeCache(user.id);
-  const sportCache = await buildSportCache(user.id);
-  const tracker = new ReconcileTracker(user.id);
-  // User timezone anchors naive dates ("2026-05-07" or
-  // "2026-05-07 23:00") to wall-clock time in `tz`. Without this a
-  // late-evening sleep entry in PT lands on the wrong calendar day.
-  const tz = await loadUserTimezone(user.id);
+    const typeCache = await buildMetricTypeCache(user.id);
+    const sportCache = await buildSportCache(user.id);
+    const tracker = new ReconcileTracker(user.id);
+    // User timezone anchors naive dates ("2026-05-07" or
+    // "2026-05-07 23:00") to wall-clock time in `tz`. Without this a
+    // late-evening sleep entry in PT lands on the wrong calendar day.
+    const tz = await loadUserTimezone(user.id);
 
-  for (let i = 0; i < rows.length; i++) {
-    const { out, error } = applyMapping(mapping, headers, rows[i], i, tz);
-    if (error) {
-      result.errors.push(`row ${i + 2}: ${error}`);
-      continue;
-    }
-    for (const item of out) {
-      try {
-        await writeOutRow(item, sourceTag, typeCache, sportCache, result, i, tracker, user.id);
-      } catch (err) {
-        result.errors.push(
-          `row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
-        );
+    emit("start", { totalRows: rows.length });
+
+    // Throttle progress emits: fire at most every PROGRESS_EMIT_MIN_MS,
+    // and at least every PROGRESS_EMIT_MIN_ROWS so dense fast rows
+    // still get visible movement.
+    let lastEmitRows = 0;
+    let lastEmitAt = Date.now();
+    const maybeEmitProgress = (rowsProcessed: number, force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        rowsProcessed - lastEmitRows < PROGRESS_EMIT_MIN_ROWS &&
+        now - lastEmitAt < PROGRESS_EMIT_MIN_MS
+      ) {
+        return;
       }
+      lastEmitRows = rowsProcessed;
+      lastEmitAt = now;
+      emit("progress", { rowsProcessed });
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      const { out, error } = applyMapping(mapping, headers, rows[i], i, tz);
+      if (error) {
+        result.errors.push(`row ${i + 2}: ${error}`);
+      } else {
+        for (const item of out) {
+          try {
+            await writeOutRow(item, sourceTag, typeCache, sportCache, result, i, tracker, user.id);
+          } catch (err) {
+            result.errors.push(
+              `row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+      }
+      maybeEmitProgress(i + 1);
     }
-  }
+    // Force a final progress emit so the client lands on the exact
+    // total row count before `done`.
+    maybeEmitProgress(rows.length, true);
 
-  // Truncate long error lists so the response stays small on huge imports.
-  if (result.errors.length > 20) {
-    result.errors = [...result.errors.slice(0, 20), `... +${result.errors.length - 20} more`];
-  }
+    // Truncate long error lists so the final payload stays small on huge
+    // imports.
+    if (result.errors.length > 20) {
+      result.errors = [...result.errors.slice(0, 20), `... +${result.errors.length - 20} more`];
+    }
 
-  const reconcile = await tracker.apply(sourceTag);
+    const reconcile = await tracker.apply(sourceTag);
 
-  return NextResponse.json({ kind: mapping.kind, result, reconcile });
+    emit("done", { kind: mapping.kind, result, reconcile });
+  });
+
+  return new Response(stream, { headers: sseHeaders() });
 }
 
 async function writeOutRow(
