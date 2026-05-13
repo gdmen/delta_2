@@ -54,8 +54,8 @@ export async function POST(
       { status: 409 },
     );
   }
-  if (composite.memberIds.length < 2) {
-    // Degenerate: composite with <2 members shouldn't normally exist,
+  if (composite.memberIds.length === 0) {
+    // Degenerate: composite with no members shouldn't normally exist,
     // but handle gracefully — just delete it and bail.
     await db
       .delete(events)
@@ -63,10 +63,13 @@ export async function POST(
     return NextResponse.json({ ok: true, denylistInserts: 0 });
   }
 
-  // Build the denylist insert payload: every unordered pair from the
-  // member list. For 2 members that's one row; for N members it's
-  // C(N, 2) rows.
   const sorted = [...composite.memberIds].sort((a, b) => a - b);
+
+  // Build the denylist insert payload: every unordered pair from the
+  // member list. 2 members → 1 row; N members → C(N, 2) rows.
+  // A 1-member composite (sport-promote flavor) has no pairs to
+  // denylist — flipping the lone member back to visible is the
+  // entire unmerge.
   const denylistRows: { userId: number; eventAId: number; eventBId: number }[] = [];
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {
@@ -78,12 +81,14 @@ export async function POST(
     }
   }
 
-  // ON CONFLICT DO NOTHING — a pair could already be denylisted from a
-  // previous unmerge cycle (merge → unmerge → re-merge → unmerge).
-  await db
-    .insert(eventDuplicateDenylist)
-    .values(denylistRows)
-    .onConflictDoNothing();
+  if (denylistRows.length > 0) {
+    // ON CONFLICT DO NOTHING — a pair could already be denylisted from
+    // a previous unmerge cycle (merge → unmerge → re-merge → unmerge).
+    await db
+      .insert(eventDuplicateDenylist)
+      .values(denylistRows)
+      .onConflictDoNothing();
+  }
 
   // Flip members back to visible.
   await db

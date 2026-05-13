@@ -19,23 +19,31 @@ export interface SportOption {
 }
 
 /**
- * Inline modal for "Merge these two events into a composite". Asks the
- * user for the composite's sport (free pick from any of their sports;
- * defaults to whichever member has the less source-prefixed sport
- * name — that's usually the user-curated canonical one).
+ * Inline modal for "Wrap one or two events into a composite". Two flavors:
  *
- * Sends POST /api/events/merge on confirm and refreshes the page.
+ *  - **Two-member** (b is set): typical "same physical session logged
+ *    twice" merge. Title reads "Merge into composite event".
+ *  - **Single-member** (b is omitted): retag a single event with a
+ *    canonical sport while keeping the source row's data accessible
+ *    via the composite. Title reads "Promote to composite event".
+ *
+ * Either way: user picks the sport (defaults to the less source-prefixed
+ * name among members), optionally adds notes, and confirms. Sends
+ * POST /api/events/merge with `bId` omitted in the single-member case.
  */
 export function CompositeMergeModal({
   a,
   b,
   sportOptions,
   onClose,
+  onSuccess,
 }: {
   a: MergeMember;
-  b: MergeMember;
+  b?: MergeMember;
   sportOptions: SportOption[];
   onClose: () => void;
+  /** Optional callback fired with the new composite's id after success. */
+  onSuccess?: (compositeId: number) => void;
 }) {
   const router = useRouter();
   const defaultSport = pickDefaultSport(a, b);
@@ -52,7 +60,7 @@ export function CompositeMergeModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         aId: a.id,
-        bId: b.id,
+        ...(b ? { bId: b.id } : {}),
         sportId,
         notes: notes.trim() || null,
       }),
@@ -63,9 +71,19 @@ export function CompositeMergeModal({
       setSubmitting(false);
       return;
     }
+    const j = (await res.json()) as { id: number };
     onClose();
-    router.refresh();
+    if (onSuccess) {
+      onSuccess(j.id);
+    } else {
+      router.refresh();
+    }
   }
+
+  const title = b
+    ? "Merge into composite event"
+    : "Promote to composite event";
+  const confirmLabel = submitting ? (b ? "Merging…" : "Promoting…") : b ? "Merge" : "Promote";
 
   return (
     <div
@@ -76,11 +94,11 @@ export function CompositeMergeModal({
         className="bg-background border border-border rounded-lg max-w-lg w-full p-5 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-[1rem] font-semibold">Merge into composite event</h2>
+        <h2 className="text-[1rem] font-semibold">{title}</h2>
 
         <div className="space-y-2 text-[0.8125rem]">
           <MemberRow m={a} />
-          <MemberRow m={b} />
+          {b && <MemberRow m={b} />}
         </div>
 
         <div>
@@ -133,7 +151,7 @@ export function CompositeMergeModal({
             disabled={submitting}
             className="px-3 py-1.5 text-[0.8125rem] bg-foreground text-background rounded hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Merging…" : "Merge"}
+            {confirmLabel}
           </button>
         </div>
       </div>
@@ -159,11 +177,12 @@ function MemberRow({ m }: { m: MergeMember }) {
   );
 }
 
-function pickDefaultSport(a: MergeMember, b: MergeMember): number {
+function pickDefaultSport(a: MergeMember, b?: MergeMember): number {
   // Prefer the sport name that doesn't look like `<source>:<x>` —
   // that's almost always the user-curated canonical (e.g. prefer
   // "powerlifting" over "strava:WeightTraining"). If both or neither
   // are prefixed, pick a's.
+  if (!b) return a.sportId;
   const aIsPrefixed = a.sportName.includes(":");
   const bIsPrefixed = b.sportName.includes(":");
   if (aIsPrefixed && !bIsPrefixed) return b.sportId;

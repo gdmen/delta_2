@@ -4,6 +4,7 @@ import { events, sports, workoutSets, eventMetrics, metricTypes } from "@/db/sch
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { EventEditor } from "./editor";
 import { CompositeView } from "./composite-view";
+import { PromoteToCompositeButton } from "./promote-to-composite";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
@@ -143,6 +144,33 @@ export default async function EventDetailPage({
         initialEventMetrics={emRows}
         metricTypes={metricTypesList}
       />
+
+      {/* Single-event promote action — only on regular visible events.
+          Composites render through the CompositeView branch above;
+          hidden_by_composite rows surface their parent composite for
+          editing instead. */}
+      {event.status === "visible" && (
+        <div className="mt-8 pt-6 border-t border-border">
+          <PromoteToCompositeButton
+            member={{
+              id: event.id,
+              source: event.source,
+              sportId: event.sportId,
+              sportName: event.sportName,
+              type: event.type,
+              startedAt: event.startedAt,
+              durationMinutes: event.durationMinutes,
+            }}
+            sportOptions={sportsList}
+          />
+          <p className="mt-2 text-[0.75rem] text-muted">
+            Wraps this event in a composite with a sport you choose.
+            Useful for retagging generic source types (Strava{" "}
+            <code>Workout</code>, Apple Health <code>Other</code>) as
+            the actual activity.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
