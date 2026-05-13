@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { events, sports, workoutSets, eventMetrics, metricTypes } from "@/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { EventEditor } from "./editor";
+import { CompositeView } from "./composite-view";
+import { PromoteToCompositeButton } from "./promote-to-composite";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
@@ -29,6 +31,8 @@ export default async function EventDetailPage({
       startedAt: events.startedAt,
       source: events.source,
       sourceId: events.sourceId,
+      status: events.status,
+      compositeMemberIds: events.compositeMemberIds,
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
@@ -36,6 +40,19 @@ export default async function EventDetailPage({
     .limit(1);
   if (rows.length === 0) notFound();
   const event = rows[0];
+
+  // Composite events render through a different layout: no editor,
+  // member breakdown, unmerge button. Children (workout_sets,
+  // event_metrics) are fetched across the member ids in the composite
+  // view itself.
+  if (event.status === "composite") {
+    return (
+      <CompositeView
+        event={event}
+        userId={user.id}
+      />
+    );
+  }
 
   const sportsList = await db
     .select({ id: sports.id, name: sports.name })
@@ -98,8 +115,16 @@ export default async function EventDetailPage({
     .where(userScope(user.id).metricTypes)
     .orderBy(asc(metricTypes.name));
 
+  const hiddenBanner = event.status === "hidden_by_composite";
+
   return (
     <div className="max-w-[940px]">
+      {hiddenBanner && (
+        <div className="mb-4 px-3 py-2 bg-surface border border-border rounded text-[0.8125rem]">
+          This event is part of a <span className="font-mono uppercase tracking-wider">composite</span>{" "}
+          and is hidden from default views. Edits still save.
+        </div>
+      )}
       <h1 className="text-2xl font-semibold mb-2">
         Event #{event.id}{" "}
         <span className="text-muted text-[0.875rem] font-mono">
@@ -119,6 +144,33 @@ export default async function EventDetailPage({
         initialEventMetrics={emRows}
         metricTypes={metricTypesList}
       />
+
+      {/* Single-event promote action — only on regular visible events.
+          Composites render through the CompositeView branch above;
+          hidden_by_composite rows surface their parent composite for
+          editing instead. */}
+      {event.status === "visible" && (
+        <div className="mt-8 pt-6 border-t border-border">
+          <PromoteToCompositeButton
+            member={{
+              id: event.id,
+              source: event.source,
+              sportId: event.sportId,
+              sportName: event.sportName,
+              type: event.type,
+              startedAt: event.startedAt,
+              durationMinutes: event.durationMinutes,
+            }}
+            sportOptions={sportsList}
+          />
+          <p className="mt-2 text-[0.75rem] text-muted">
+            Wraps this event in a composite with a sport you choose.
+            Useful for retagging generic source types (Strava{" "}
+            <code>Workout</code>, Apple Health <code>Other</code>) as
+            the actual activity.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -106,6 +106,10 @@ export function Sidebar({ dashboards, user }: SidebarProps) {
           </button>
         </div>
 
+        <Section label="Home">
+          <NavItem href="/home" label="Home" active={pathname === "/home"} />
+        </Section>
+
         <DashboardsSection dashboards={dashboards} pathname={pathname} />
 
         <Section label="Targets">

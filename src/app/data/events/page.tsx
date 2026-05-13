@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { events, sports } from "@/db/schema";
-import { and, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { PaginationControls } from "@/components/pagination-controls";
-import { formatShort } from "@/lib/format";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
+import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
+import { EventsTable } from "./events-table";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,16 @@ export default async function AllEventsPage({
   // Build WHERE from date range + optional text match. `started_at` is stored
   // as ISO with time; day-boundary ISO strings work with text-string
   // comparison. Text match is OR across sport name, event type, source, notes.
-  const conditions = [userScope(user.id).events];
+  //
+  // Hide events that have been folded into a composite — they still
+  // exist in the DB (status='hidden_by_composite') for exports and
+  // diagnostics, but the default events list shouldn't double-count
+  // them. The composite itself (status='composite') shows up as a
+  // normal row.
+  const conditions = [
+    userScope(user.id).events,
+    or(eq(events.status, "visible"), eq(events.status, "composite"))!,
+  ];
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));
   if (to) conditions.push(lte(events.startedAt, `${to}T23:59:59.999Z`));
   if (q) {
@@ -64,10 +74,12 @@ export default async function AllEventsPage({
     .select({
       id: events.id,
       startedAt: events.startedAt,
+      sportId: events.sportId,
       sportName: sports.name,
       type: events.type,
       durationMinutes: events.durationMinutes,
       source: events.source,
+      status: events.status,
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
@@ -75,6 +87,14 @@ export default async function AllEventsPage({
     .orderBy(desc(events.startedAt))
     .limit(PAGE_SIZE)
     .offset((currentPage - 1) * PAGE_SIZE);
+
+  // Drives the composite-merge action bar at the bottom of the table.
+  const sportOptions = await db
+    .select({ id: sports.id, name: sports.name })
+    .from(sports)
+    .where(userScope(user.id).sports)
+    .orderBy(asc(sports.name));
+  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
 
   const baseQs = new URLSearchParams();
   if (from) baseQs.set("from", from);
@@ -163,47 +183,11 @@ export default async function AllEventsPage({
         className="mb-4"
       />
 
-      <div className="border border-border rounded overflow-hidden">
-        <table className="w-full text-[0.8125rem]">
-          <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
-            <tr>
-              <th className="text-left font-mono font-semibold px-3 py-2">Started at</th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Sport</th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Type</th>
-              <th className="text-right font-mono font-semibold px-3 py-2 w-20">Dur.</th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-muted">
-                  No events match the current filters.
-                </td>
-              </tr>
-            ) : (
-              rows.map((e) => (
-                <tr key={e.id} className="relative border-t border-border hover:bg-surface/40">
-                  <td className="px-3 py-2 font-mono tabular-nums">
-                    <Link
-                      href={`/data/events/${e.id}`}
-                      className="absolute inset-0"
-                      aria-label={`Open event ${e.id}`}
-                    />
-                    {formatShort(e.startedAt)}
-                  </td>
-                  <td className="px-3 py-2 font-mono">{e.sportName}</td>
-                  <td className="px-3 py-2 font-mono text-muted">{e.type}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
-                    {e.durationMinutes ?? "-"}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[0.75rem] text-muted">{e.source}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <EventsTable
+        rows={rows}
+        sportOptions={sportOptions}
+        typeSuggestionsBySportId={typeSuggestionsBySportId}
+      />
 
       <PaginationControls
         currentPage={currentPage}

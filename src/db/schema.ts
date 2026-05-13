@@ -294,12 +294,57 @@ export const events = pgTable(
     startedAt: text("started_at").notNull(),
     source: text("source").notNull().default("manual"),
     sourceId: text("source_id"),
+    // 'visible' = normal event. 'hidden_by_composite' = folded into a
+    // composite (still queryable for exports/diagnostics, but absent
+    // from default views). 'composite' = synthetic merged row that
+    // references its members via composite_member_ids.
+    status: text("status", {
+      enum: ["visible", "hidden_by_composite", "composite"],
+    })
+      .notNull()
+      .default("visible"),
+    // Non-empty only when status='composite'. Lists the event ids that
+    // were merged. Child rows (event_metrics, workout_sets) stay on
+    // the member rows; composite renders fetch them via
+    // WHERE event_id = ANY(composite_member_ids).
+    compositeMemberIds: integer("composite_member_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::integer[]`),
     createdAt: text("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     index("idx_events_sport_started").on(t.sportId, t.startedAt),
     uniqueIndex("idx_events_user_source_id").on(t.userId, t.sourceId),
     index("idx_events_user").on(t.userId),
+  ],
+);
+
+/**
+ * Dismiss-once-forever memory for the duplicate detector. When a user
+ * clicks "Not a duplicate" on a candidate pair OR unmerges a composite,
+ * the pair (event_a_id, event_b_id) lands here. The detector skips any
+ * pair present in this table. Always insert with event_a_id < event_b_id
+ * so the lookup stays symmetric.
+ */
+export const eventDuplicateDenylist = pgTable(
+  "event_duplicate_denylist",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    eventAId: integer("event_a_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    eventBId: integer("event_b_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [
+    uniqueIndex("event_duplicate_denylist_pair").on(t.eventAId, t.eventBId),
+    index("idx_event_duplicate_denylist_user").on(t.userId),
   ],
 );
 
