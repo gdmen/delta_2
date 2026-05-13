@@ -11,17 +11,14 @@
  *   npx tsx scripts/smoke-daily-summaries.ts
  */
 import { db } from "@/db";
-import { metrics, metricTypes, dailySummaries, sports } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { metrics, metricTypes, dailySummaries, sports, users } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { recomputeDailySummary } from "@/lib/ingest-service";
 
 const TEST_TAG = "smoke-test-daily-summaries";
 
 async function pickUserId(): Promise<number> {
-  const rows = await db
-    .select({ id: sql<number>`id` })
-    .from(sql.raw("users") as never)
-    .limit(1);
+  const rows = await db.select({ id: users.id }).from(users).limit(1);
   if (rows.length === 0) throw new Error("No users in DB; bootstrap one first");
   return rows[0].id;
 }
