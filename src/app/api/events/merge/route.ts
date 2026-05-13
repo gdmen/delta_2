@@ -6,38 +6,51 @@ import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
 interface MergeBody {
-  /** Required. First (or only) member event. */
-  aId: number;
   /**
-   * Optional second member. Omit to create a single-member composite
-   * — used to wrap one event with a corrected canonical sport
-   * (e.g. retag a Strava `Workout` row as BJJ while keeping the
-   * Strava heart-rate data accessible via the composite's Sources
-   * panel).
+   * One or more member event ids. The composite wraps all of them.
+   *
+   * - N=1 is a "promote" — wrap one event with a corrected canonical
+   *   sport (e.g. retag a Strava `Workout` row as BJJ).
+   * - N=2 is the typical "same session logged twice" merge.
+   * - N≥3 covers multi-source single sessions (Strava + Apple Health
+   *   + Whoop all reporting the same morning lift).
+   *
+   * No two members may share a `source` — composites combine
+   * cross-source data; two events from the same source for the same
+   * time are almost always one being a duplicate-import rather than
+   * truly distinct sessions.
    */
-  bId?: number;
+  memberIds: number[];
   /** Sport for the composite. Must belong to the calling user. */
   sportId: number;
-  /** Optional override of the composite's display type (defaults to a's). */
+  /** Optional override of the composite's display type (defaults to first member's). */
   type?: string;
   /** Optional free-form notes on the merge. */
   notes?: string | null;
+  /**
+   * Optional ISO timestamp override for the composite's started_at.
+   * When omitted, defaults to the earliest member's started_at.
+   */
+  startedAt?: string;
+  /**
+   * Optional duration override in minutes. When omitted, falls back to
+   * the auto-computed span between earliest start and latest end —
+   * which is fine for clean cross-source merges but can produce wacky
+   * values when member timestamps are off by an hour (clock skew,
+   * timezone bugs in the source). UI defaults to max(member durations)
+   * which is closer to the user's intent. Pass `null` to leave the
+   * composite with null duration.
+   */
+  durationMinutes?: number | null;
 }
 
 /**
  * POST /api/events/merge
  *
- * Folds one or two visible events into a single composite event.
+ * Folds one or more visible events into a single composite event.
  * Members flip to `status='hidden_by_composite'`; the composite is a
  * new row with `status='composite'` and the member ids stored in
  * `composite_member_ids`.
- *
- * Two flavors:
- *   - **Two-member merge** — typical "same physical session logged
- *     twice" case. Different sources required.
- *   - **Single-member promote** — wrap one event with a corrected
- *     canonical sport. Useful when a source emits a generic activity
- *     type (Strava `Workout`) but the user knows what it actually was.
  *
  * Members aren't deleted: exports and diagnostics still see them. Only
  * default views filter `status = 'visible'`.
@@ -53,20 +66,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!Number.isInteger(body.aId) || !Number.isInteger(body.sportId)) {
+  if (!Number.isInteger(body.sportId)) {
     return NextResponse.json(
-      { error: "aId and sportId are required" },
+      { error: "sportId is required" },
       { status: 400 },
     );
   }
-  const memberIdsRequested =
-    body.bId !== undefined && body.bId !== null ? [body.aId, body.bId] : [body.aId];
   if (
-    memberIdsRequested.length === 2 &&
-    (!Number.isInteger(memberIdsRequested[1]) || memberIdsRequested[0] === memberIdsRequested[1])
+    !Array.isArray(body.memberIds) ||
+    body.memberIds.length === 0 ||
+    !body.memberIds.every((id) => Number.isInteger(id))
   ) {
     return NextResponse.json(
-      { error: "When provided, bId must be an integer distinct from aId" },
+      { error: "memberIds must be a non-empty array of integers" },
+      { status: 400 },
+    );
+  }
+  const memberIdsRequested = body.memberIds;
+  if (new Set(memberIdsRequested).size !== memberIdsRequested.length) {
+    return NextResponse.json(
+      { error: "memberIds must not contain duplicates" },
       { status: 400 },
     );
   }
@@ -104,11 +123,23 @@ export async function POST(request: NextRequest) {
       );
     }
   }
-  if (members.length === 2 && members[0].source === members[1].source) {
-    return NextResponse.json(
-      { error: "Both events have the same source; merging same-source events isn't supported" },
-      { status: 409 },
-    );
+  // No two members may share a source. Generalizes the prior 2-member
+  // check to N members; finds the first colliding pair for a helpful
+  // error.
+  if (members.length > 1) {
+    const seen = new Map<string, number>();
+    for (const m of members) {
+      const prevId = seen.get(m.source);
+      if (prevId !== undefined) {
+        return NextResponse.json(
+          {
+            error: `Events ${prevId} and ${m.id} share source='${m.source}'; merging same-source events isn't supported`,
+          },
+          { status: 409 },
+        );
+      }
+      seen.set(m.source, m.id);
+    }
   }
 
   const ownsSport = await db
@@ -120,23 +151,57 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "sportId not found" }, { status: 400 });
   }
 
-  // Span derivation: earliest start, latest "end" (= start + duration
-  // when available, else just start). Single-member composite collapses
-  // to the member's own start + duration.
-  const ends = members.map((m) =>
-    m.durationMinutes
-      ? new Date(new Date(m.startedAt).getTime() + m.durationMinutes * 60_000).toISOString()
-      : m.startedAt,
-  );
-  const earliestStart = members.reduce((acc, m) =>
-    m.startedAt < acc ? m.startedAt : acc,
-    members[0].startedAt,
-  );
-  const latestEnd = ends.reduce((acc, e) => (e > acc ? e : acc), ends[0]);
-  const compositeDurationMinutes = Math.max(
-    1,
-    Math.round((new Date(latestEnd).getTime() - new Date(earliestStart).getTime()) / 60_000),
-  );
+  // started_at: caller override wins, else earliest member start.
+  let compositeStartedAt: string;
+  if (body.startedAt !== undefined) {
+    const parsed = new Date(body.startedAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return NextResponse.json(
+        { error: "startedAt must be a valid ISO timestamp" },
+        { status: 400 },
+      );
+    }
+    compositeStartedAt = parsed.toISOString();
+  } else {
+    compositeStartedAt = members.reduce(
+      (acc, m) => (m.startedAt < acc ? m.startedAt : acc),
+      members[0].startedAt,
+    );
+  }
+
+  // duration: caller override wins (including explicit null), else
+  // computed span between earliest member start and latest member end.
+  let compositeDurationMinutes: number | null;
+  if (body.durationMinutes !== undefined) {
+    if (body.durationMinutes === null) {
+      compositeDurationMinutes = null;
+    } else if (
+      !Number.isFinite(body.durationMinutes) ||
+      body.durationMinutes < 1
+    ) {
+      return NextResponse.json(
+        { error: "durationMinutes must be null or a positive number" },
+        { status: 400 },
+      );
+    } else {
+      compositeDurationMinutes = Math.round(body.durationMinutes);
+    }
+  } else {
+    const earliestStart = members.reduce(
+      (acc, m) => (m.startedAt < acc ? m.startedAt : acc),
+      members[0].startedAt,
+    );
+    const ends = members.map((m) =>
+      m.durationMinutes
+        ? new Date(new Date(m.startedAt).getTime() + m.durationMinutes * 60_000).toISOString()
+        : m.startedAt,
+    );
+    const latestEnd = ends.reduce((acc, e) => (e > acc ? e : acc), ends[0]);
+    compositeDurationMinutes = Math.max(
+      1,
+      Math.round((new Date(latestEnd).getTime() - new Date(earliestStart).getTime()) / 60_000),
+    );
+  }
 
   const compositeType = body.type ?? members[0].type;
   const compositeNotes = body.notes ?? null;
@@ -153,7 +218,7 @@ export async function POST(request: NextRequest) {
       type: compositeType,
       durationMinutes: compositeDurationMinutes,
       notes: compositeNotes,
-      startedAt: earliestStart,
+      startedAt: compositeStartedAt,
       source: "composite",
       sourceId,
       status: "composite",

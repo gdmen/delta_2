@@ -22,9 +22,11 @@ import {
 export function SuggestedComposites({
   pairs,
   sportOptions,
+  typeSuggestionsBySportId,
 }: {
   pairs: CandidatePair[];
   sportOptions: SportOption[];
+  typeSuggestionsBySportId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [mergeTarget, setMergeTarget] = useState<CandidatePair | null>(null);
@@ -89,25 +91,28 @@ export function SuggestedComposites({
 
       {mergeTarget && (
         <CompositeMergeModal
-          a={{
-            id: mergeTarget.aId,
-            source: mergeTarget.aSource,
-            sportId: mergeTarget.aSportId,
-            sportName: mergeTarget.aSportName,
-            type: mergeTarget.aType,
-            startedAt: mergeTarget.aStartedAt,
-            durationMinutes: mergeTarget.aDurationMinutes,
-          }}
-          b={{
-            id: mergeTarget.bId,
-            source: mergeTarget.bSource,
-            sportId: mergeTarget.bSportId,
-            sportName: mergeTarget.bSportName,
-            type: mergeTarget.bType,
-            startedAt: mergeTarget.bStartedAt,
-            durationMinutes: mergeTarget.bDurationMinutes,
-          }}
+          members={[
+            {
+              id: mergeTarget.aId,
+              source: mergeTarget.aSource,
+              sportId: mergeTarget.aSportId,
+              sportName: mergeTarget.aSportName,
+              type: mergeTarget.aType,
+              startedAt: mergeTarget.aStartedAt,
+              durationMinutes: mergeTarget.aDurationMinutes,
+            },
+            {
+              id: mergeTarget.bId,
+              source: mergeTarget.bSource,
+              sportId: mergeTarget.bSportId,
+              sportName: mergeTarget.bSportName,
+              type: mergeTarget.bType,
+              startedAt: mergeTarget.bStartedAt,
+              durationMinutes: mergeTarget.bDurationMinutes,
+            },
+          ]}
           sportOptions={sportOptions}
+          typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setMergeTarget(null)}
         />
       )}

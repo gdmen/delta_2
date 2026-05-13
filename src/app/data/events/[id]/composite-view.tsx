@@ -10,6 +10,7 @@ import {
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { userScope } from "@/lib/auth/scope";
 import { formatShort } from "@/lib/format";
+import { EventEditor } from "./editor";
 import { UnmergeButton } from "./unmerge-button";
 
 interface CompositeEventRow {
@@ -21,6 +22,7 @@ interface CompositeEventRow {
   notes: string | null;
   startedAt: string;
   source: string;
+  sourceId: string | null;
   status: "visible" | "hidden_by_composite" | "composite";
   compositeMemberIds: number[];
 }
@@ -38,9 +40,11 @@ interface CompositeEventRow {
 export async function CompositeView({
   event,
   userId,
+  typeSuggestionsBySportId,
 }: {
   event: CompositeEventRow;
   userId: number;
+  typeSuggestionsBySportId?: Record<number, string[]>;
 }) {
   const memberIds = event.compositeMemberIds;
 
@@ -120,6 +124,15 @@ export async function CompositeView({
         .orderBy(asc(events.source), asc(metricTypes.name))
     : [];
 
+  // Sports list for the editor's sport dropdown. The composite owns
+  // its own sport/type/duration/started_at/notes; the EventEditor
+  // (in headerOnly mode) PATCHes /api/events/<composite.id> directly.
+  const sportsList = await db
+    .select({ id: sports.id, name: sports.name })
+    .from(sports)
+    .where(userScope(userId).sports)
+    .orderBy(asc(sports.name));
+
   return (
     <div className="max-w-[940px] space-y-8">
       <header>
@@ -129,18 +142,21 @@ export async function CompositeView({
             composite
           </span>
         </div>
-        <p className="text-[0.875rem] text-text-secondary">
-          {event.sportName} · {event.type}
-          {event.durationMinutes ? ` · ${event.durationMinutes}m` : ""}
-          {" · "}
-          starts {formatShort(event.startedAt)}
-        </p>
-        {event.notes && (
-          <p className="mt-2 text-[0.875rem] whitespace-pre-wrap">
-            {event.notes}
-          </p>
-        )}
       </header>
+
+      {/* Editable header — sport, type, started_at, duration, notes.
+          Children sections and Delete button are suppressed via
+          headerOnly; children belong to the member rows and the
+          composite's tear-down lives in the Unmerge button below. */}
+      <EventEditor
+        event={event}
+        sports={sportsList}
+        initialSets={[]}
+        initialEventMetrics={[]}
+        metricTypes={[]}
+        headerOnly
+        typeSuggestionsBySportId={typeSuggestionsBySportId}
+      />
 
       <section>
         <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3 border-b border-border pb-2">

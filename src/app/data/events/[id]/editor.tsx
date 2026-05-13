@@ -43,12 +43,29 @@ export function EventEditor({
   initialSets,
   initialEventMetrics,
   metricTypes,
+  headerOnly = false,
+  typeSuggestionsBySportId,
 }: {
   event: Event;
   sports: Sport[];
   initialSets: WorkoutSetRow[];
   initialEventMetrics: EventMetricRow[];
   metricTypes: MetricTypeOption[];
+  /**
+   * When true: skip the workout_sets and attached-metrics sections and
+   * hide the per-event Delete button. Used by the composite-event view
+   * — composites don't own children of their own (those stay attached
+   * to member rows) and "Delete" doesn't make sense on a composite
+   * (use Unmerge instead).
+   */
+  headerOnly?: boolean;
+  /**
+   * Existing `events.type` values seen for each sport_id. Drives the
+   * Type input's datalist + the "existing types for this sport: …"
+   * hint, mirroring the New Event form. Free-text; the input doesn't
+   * restrict to these. Omit for no suggestions.
+   */
+  typeSuggestionsBySportId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
@@ -76,7 +93,15 @@ export function EventEditor({
   });
   const [newEm, setNewEm] = useState({ metricTypeId: "", value: "" });
 
-  const imported = event.source !== "manual";
+  // Composites have source='composite' but are user-created, never
+  // re-synced. Only true external sources (strava, apple_health, ...)
+  // can be overwritten.
+  const imported = event.source !== "manual" && event.source !== "composite";
+
+  const typeSuggestions =
+    typeSuggestionsBySportId?.[header.sportId]?.filter(
+      (t) => t.trim().length > 0,
+    ) ?? [];
 
   async function saveHeader() {
     setBusy(true);
@@ -242,8 +267,21 @@ export function EventEditor({
               type="text"
               value={header.type}
               onChange={(e) => { setHeader((h) => ({ ...h, type: e.target.value })); setHeaderDirty(true); }}
+              list="event-type-suggestions-editor"
               className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem]"
             />
+            {typeSuggestions.length > 0 && (
+              <datalist id="event-type-suggestions-editor">
+                {typeSuggestions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
+            )}
+            {typeSuggestions.length > 0 && (
+              <p className="mt-1 text-[0.6875rem] font-mono text-muted">
+                existing types for this sport: {typeSuggestions.join(", ")}
+              </p>
+            )}
           </Field>
           <Field label="Started at">
             <input
@@ -282,19 +320,21 @@ export function EventEditor({
             >
               Save event
             </button>
-            <button
-              type="button"
-              onClick={deleteEvent}
-              disabled={busy}
-              className="text-[0.8125rem] text-muted hover:text-accent-red"
-            >
-              Delete event
-            </button>
+            {!headerOnly && (
+              <button
+                type="button"
+                onClick={deleteEvent}
+                disabled={busy}
+                className="text-[0.8125rem] text-muted hover:text-accent-red"
+              >
+                Delete event
+              </button>
+            )}
           </div>
         </div>
       </section>
 
-      {/* Workout sets */}
+      {!headerOnly && (
       <section>
         <h2 className="font-mono text-[0.6875rem] uppercase tracking-wider text-muted mb-2">
           Workout sets ({sets.length})
@@ -363,8 +403,9 @@ export function EventEditor({
           </table>
         </div>
       </section>
+      )}
 
-      {/* Attached event metrics */}
+      {!headerOnly && (
       <section>
         <h2 className="font-mono text-[0.6875rem] uppercase tracking-wider text-muted mb-2">
           Attached metrics ({ems.length})
@@ -416,6 +457,7 @@ export function EventEditor({
           </table>
         </div>
       </section>
+      )}
 
       {err && (
         <div className="p-3 bg-accent-red/10 border border-accent-red/20 rounded text-[0.8125rem] text-accent-red">
