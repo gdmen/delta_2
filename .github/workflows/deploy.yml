@@ -66,17 +66,23 @@ jobs:
         # deploy.sh exiting 0 means the script ran, not that the app serves
         # requests. Six attempts x 10s gives systemd time to bounce the
         # service and Next.js time to warm up before we fail the job.
+        #
+        # Any 2xx or 3xx counts as healthy: the app's middleware redirects
+        # the unauthenticated root request to /signin (307), so insisting on
+        # 200 would false-fail every deploy. 4xx/5xx still fails the job.
         run: |
           for i in 1 2 3 4 5 6; do
-            code=$(curl -sf -o /dev/null -w '%{http_code}' "https://${{ secrets.DEPLOY_HOST }}/" || true)
-            if [ "$code" = "200" ]; then
-              echo "Site healthy (200) on attempt $i."
-              exit 0
-            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ secrets.DEPLOY_HOST }}/" || echo "000")
+            case "$code" in
+              2??|3??)
+                echo "Site healthy ($code) on attempt $i."
+                exit 0
+                ;;
+            esac
             echo "Attempt $i: got '$code', retrying in 10s…"
             sleep 10
           done
-          echo "Health check failed: site did not return 200 within ~60s."
+          echo "Health check failed: site did not return 2xx/3xx within ~60s."
           exit 1
 
       - name: Job summary
