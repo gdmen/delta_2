@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { events, sports, workoutSets, eventMetrics, metricTypes } from "@/db/schema";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { EventEditor } from "./editor";
 import { CompositeView } from "./composite-view";
 import { PromoteToCompositeButton } from "./promote-to-composite";
@@ -115,14 +116,43 @@ export default async function EventDetailPage({
     .where(userScope(user.id).metricTypes)
     .orderBy(asc(metricTypes.name));
 
-  const hiddenBanner = event.status === "hidden_by_composite";
+  // For hidden_by_composite members, look up the parent composite so
+  // the banner can link out. Composite ownership is guaranteed
+  // (composite_member_ids only points at events owned by the same
+  // user), but we still scope through userScope as defense-in-depth.
+  let parentComposite: { id: number; sportName: string; type: string } | null = null;
+  if (event.status === "hidden_by_composite") {
+    const parents = await db
+      .select({
+        id: events.id,
+        sportName: sports.name,
+        type: events.type,
+      })
+      .from(events)
+      .innerJoin(sports, eq(events.sportId, sports.id))
+      .where(
+        and(
+          userScope(user.id).events,
+          eq(events.status, "composite"),
+          sql`${event.id} = ANY(${events.compositeMemberIds})`,
+        ),
+      )
+      .limit(1);
+    parentComposite = parents[0] ?? null;
+  }
 
   return (
     <div className="max-w-[940px]">
-      {hiddenBanner && (
+      {parentComposite && (
         <div className="mb-4 px-3 py-2 bg-surface border border-border rounded text-[0.8125rem]">
           This event is part of a <span className="font-mono uppercase tracking-wider">composite</span>{" "}
-          and is hidden from default views. Edits still save.
+          and is hidden from default views. Edits still save.{" "}
+          <Link
+            href={`/data/events/${parentComposite.id}`}
+            className="underline hover:text-foreground"
+          >
+            Open composite #{parentComposite.id} ({parentComposite.sportName} · {parentComposite.type}) →
+          </Link>
         </div>
       )}
       <h1 className="text-2xl font-semibold mb-2">
