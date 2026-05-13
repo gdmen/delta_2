@@ -277,6 +277,39 @@ npm run build                   # Production build to .next/
 - `seed.ts` — inserts the 5 sports + all metric types using `ON CONFLICT DO NOTHING`. Safe to re-run; new metric types added over time will be inserted, existing ones untouched.
 - `npm run build` — Next.js production build. Must complete without errors.
 
+### 3a. EC2 → GitHub pull access
+
+Every `scripts/deploy.sh` run (manual or via the auto-deploy Action) starts with `git fetch && git reset --hard origin/main`. The EC2 box therefore needs its own SSH key registered as a GitHub Deploy Key on this repo — agent-forwarded keys only work for the initial interactive clone above, not for ongoing automated pulls.
+
+```bash
+# Generate a keypair on EC2 specifically for git pulls. Different key
+# from anything else you have; never shared.
+ssh-keygen -t ed25519 -f ~/.ssh/delta_deploy -C "ec2-delta2-pull" -N ""
+chmod 600 ~/.ssh/delta_deploy   # OpenSSH refuses to use a key with looser perms.
+chmod 644 ~/.ssh/delta_deploy.pub
+```
+
+Add `~/.ssh/delta_deploy.pub` to the repo's Deploy Keys at https://github.com/gdmen/delta_2/settings/keys/new. **Leave "Allow write access" unchecked** — read is all the box needs.
+
+Route `git@github.com` traffic through this key by appending to `~/.ssh/config`:
+
+```sshconfig
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/delta_deploy
+    IdentitiesOnly yes
+```
+
+Verify:
+
+```bash
+ssh -T git@github.com
+# Expect: Hi gdmen/delta_2! You've successfully authenticated, but GitHub does not provide shell access.
+```
+
+If you see "Permission denied (publickey)" — the public-key half didn't land on the repo's deploy keys page, OR the private-key perms are still wrong (`chmod 600` again).
+
 ### 4. Environment variables
 
 Create `/opt/delta2/.env.local`:
@@ -425,7 +458,15 @@ Then in a browser:
 
 ### 8. Updates (re-deploys)
 
-Use the deploy script:
+Every push to `main` auto-deploys via GitHub Actions — see section 8a for one-time setup. The flow:
+
+1. `.github/workflows/test.yml` runs (lint + tsc + vitest + migrate + build).
+2. On success, `.github/workflows/deploy.yml` SSHs into EC2 and runs `scripts/deploy.sh`.
+3. Post-deploy health check curls the public URL and fails the run if it doesn't return 2xx/3xx within ~60s.
+
+Watch deploys in the Actions tab. Failures show up as emails + push notifications via the GitHub mobile app.
+
+**Manual deploy** (for emergency rollbacks or out-of-CI changes):
 
 ```bash
 cd /opt/delta2
@@ -448,6 +489,63 @@ sudo systemctl start delta2
 If the new build bumps `COACH_PROMPT_VERSION`, briefings generated before the
 deploy will still be visible (they're stamped with the old version). New
 briefings use the new prompt.
+
+### 8a. Auto-deploy Action setup (one-time)
+
+The Action needs two things: an SSH key that's allowed onto the box (and locked to a single command server-side), and a pinned host fingerprint.
+
+#### Generate the Action's SSH keypair
+
+Run this on a trusted machine (not the EC2 box):
+
+```bash
+ssh-keygen -t ed25519 -f /tmp/delta_action -C "github-actions-delta2" -N ""
+```
+
+You now have `/tmp/delta_action` (private) and `/tmp/delta_action.pub` (public).
+
+#### Lock the public key on EC2
+
+On the EC2 box, append to `~ubuntu/.ssh/authorized_keys` with a `command=` prefix so a leaked key can ONLY run `scripts/deploy.sh`:
+
+```
+command="/opt/delta2/scripts/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA…<paste delta_action.pub here> github-actions-delta2
+```
+
+The `cd /opt/delta2 &&` part of the Action's command gets ignored — the server forces the run to be exactly `deploy.sh`. The repo's `deploy.sh` already starts with `cd "$(dirname "$0")/.."` so the working directory is correct.
+
+#### Capture the EC2 host fingerprint
+
+From a machine you trust (NOT the EC2 box):
+
+```bash
+ssh-keyscan -t ed25519,rsa delta.garymenezes.com
+```
+
+Cross-check the fingerprint against what you see in the EC2 console (Instance → Connect → "EC2 Instance Connect" tab shows the public host keys). Copy the entire multi-line output — that's the `DEPLOY_KNOWN_HOSTS` value.
+
+#### Add four repository secrets
+
+At https://github.com/gdmen/delta_2/settings/secrets/actions:
+
+| Secret | Value |
+|---|---|
+| `DEPLOY_SSH_KEY` | The contents of `/tmp/delta_action` (private key, full `-----BEGIN…END-----` block). |
+| `DEPLOY_KNOWN_HOSTS` | The `ssh-keyscan` output from above. |
+| `DEPLOY_HOST` | `delta.garymenezes.com` |
+| `DEPLOY_USER` | `ubuntu` |
+
+Then `rm /tmp/delta_action` — the private key now lives only in the repo secret.
+
+#### Verify
+
+Push a no-op commit (e.g. tweak a comment) to `main`. The Actions tab should show `test` then `deploy` running. The deploy job's "Health-check the public URL" step should print `Site healthy (200 or 3xx) on attempt N.` and turn green.
+
+If it fails: see the troubleshooting section below, especially the "Action deploy fails at …" rows.
+
+#### Disabling auto-deploy temporarily
+
+Comment out the `if:` line in `.github/workflows/deploy.yml` and push. Every `workflow_run` will skip the deploy step. Restore by uncommenting + pushing.
 
 ### 9. Logs + troubleshooting
 
@@ -483,6 +581,11 @@ du -sh /var/lib/postgresql/16/main                        # on-disk size (check 
 | `503` from `/api/coach/*` | `CLAUDE_API_KEY` unset or placeholder | Check `.env.local`, then `sudo systemctl restart delta2` (env is read at startup) |
 | Chat returns `"not enough data yet"` | Briefing refuses on empty context | Import some metrics first, or log a focus |
 | Migration errors on deploy | A prior migration crashed mid-flight | `psql -d delta_prod -c 'SELECT * FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5;'`. Find the missing entry; if needed, manually run the offending SQL from `drizzle/` and insert the row |
+| Action deploy fails at "Run deploy.sh on EC2" → `Permission denied (publickey)` | Wrong/missing key in `~ubuntu/.ssh/authorized_keys`, or the `command="..."` prefix is malformed | Re-paste the full pubkey from `/tmp/delta_action.pub` with the exact prefix from section 8a. Test by SSH'ing manually with the same key. |
+| Action deploy fails at "Run deploy.sh on EC2" → `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` secret is missing, stale, or doesn't match the actual EC2 host (e.g. instance was replaced) | Re-run `ssh-keyscan -t ed25519,rsa <host>` from a trusted machine, update the secret. |
+| Action deploy fails inside `deploy.sh` with `git@github.com: Permission denied (publickey)` | EC2's own pull key isn't set up or the private-key file perms are too loose | On EC2: `chmod 600 ~/.ssh/delta_deploy`, confirm the pubkey is on the repo's Deploy Keys page (section 3a), confirm `~/.ssh/config` routes `github.com` through it |
+| Action deploy fails at "Health-check the public URL" | `deploy.sh` exited 0 but the site returned 4xx/5xx (or didn't respond at all) | SSH in: `sudo journalctl -u delta2 -n 200`. Build succeeded but runtime is broken — usually a missing env var (CLAUDE_API_KEY, etc.) or a migration that landed weird |
+| Two deploys ran back-to-back, older one got cancelled mid-flight | Expected. `concurrency: cancel-in-progress: true` keeps prod on the newest code | No fix needed; the newer deploy lands prod state correctly |
 
 ### 10. Rollback
 
@@ -543,6 +646,7 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] Postgres role `ubuntu` and database `delta_prod` exist (`psql -d delta_prod -c '\conninfo'` connects)
 - [ ] `pg_hba.conf` trusts `127.0.0.1/32` and `::1/128` (postgres-js connects via TCP-localhost — auth must not be `scram-sha-256`/`md5`/`password`)
 - [ ] Repo cloned to `/opt/delta2`, owned by `ubuntu`
+- [ ] EC2 pull-key generated at `~/.ssh/delta_deploy` with `chmod 600`, public half added as a read-only Deploy Key on the repo, `~/.ssh/config` routes `github.com` through it (`ssh -T git@github.com` succeeds) — section 3a
 - [ ] `.env.local` exists at `/opt/delta2/.env.local` with `DATABASE_URL=postgresql://ubuntu@localhost/delta_prod`, real `CLAUDE_API_KEY`, real `INGEST_API_KEY`
 - [ ] `.env.local` permissions are 600
 - [ ] `npm ci` succeeded
@@ -557,6 +661,7 @@ Tick these off in order. Don't skip — most prod problems are a missed step.
 - [ ] `sudo certbot --nginx` completed, `https://delta.garymenezes.com` serves over TLS
 - [ ] Browser smoke test: `/`, `/data-sources`, `/coach/chat` all load
 - [ ] API smoke tests (section 7) all return expected status codes
+- [ ] Auto-deploy Action wired (section 8a): four repo secrets set (`DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `DEPLOY_HOST`, `DEPLOY_USER`), EC2 `authorized_keys` has the locked-command entry, one no-op push to `main` produced a green `deploy` job in the Actions tab
 - [ ] Backups configured (see section 11 — at minimum a `pg_dump` cron, restore tested at least once)
 - [ ] A test DEXA PDF uploaded through `/data-sources/bodyspec` round-trips cleanly
 
