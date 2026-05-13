@@ -34,7 +34,16 @@ export default async function AllEventsPage({
   // Build WHERE from date range + optional text match. `started_at` is stored
   // as ISO with time; day-boundary ISO strings work with text-string
   // comparison. Text match is OR across sport name, event type, source, notes.
-  const conditions = [userScope(user.id).events];
+  //
+  // Hide events that have been folded into a composite — they still
+  // exist in the DB (status='hidden_by_composite') for exports and
+  // diagnostics, but the default events list shouldn't double-count
+  // them. The composite itself (status='composite') shows up as a
+  // normal row.
+  const conditions = [
+    userScope(user.id).events,
+    or(eq(events.status, "visible"), eq(events.status, "composite"))!,
+  ];
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));
   if (to) conditions.push(lte(events.startedAt, `${to}T23:59:59.999Z`));
   if (q) {
