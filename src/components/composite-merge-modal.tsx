@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatShort } from "@/lib/format";
 
 export interface MergeMember {
   id: number;
@@ -160,7 +161,7 @@ export function CompositeMergeModal({
 }
 
 function MemberRow({ m }: { m: MergeMember }) {
-  const time = m.startedAt.slice(0, 16).replace("T", " ");
+  const time = formatShort(m.startedAt);
   return (
     <div className="border border-border rounded px-3 py-2 flex justify-between gap-3 font-mono text-[0.75rem]">
       <span className="text-muted uppercase tracking-wider truncate">

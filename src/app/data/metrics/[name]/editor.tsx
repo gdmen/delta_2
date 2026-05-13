@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatShort } from "@/lib/format";
+import { formatShort, utcIsoToLocalInput } from "@/lib/format";
 
 interface MetricRow {
   /**
@@ -48,7 +48,7 @@ export function MetricHistoryEditor({
   const [draft, setDraft] = useState<{ value: string; recordedAt: string }>({ value: "", recordedAt: "" });
   const [newDraft, setNewDraft] = useState<{ value: string; recordedAt: string }>({
     value: "",
-    recordedAt: new Date().toISOString().slice(0, 16),
+    recordedAt: utcIsoToLocalInput(new Date().toISOString()),
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -57,8 +57,11 @@ export function MetricHistoryEditor({
     setEditingId(r.id);
     setDraft({
       value: String(r.value),
-      // datetime-local takes YYYY-MM-DDTHH:MM.
-      recordedAt: r.recordedAt.slice(0, 16),
+      // datetime-local takes YYYY-MM-DDTHH:MM in LOCAL time. The stored
+      // ISO is UTC — convert through utcIsoToLocalInput so the input
+      // shows the user's wall-clock time and the round-trip on save
+      // doesn't shift by the TZ offset.
+      recordedAt: utcIsoToLocalInput(r.recordedAt),
     });
     setErr(null);
   }
@@ -124,7 +127,7 @@ export function MetricHistoryEditor({
     }
     // Simplest way to get the new row's id: refresh.
     router.refresh();
-    setNewDraft({ value: "", recordedAt: new Date().toISOString().slice(0, 16) });
+    setNewDraft({ value: "", recordedAt: utcIsoToLocalInput(new Date().toISOString()) });
     setErr(null);
   }
 
