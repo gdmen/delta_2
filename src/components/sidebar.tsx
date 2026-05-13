@@ -106,9 +106,16 @@ export function Sidebar({ dashboards, user }: SidebarProps) {
           </button>
         </div>
 
-        <Section label="Home">
-          <NavItem href="/home" label="Home" active={pathname === "/home"} />
-        </Section>
+        {/* Home is the landing surface — pinned standalone above the
+            sections so it reads as "your starting point" rather than a
+            redundant single-item group. Distinct visual weight (icon +
+            bg-surface accent on active) signals "this is special". */}
+        <PinnedNavItem
+          href="/home"
+          icon="🏠"
+          label="Home"
+          active={pathname === "/home"}
+        />
 
         <DashboardsSection dashboards={dashboards} pathname={pathname} />
 
@@ -236,6 +243,40 @@ function NavItem({
         />
       )}
       {label}
+    </Link>
+  );
+}
+
+/**
+ * Standalone nav item with an emoji icon, intended for "landing" surfaces
+ * that don't belong inside a section group. Slightly more presence than
+ * a regular NavItem (taller padding, surface accent on active) so the
+ * eye finds it as "the starting point" rather than just another link.
+ */
+function PinnedNavItem({
+  href,
+  icon,
+  label,
+  active,
+}: {
+  href: string;
+  icon: string;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`mx-3 mb-2 flex items-center gap-2 px-2 py-1.5 rounded text-[0.875rem] transition-colors ${
+        active
+          ? "bg-surface text-foreground font-medium"
+          : "text-text-secondary hover:bg-surface/60 hover:text-foreground"
+      }`}
+    >
+      <span aria-hidden className="text-[1rem] leading-none">
+        {icon}
+      </span>
+      <span>{label}</span>
     </Link>
   );
 }

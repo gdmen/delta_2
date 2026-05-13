@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatShort } from "@/lib/format";
+import { formatShort, utcIsoToLocalInput } from "@/lib/format";
 
 export interface MergeMember {
   id: number;
@@ -20,50 +20,90 @@ export interface SportOption {
 }
 
 /**
- * Inline modal for "Wrap one or two events into a composite". Two flavors:
+ * Inline modal for "wrap N events into a composite".
  *
- *  - **Two-member** (b is set): typical "same physical session logged
- *    twice" merge. Title reads "Merge into composite event".
- *  - **Single-member** (b is omitted): retag a single event with a
- *    canonical sport while keeping the source row's data accessible
- *    via the composite. Title reads "Promote to composite event".
+ *  - N=1: promote — retag a single event with a corrected canonical
+ *    sport while keeping the source row's data accessible via the
+ *    composite. Title reads "Promote to composite event".
+ *  - N≥2: merge — fold multiple cross-source rows for the same physical
+ *    session into one composite. Title reads "Merge into composite
+ *    event".
  *
- * Either way: user picks the sport (defaults to the less source-prefixed
- * name among members), optionally adds notes, and confirms. Sends
- * POST /api/events/merge with `bId` omitted in the single-member case.
+ * Either way: user picks the sport (defaults to the least
+ * source-prefixed sport name across members), tweaks type / started_at
+ * / duration / notes, and confirms. Sends POST /api/events/merge with
+ * `memberIds: number[]`. No two members may share a source.
  */
 export function CompositeMergeModal({
-  a,
-  b,
+  members,
   sportOptions,
+  typeSuggestionsBySportId,
   onClose,
   onSuccess,
 }: {
-  a: MergeMember;
-  b?: MergeMember;
+  /** One or more members. Order is preserved in the rendered list. */
+  members: MergeMember[];
   sportOptions: SportOption[];
+  /**
+   * Existing `events.type` values seen for each sport_id, used to
+   * populate the type input's datalist. Free-text — the input doesn't
+   * restrict to these. Omit for no suggestions.
+   */
+  typeSuggestionsBySportId?: Record<number, string[]>;
   onClose: () => void;
   /** Optional callback fired with the new composite's id after success. */
   onSuccess?: (compositeId: number) => void;
 }) {
   const router = useRouter();
-  const defaultSport = pickDefaultSport(a, b);
-  const [sportId, setSportId] = useState<number>(defaultSport);
+  const isPromote = members.length === 1;
+
+  const [sportId, setSportId] = useState<number>(pickDefaultSport(members));
+  const [type, setType] = useState<string>(members[0].type);
   const [notes, setNotes] = useState("");
+  // Defaults: earliest member's startedAt; duration is the max member
+  // duration (closer to "this is what actually happened" than the
+  // auto-computed span between earliest start and latest end, which
+  // can be wildly inflated by clock skew between sources).
+  const [startedAt, setStartedAt] = useState<string>(
+    utcIsoToLocalInput(defaultStartedAt(members)),
+  );
+  const [durationMinutes, setDurationMinutes] = useState<string>(
+    defaultDuration(members)?.toString() ?? "",
+  );
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const typeSuggestions =
+    typeSuggestionsBySportId?.[sportId]?.filter((t) => t.trim().length > 0) ?? [];
 
   async function submit() {
     setSubmitting(true);
     setErr(null);
+    const durTrimmed = durationMinutes.trim();
+    const durNum = durTrimmed === "" ? null : Number(durTrimmed);
+    if (durNum !== null && (!Number.isFinite(durNum) || durNum < 1)) {
+      setErr("Duration must be a positive number of minutes");
+      setSubmitting(false);
+      return;
+    }
+    const startedAtIso = startedAt
+      ? new Date(startedAt).toISOString()
+      : undefined;
+    if (startedAt && Number.isNaN(new Date(startedAt).getTime())) {
+      setErr("Started at must be a valid date/time");
+      setSubmitting(false);
+      return;
+    }
     const res = await fetch("/api/events/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        aId: a.id,
-        ...(b ? { bId: b.id } : {}),
+        memberIds: members.map((m) => m.id),
         sportId,
+        type: type.trim() || undefined,
         notes: notes.trim() || null,
+        startedAt: startedAtIso,
+        durationMinutes: durNum,
       }),
     });
     if (!res.ok) {
@@ -81,10 +121,16 @@ export function CompositeMergeModal({
     }
   }
 
-  const title = b
-    ? "Merge into composite event"
-    : "Promote to composite event";
-  const confirmLabel = submitting ? (b ? "Merging…" : "Promoting…") : b ? "Merge" : "Promote";
+  const title = isPromote
+    ? "Promote to composite event"
+    : "Merge into composite event";
+  const confirmLabel = submitting
+    ? isPromote
+      ? "Promoting…"
+      : "Merging…"
+    : isPromote
+      ? "Promote"
+      : `Merge ${members.length}`;
 
   return (
     <div
@@ -98,8 +144,9 @@ export function CompositeMergeModal({
         <h2 className="text-[1rem] font-semibold">{title}</h2>
 
         <div className="space-y-2 text-[0.8125rem]">
-          <MemberRow m={a} />
-          {b && <MemberRow m={b} />}
+          {members.map((m) => (
+            <MemberRow key={m.id} m={m} />
+          ))}
         </div>
 
         <div>
@@ -118,6 +165,63 @@ export function CompositeMergeModal({
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
+            Composite type
+          </label>
+          <input
+            type="text"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            disabled={submitting}
+            list="composite-type-suggestions"
+            placeholder="e.g. open_mat, class, training"
+            className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
+          />
+          {typeSuggestions.length > 0 && (
+            <datalist id="composite-type-suggestions">
+              {typeSuggestions.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+          )}
+          {typeSuggestions.length > 0 && (
+            <p className="mt-1 text-[0.6875rem] font-mono text-muted">
+              existing types for this sport: {typeSuggestions.join(", ")}
+            </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
+              Started at
+            </label>
+            <input
+              type="datetime-local"
+              value={startedAt}
+              onChange={(e) => setStartedAt(e.target.value)}
+              disabled={submitting}
+              className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] font-mono bg-background"
+            />
+          </div>
+          <div>
+            <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
+              Duration (minutes)
+            </label>
+            <input
+              type="number"
+              step="any"
+              min="1"
+              value={durationMinutes}
+              onChange={(e) => setDurationMinutes(e.target.value)}
+              disabled={submitting}
+              placeholder="blank = null"
+              className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] font-mono bg-background"
+            />
+          </div>
         </div>
 
         <div>
@@ -178,15 +282,31 @@ function MemberRow({ m }: { m: MergeMember }) {
   );
 }
 
-function pickDefaultSport(a: MergeMember, b?: MergeMember): number {
-  // Prefer the sport name that doesn't look like `<source>:<x>` —
-  // that's almost always the user-curated canonical (e.g. prefer
-  // "powerlifting" over "strava:WeightTraining"). If both or neither
-  // are prefixed, pick a's.
-  if (!b) return a.sportId;
-  const aIsPrefixed = a.sportName.includes(":");
-  const bIsPrefixed = b.sportName.includes(":");
-  if (aIsPrefixed && !bIsPrefixed) return b.sportId;
-  if (!aIsPrefixed && bIsPrefixed) return a.sportId;
-  return a.sportId;
+function defaultStartedAt(members: MergeMember[]): string {
+  return members.reduce(
+    (acc, m) => (m.startedAt < acc ? m.startedAt : acc),
+    members[0].startedAt,
+  );
+}
+
+function defaultDuration(members: MergeMember[]): number | null {
+  // Single-member: keep the member's duration. N-member: max of all
+  // member durations. That's almost always the "real" session length
+  // — e.g. Strava reports 90min + Whoop reports 30min + Apple Health
+  // reports 85min for one BJJ session = actual session ≈ 90min, not
+  // the computed span which can be inflated by clock skew.
+  if (members.length === 1) return members[0].durationMinutes;
+  const max = members.reduce(
+    (acc, m) => Math.max(acc, m.durationMinutes ?? 0),
+    0,
+  );
+  return max > 0 ? max : null;
+}
+
+function pickDefaultSport(members: MergeMember[]): number {
+  // Prefer the first non-source-prefixed sport ("powerlifting" over
+  // "strava:WeightTraining"). If all are prefixed (or none are),
+  // fall back to the first member's sport.
+  const unprefixed = members.find((m) => !m.sportName.includes(":"));
+  return unprefixed?.sportId ?? members[0].sportId;
 }

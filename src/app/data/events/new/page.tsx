@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { events, sports } from "@/db/schema";
+import { sports } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { NewEventForm } from "./form";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
+import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -19,16 +20,7 @@ export default async function NewEventPage() {
   // Distinct (sport, type) pairs feed the autocomplete on the Type input.
   // Keeping it server-side avoids a round-trip when the sport selector
   // changes; one query at single-user scale is negligible.
-  const typeRows = await db
-    .selectDistinct({ sportId: events.sportId, type: events.type })
-    .from(events)
-    .where(userScope(user.id).events)
-    .orderBy(asc(events.sportId), asc(events.type));
-  const typesBySport: Record<number, string[]> = {};
-  for (const r of typeRows) {
-    if (!r.type) continue;
-    (typesBySport[r.sportId] ??= []).push(r.type);
-  }
+  const typesBySport = await buildTypeSuggestionsBySportId(user.id);
 
   return (
     <div className="max-w-[640px]">

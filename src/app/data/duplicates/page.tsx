@@ -6,6 +6,7 @@ import {
   findDuplicateCandidates,
   groupCandidates,
 } from "@/lib/duplicates/detector";
+import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 import { DuplicatesView } from "./view";
@@ -26,6 +27,7 @@ export default async function DuplicatesPage() {
     .from(sports)
     .where(userScope(user.id).sports)
     .orderBy(asc(sports.name));
+  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
 
   return (
     <div className="max-w-[820px]">
@@ -42,7 +44,12 @@ export default async function DuplicatesPage() {
         </p>
       </header>
 
-      <DuplicatesView pairs={pairs} groups={groups} sportOptions={sportOptions} />
+      <DuplicatesView
+        pairs={pairs}
+        groups={groups}
+        sportOptions={sportOptions}
+        typeSuggestionsBySportId={typeSuggestionsBySportId}
+      />
     </div>
   );
 }

@@ -20,9 +20,11 @@ import {
 export function PromoteToCompositeButton({
   member,
   sportOptions,
+  typeSuggestionsBySportId,
 }: {
   member: MergeMember;
   sportOptions: SportOption[];
+  typeSuggestionsBySportId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -39,8 +41,9 @@ export function PromoteToCompositeButton({
       </button>
       {open && (
         <CompositeMergeModal
-          a={member}
+          members={[member]}
           sportOptions={sportOptions}
+          typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setOpen(false)}
           onSuccess={(compositeId) => {
             router.push(`/data/events/${compositeId}`);

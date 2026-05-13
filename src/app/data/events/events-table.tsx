@@ -30,13 +30,10 @@ export interface EventRow {
  *   - Only `visible` rows can be checked. Composite rows already wrap
  *     other events; merging a composite into another composite isn't a
  *     thing we support (use Unmerge first).
- *   - 1 selected → "Promote to composite" (single-member sport retag,
- *     same flow as the per-event detail page button).
- *   - 2 selected → "Merge into composite" (typical cross-source merge).
- *     The API rejects same-source pairs, so the modal will surface the
- *     error if the user picks two manual rows.
- *   - 3+ selected → CTA disabled with a hint to deselect, because the
- *     /api/events/merge route only handles 1 or 2 members today.
+ *   - 1 selected → "Promote to composite" (sport retag).
+ *   - 2+ selected → "Merge N → composite". The API rejects any two
+ *     members sharing a source, so the modal surfaces the error
+ *     in-line if the user picks colliding rows.
  */
 export function EventsTable({
   rows,
@@ -82,15 +79,13 @@ export function EventsTable({
   }
 
   const selectedList = rows.filter((r) => cleanSelected.has(r.id));
-  const canMerge = selectedList.length >= 1 && selectedList.length <= 2;
+  const canMerge = selectedList.length >= 1;
   const cta =
     selectedList.length === 0
       ? "Merge"
       : selectedList.length === 1
         ? "Promote to composite →"
-        : selectedList.length === 2
-          ? "Merge into composite →"
-          : "Select 1 or 2 events";
+        : `Merge ${selectedList.length} → composite →`;
 
   function toMember(r: EventRow): MergeMember {
     return {
@@ -216,8 +211,7 @@ export function EventsTable({
 
       {modalOpen && canMerge && (
         <CompositeMergeModal
-          a={toMember(selectedList[0])}
-          b={selectedList[1] ? toMember(selectedList[1]) : undefined}
+          members={selectedList.map(toMember)}
           sportOptions={sportOptions}
           typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setModalOpen(false)}

@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { sports } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { findDuplicateCandidates } from "@/lib/duplicates/detector";
+import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 import { SuggestedComposites } from "./suggested-composites";
@@ -23,17 +24,29 @@ export default async function HomePage() {
     .from(sports)
     .where(userScope(user.id).sports)
     .orderBy(asc(sports.name));
+  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
+
+  // No page-level "Home" header — the sidebar's 🏠 Home pinned link is
+  // sufficient identification. A soft date stamp orients the user
+  // without redundantly naming the page. Cards below carry their own
+  // section headers and are the actual content.
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
     <div className="max-w-[820px] space-y-10">
-      <header>
-        <h1 className="text-2xl font-semibold mb-1">Home</h1>
-        <p className="text-[0.8125rem] text-muted">
-          Quick review surface. More cards will land here over time.
-        </p>
-      </header>
+      <p className="text-[0.75rem] font-mono uppercase tracking-wider text-muted">
+        {today}
+      </p>
 
-      <SuggestedComposites pairs={pairs} sportOptions={sportOptions} />
+      <SuggestedComposites
+        pairs={pairs}
+        sportOptions={sportOptions}
+        typeSuggestionsBySportId={typeSuggestionsBySportId}
+      />
     </div>
   );
 }
