@@ -36,6 +36,16 @@ import {
 import { isStatus } from "@/lib/enums";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
+import { makeSseStream, sseHeaders } from "@/lib/sse-stream";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type {
+  ImportDoneFrame,
+  ImportFrameEvent,
+  ImportPhaseFrame,
+  ImportPhaseProgressFrame,
+  ImportStartFrame,
+  ImportTable,
+} from "@/lib/import/sse-frames";
 
 /**
  * POST /api/import
@@ -88,6 +98,23 @@ export async function POST(request: NextRequest) {
   if (error) return error;
   const userId = user.id;
 
+  // Per-user lifecycle. New POST supersedes the previous in-flight
+  // import for this user (refresh + retry "just works"). The old one
+  // unwinds at its next signal check inside processCsv. We also bridge
+  // request.signal → our controller so a client disconnect (browser
+  // refresh/close) trips the same path.
+  const prev = activeImports.get(userId);
+  if (prev) prev.abort(new Error("Superseded by a newer import"));
+  const controller = new AbortController();
+  activeImports.set(userId, controller);
+  if (request.signal.aborted) {
+    controller.abort(request.signal.reason);
+  } else {
+    request.signal.addEventListener("abort", () => {
+      controller.abort(new Error("Client disconnected"));
+    });
+  }
+
   const form = await request.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
@@ -121,27 +148,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const recognized = [
-    "sports.csv",
-    "metric_types.csv",
-    "metric_type_aliases.csv",
-    "import_sources.csv",
-    "source_settings.csv",
-    "goals.csv",
-    "focuses.csv",
-    "goal_journal_entries.csv",
-    "dashboards.csv",
-    "dashboard_widgets.csv",
-    "metrics.csv",
-    "events.csv",
-    "event_metrics.csv",
-    "workout_sets.csv",
-    "event_duplicate_denylist.csv",
-    "coach_calls.csv",
-    "reconcile_log.csv",
-    "daily_summaries.csv",
-    "merge_log.csv",
-  ];
+  // Recognized filenames + their importers + their canonical execution
+  // order all come from one source of truth: PIPELINE_ORDER. Adding a
+  // new table = one new tuple, nothing else.
+  const recognized = PIPELINE_ORDER.map(([csvKey]) => csvKey);
   const matched = recognized.filter((n) => n in csvs);
   if (matched.length === 0) {
     return NextResponse.json(
@@ -152,140 +162,162 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const out: Record<string, TableResult> = {};
+  // Build the import pipeline. Order matters: foundational catalog first
+  // (so FKs resolve), then user targets (goals/focuses reference the
+  // catalog), then measured data (events reference sports;
+  // event_metrics/workout_sets reference events), then audit/cache rows
+  // last. The pipeline only includes phases for CSVs actually present
+  // in the upload, so a single-CSV import emits exactly one phase.
+  // buildPipeline pre-computes row counts per phase (countCsvRows) so
+  // the SSE frames carry a real denominator for the progress bar.
+  // Cheap — line count, no validation. parseCsv-level errors still
+  // surface in TableResult.errors per row at run time.
+  const pipeline = buildPipeline(csvs, userId);
 
-  // Order below matters: foundational catalog first (so FKs resolve),
-  // then user targets (goals/focuses reference the catalog), then measured
-  // data (events reference sports; event_metrics/workout_sets reference events).
+  const stream = makeSseStream<ImportFrameEvent>(async (emit) => {
+    try {
+      await signalStorage.run(controller.signal, async () => {
+        await runPipeline(pipeline, emit);
+      });
+    } finally {
+      // Only clear if we're still the active import — a successor may
+      // have already replaced us and we shouldn't yank their slot.
+      if (activeImports.get(userId) === controller) {
+        activeImports.delete(userId);
+      }
+    }
+  });
 
-  // --- sports.csv ----------------------------------------------------------
-  if (csvs["sports.csv"]) {
-    out.sports = await importSportsTable(csvs["sports.csv"], userId);
+  return new NextResponse(stream, { headers: sseHeaders() });
+}
+
+async function runPipeline(
+  pipeline: PipelinePhase[],
+  emit: (event: ImportFrameEvent, data: unknown) => void,
+): Promise<void> {
+  const totalRows = pipeline.reduce((sum, p) => sum + p.rowTotal, 0);
+  emit("start", {
+    totalPhases: pipeline.length,
+    totalRows,
+    phases: pipeline.map((p) => ({ table: p.table, rowTotal: p.rowTotal })),
+  } satisfies ImportStartFrame);
+  const out: Partial<Record<ImportTable, TableResult>> = {};
+  for (let i = 0; i < pipeline.length; i++) {
+    const phase = pipeline[i];
+    emit("phase", {
+      index: i,
+      total: pipeline.length,
+      table: phase.table,
+      rowTotal: phase.rowTotal,
+      done: false,
+    } satisfies ImportPhaseFrame);
+    // AsyncLocalStorage carries the tick callback to processCsv;
+    // importers themselves don't need to know about it.
+    const tick = (rowsDone: number) => {
+      emit("phase-progress", {
+        index: i,
+        total: pipeline.length,
+        table: phase.table,
+        rowsDone,
+        rowTotal: phase.rowTotal,
+      } satisfies ImportPhaseProgressFrame);
+    };
+    const result = await progressStorage.run(tick, () => phase.run());
+    out[phase.table] = result;
+    emit("phase", {
+      index: i,
+      total: pipeline.length,
+      table: phase.table,
+      rowTotal: phase.rowTotal,
+      done: true,
+      result,
+    } satisfies ImportPhaseFrame);
   }
+  emit("done", { result: out } satisfies ImportDoneFrame);
+}
 
-  // --- metric_types.csv ----------------------------------------------------
-  if (csvs["metric_types.csv"]) {
-    out.metric_types = await importMetricTypes(csvs["metric_types.csv"], userId);
+interface PipelinePhase {
+  table: ImportTable;
+  csv: string;
+  /** Pre-computed via countCsvRows so the SSE frames carry a real denominator. */
+  rowTotal: number;
+  run: () => Promise<TableResult>;
+}
+
+/**
+ * Filter PIPELINE_ORDER down to what's actually in the upload,
+ * preserving the canonical import order. Each phase carries a closure
+ * over the right importer + the user_id so the SSE pipeline can run
+ * them uniformly.
+ */
+function buildPipeline(
+  csvs: Record<string, string>,
+  userId: number,
+): PipelinePhase[] {
+  const phases: PipelinePhase[] = [];
+  for (const [csvKey, table, importer] of PIPELINE_ORDER) {
+    const csv = csvs[csvKey];
+    if (csv) {
+      phases.push({
+        table,
+        csv,
+        rowTotal: countCsvRows(csv),
+        run: () => importer(csv, userId),
+      });
+    }
   }
+  return phases;
+}
 
-  // --- metric_type_aliases.csv ---------------------------------------------
-  if (csvs["metric_type_aliases.csv"]) {
-    out.metric_type_aliases = await importMetricTypeAliases(csvs["metric_type_aliases.csv"], userId);
+/**
+ * The single source of truth for the import pipeline: (csv filename,
+ * table key, importer function) tuples in execution order. Order
+ * matters — foundational catalog first (so FKs resolve), then user
+ * targets (goals/focuses reference the catalog), then measured data
+ * (events reference sports; event_metrics/workout_sets reference
+ * events), then audit/cache rows last.
+ *
+ * Adding a new table = one new tuple here. `recognized`, the SSE
+ * pipeline, and (via `ImportTable` in src/lib/import/sse-frames.ts)
+ * the client result panel all derive from it.
+ */
+const PIPELINE_ORDER: ReadonlyArray<
+  [string, ImportTable, (csv: string, userId: number) => Promise<TableResult>]
+> = [
+  ["sports.csv", "sports", importSportsTable],
+  ["metric_types.csv", "metric_types", importMetricTypes],
+  ["metric_type_aliases.csv", "metric_type_aliases", importMetricTypeAliases],
+  ["import_sources.csv", "import_sources", importImportSources],
+  ["source_settings.csv", "source_settings", importSourceSettings],
+  ["goals.csv", "goals", importGoals],
+  ["focuses.csv", "focuses", importFocuses],
+  ["goal_journal_entries.csv", "goal_journal_entries", importGoalJournalEntries],
+  ["dashboards.csv", "dashboards", importDashboards],
+  ["dashboard_widgets.csv", "dashboard_widgets", importDashboardWidgets],
+  ["metrics.csv", "metrics", importMetrics],
+  ["events.csv", "events", importEvents],
+  ["event_metrics.csv", "event_metrics", importEventMetrics],
+  ["workout_sets.csv", "workout_sets", importWorkoutSets],
+  ["event_duplicate_denylist.csv", "event_duplicate_denylist", importEventDuplicateDenylist],
+  ["coach_calls.csv", "coach_calls", importCoachCalls],
+  ["reconcile_log.csv", "reconcile_log", importReconcileLog],
+  ["daily_summaries.csv", "daily_summaries", importDailySummaries],
+  ["merge_log.csv", "merge_log", importMergeLog],
+];
+
+/**
+ * Cheap CSV row count: lines minus the header, ignoring any trailing
+ * blank line. Doesn't parse — quoted-newline edge cases will produce a
+ * slight overestimate, which is fine for a progress denominator.
+ */
+function countCsvRows(text: string): number {
+  let lines = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) lines++;
   }
-
-  // --- import_sources.csv --------------------------------------------------
-  if (csvs["import_sources.csv"]) {
-    out.import_sources = await importImportSources(csvs["import_sources.csv"], userId);
-  }
-
-  // --- source_settings.csv -------------------------------------------------
-  if (csvs["source_settings.csv"]) {
-    out.source_settings = await importSourceSettings(csvs["source_settings.csv"], userId);
-  }
-
-  // --- goals.csv -----------------------------------------------------------
-  if (csvs["goals.csv"]) {
-    out.goals = await importGoals(csvs["goals.csv"], userId);
-  }
-
-  // --- focuses.csv ---------------------------------------------------------
-  if (csvs["focuses.csv"]) {
-    out.focuses = await importFocuses(csvs["focuses.csv"], userId);
-  }
-
-  // --- goal_journal_entries.csv -------------------------------------------
-  if (csvs["goal_journal_entries.csv"]) {
-    out.goal_journal_entries = await importGoalJournalEntries(
-      csvs["goal_journal_entries.csv"],
-      userId,
-    );
-  }
-
-  // --- dashboards.csv ------------------------------------------------------
-  // Dashboards run before dashboard_widgets so the parent rows exist.
-  if (csvs["dashboards.csv"]) {
-    out.dashboards = await importDashboards(csvs["dashboards.csv"], userId);
-  }
-
-  // --- dashboard_widgets.csv -----------------------------------------------
-  // Widgets resolve their parent dashboard by slug. Re-importing without a
-  // prior wipe will append duplicate widgets — the documented round-trip is
-  // wipe + import, not import-on-top-of.
-  if (csvs["dashboard_widgets.csv"]) {
-    out.dashboard_widgets = await importDashboardWidgets(csvs["dashboard_widgets.csv"], userId);
-  }
-
-  // --- metrics.csv ---------------------------------------------------------
-  if (csvs["metrics.csv"]) {
-    out.metrics = await importMetrics(csvs["metrics.csv"], userId);
-  }
-
-  // --- events.csv ----------------------------------------------------------
-  if (csvs["events.csv"]) {
-    out.events = await importEvents(csvs["events.csv"], userId);
-  }
-
-  // --- event_metrics.csv ---------------------------------------------------
-  // Runs after events.csv so parent events exist. Same parent-resolution
-  // strategy as workout_sets: event_source_id first, then (started_at,
-  // sport, type) natural key, else auto-create a barebones parent event.
-  if (csvs["event_metrics.csv"]) {
-    out.event_metrics = await importEventMetrics(csvs["event_metrics.csv"], userId);
-  }
-
-  // --- workout_sets.csv ----------------------------------------------------
-  // Must run after events.csv so parent events exist (if the user bundled
-  // both). When users import workout_sets.csv alone, we try to find existing
-  // events by their natural key; if missing, we error on that row.
-  if (csvs["workout_sets.csv"]) {
-    out.workout_sets = await importWorkoutSets(csvs["workout_sets.csv"], userId);
-  }
-
-  // --- event_duplicate_denylist.csv ---------------------------------------
-  // Runs after events.csv so member events exist and can be resolved by
-  // source_id. The denylist is what powers the "don't re-suggest this
-  // pair as a duplicate" memory; round-tripping it preserves the user's
-  // dismissals across export/import.
-  if (csvs["event_duplicate_denylist.csv"]) {
-    out.event_duplicate_denylist = await importEventDuplicateDenylist(
-      csvs["event_duplicate_denylist.csv"],
-      userId,
-    );
-  }
-
-  // --- coach_calls.csv -----------------------------------------------------
-  // Operational history. Runs after goals so the goal_id FK can be resolved
-  // by natural key (sport, metric, deadline).
-  if (csvs["coach_calls.csv"]) {
-    out.coach_calls = await importCoachCalls(csvs["coach_calls.csv"], userId);
-  }
-
-  // --- reconcile_log.csv ---------------------------------------------------
-  // Runs after metric_types so the metric_type_id reference resolves by name.
-  // Tolerates an empty `metric` column (matches the schema's nullable FK).
-  if (csvs["reconcile_log.csv"]) {
-    out.reconcile_log = await importReconcileLog(csvs["reconcile_log.csv"], userId);
-  }
-
-  // --- daily_summaries.csv -------------------------------------------------
-  // Aggregation cache. Upserts on (date, metric_type_id) so re-importing
-  // refreshes the cached values; also regenerates organically from raw
-  // metrics, so importing this is purely a recovery-time-saver.
-  if (csvs["daily_summaries.csv"]) {
-    out.daily_summaries = await importDailySummaries(csvs["daily_summaries.csv"], userId);
-  }
-
-  // --- merge_log.csv -------------------------------------------------------
-  // Audit history of past merges. Re-imports as audit-only — the
-  // payload's embedded row ids point at the EXPORTED database's
-  // autoincrement sequences, so undoing a re-imported merge will 409 at
-  // the canonical-id pre-check (correct failure mode). canonical_id is
-  // re-resolved by canonical_name when possible.
-  if (csvs["merge_log.csv"]) {
-    out.merge_log = await importMergeLog(csvs["merge_log.csv"], userId);
-  }
-
-  return NextResponse.json(out);
+  // No trailing newline? The last unterminated line is still a row.
+  if (text.length > 0 && text.charCodeAt(text.length - 1) !== 10) lines++;
+  return Math.max(0, lines - 1);
 }
 
 // -----------------------------------------------------------------------------
@@ -442,7 +474,11 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
   // status to 'hidden_by_composite'. Uses source_id lookups so the
   // round-trip works even when the exporting DB's autoincrement ids
   // don't match the importer's.
+  //
+  // No processCsv here means no automatic signal check; bail explicitly
+  // so a refresh during this block doesn't keep writing.
   if (compositeRows.length > 0) {
+    throwIfAborted();
     const allMentioned = new Set<string>();
     for (const c of compositeRows) {
       allMentioned.add(c.compositeSourceId);
@@ -463,6 +499,7 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
     }
 
     for (const c of compositeRows) {
+      throwIfAborted();
       const compositeId = eventBySourceId.get(c.compositeSourceId);
       if (compositeId === undefined) {
         result.errors.push(
@@ -740,8 +777,51 @@ async function loadSportCache(userId: number): Promise<Map<string, number>> {
  * "accepted" | "skipped" | "updated" for successful outcomes. Errors
  * thrown inside the handler are caught and formatted as
  * `<filename> row <N>: <message>` (N is 1-indexed + 1 for the header row).
+ *
+ * Row-level progress: when called inside `progressStorage.run()`, the
+ * stored callback fires every PROGRESS_TICK_EVERY rows + once at the
+ * end. Per-request scope via AsyncLocalStorage so concurrent imports
+ * don't cross-talk; importers themselves don't have to know about it.
  */
 type RowOutcome = "accepted" | "skipped" | "updated";
+
+const PROGRESS_TICK_EVERY = 100;
+
+/**
+ * Per-request progress emitter, populated by the streaming pipeline.
+ * AsyncLocalStorage scopes the callback to the request that set it, so
+ * two concurrent /api/import calls in the same Node process don't
+ * accidentally emit each other's progress frames.
+ */
+const progressStorage = new AsyncLocalStorage<(rowsDone: number) => void>();
+
+/**
+ * Per-request abort signal. Tripped on either:
+ *   - client disconnect (browser refresh/close — `request.signal` fires)
+ *   - a newer /api/import call for the same user (replace semantics)
+ *
+ * processCsv checks `signal.aborted` between rows so the importer
+ * unwinds within milliseconds of the trip. importEvents's composite
+ * second pass checks it explicitly too — that block runs without
+ * processCsv and would otherwise complete on top of an orphaned
+ * request.
+ */
+const signalStorage = new AsyncLocalStorage<AbortSignal>();
+
+/**
+ * Per-user concurrency lock. Only one /api/import may be running per
+ * user at a time; a new POST aborts the in-flight one and takes over.
+ * In-memory is fine for the self-hosted single-process deployment;
+ * multi-process would need a DB-row lock.
+ */
+const activeImports = new Map<number, AbortController>();
+
+function throwIfAborted(): void {
+  const signal = signalStorage.getStore();
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException("Aborted", "AbortError");
+  }
+}
 
 async function processCsv(
   filename: string,
@@ -751,6 +831,7 @@ async function processCsv(
 ): Promise<TableResult> {
   const result = emptyResult();
   const { headers, rows } = parseCsv(text);
+  const onProgress = progressStorage.getStore();
   let idx: Map<string, number>;
   try {
     idx = headerIndex(headers, requiredCols);
@@ -758,9 +839,15 @@ async function processCsv(
     result.errors.push(
       `${filename}: ${err instanceof Error ? err.message : String(err)}`,
     );
+    onProgress?.(0);
     return result;
   }
   for (const [i, row] of rows.entries()) {
+    // Cooperative cancellation: client disconnect or supersession by
+    // a newer import for the same user trips signalStorage. Checked
+    // every row so the importer aborts within milliseconds rather than
+    // running to completion on an orphan request.
+    throwIfAborted();
     try {
       const outcome = await handle(row, idx);
       if (outcome === "accepted") result.accepted++;
@@ -771,7 +858,12 @@ async function processCsv(
         `${filename} row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+    if (onProgress && (i + 1) % PROGRESS_TICK_EVERY === 0) {
+      onProgress(i + 1);
+    }
   }
+  // Final tick so the client lands on rowsDone === total rows.
+  onProgress?.(rows.length);
   return result;
 }
 
