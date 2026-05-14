@@ -15,7 +15,6 @@ import {
   dashboardWidgets,
   coachCalls,
   reconcileLog,
-  dailySummaries,
   mergeLog,
   eventDuplicateDenylist,
 } from "@/db/schema";
@@ -31,6 +30,9 @@ import {
   upsertEventMetric,
   upsertWorkoutSet,
   resolveEventId,
+  bulkImportStorage,
+  flushBulkImportRecomputes,
+  type BulkImportContext,
   type WorkoutSetInput,
 } from "@/lib/ingest-service";
 import { isStatus } from "@/lib/enums";
@@ -301,7 +303,11 @@ const PIPELINE_ORDER: ReadonlyArray<
   ["event_duplicate_denylist.csv", "event_duplicate_denylist", importEventDuplicateDenylist],
   ["coach_calls.csv", "coach_calls", importCoachCalls],
   ["reconcile_log.csv", "reconcile_log", importReconcileLog],
-  ["daily_summaries.csv", "daily_summaries", importDailySummaries],
+  // daily_summaries.csv intentionally absent — it's a derived cache,
+  // recomputed authoritatively by the metrics phase's
+  // flushBulkImportRecomputes. Old export ZIPs that still include
+  // daily_summaries.csv land in `csvs` but skip the pipeline because
+  // they don't match any phase.
   ["merge_log.csv", "merge_log", importMergeLog],
 ];
 
@@ -326,11 +332,18 @@ function countCsvRows(text: string): number {
 
 async function importMetrics(text: string, userId: number): Promise<TableResult> {
   const typeCache = await buildMetricTypeCache(userId);
-  return processCsv(
-    "metrics.csv",
-    text,
-    ["recorded_at", "metric", "value"],
-    async (row, idx) => {
+  // Defer daily-summary recomputes: collect touched (metricTypeId, date)
+  // buckets during the row loop, then recompute each one ONCE at the
+  // end. Without this, upsertMetric recomputes the same daily bucket
+  // for every row in that bucket — making the metrics phase
+  // O(rows × avg_bucket_size). With this, it's O(rows + distinct_buckets).
+  const ctx: BulkImportContext = { touchedBuckets: new Set() };
+  const result = await bulkImportStorage.run(ctx, () =>
+    processCsv(
+      "metrics.csv",
+      text,
+      ["recorded_at", "metric", "value"],
+      async (row, idx) => {
       const recordedAt = row[idx.get("recorded_at")!];
       const metricName = row[idx.get("metric")!];
       const valueStr = row[idx.get("value")!];
@@ -375,7 +388,12 @@ async function importMetrics(text: string, userId: number): Promise<TableResult>
       });
       return status === "accepted" ? "accepted" : "skipped";
     },
+  ),
   );
+  // Flush deferred recomputes: one per distinct (metricTypeId, date)
+  // bucket touched during the import, no matter how many rows hit it.
+  await flushBulkImportRecomputes(userId, ctx);
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -1560,75 +1578,6 @@ async function importReconcileLog(text: string, userId: number): Promise<TableRe
         at,
       });
       return "accepted";
-    },
-  );
-}
-
-// -----------------------------------------------------------------------------
-// daily_summaries.csv
-// -----------------------------------------------------------------------------
-
-/**
- * Cache of per-day per-metric aggregates. Has a unique index on
- * (user_id, date, metric_type_id) so we can upsert directly. Skips rows
- * whose metric doesn't exist locally for this user (the cache will
- * rebuild from raw metrics on the next aggregation pass).
- */
-async function importDailySummaries(text: string, userId: number): Promise<TableResult> {
-  const typeCache = await buildMetricTypeCache(userId);
-  return processCsv(
-    "daily_summaries.csv",
-    text,
-    ["date", "metric", "count"],
-    async (row, idx) => {
-      const date = row[idx.get("date")!];
-      const metric = row[idx.get("metric")!];
-      const count = Number(row[idx.get("count")!]);
-      const avgRaw = idx.has("avg_value") ? row[idx.get("avg_value")!] : "";
-      const minRaw = idx.has("min_value") ? row[idx.get("min_value")!] : "";
-      const maxRaw = idx.has("max_value") ? row[idx.get("max_value")!] : "";
-      const lastIngestAt = idx.has("last_ingest_at") ? row[idx.get("last_ingest_at")!] : "";
-
-      if (!date || !metric) throw new Error("missing date or metric");
-      if (!Number.isFinite(count)) throw new Error("count must be numeric");
-
-      const metricTypeId = typeCache.byName.get(metric);
-      if (metricTypeId === undefined) return "skipped";
-
-      const parseNullable = (s: string): number | null => {
-        if (s === "") return null;
-        const n = Number(s);
-        if (!Number.isFinite(n)) throw new Error(`non-numeric value "${s}"`);
-        return n;
-      };
-      const avgValue = parseNullable(avgRaw);
-      const minValue = parseNullable(minRaw);
-      const maxValue = parseNullable(maxRaw);
-
-      const inserted = await db
-        .insert(dailySummaries)
-        .values({
-          userId,
-          date,
-          metricTypeId,
-          avgValue,
-          minValue,
-          maxValue,
-          count,
-          lastIngestAt: lastIngestAt || null,
-        })
-        .onConflictDoUpdate({
-          target: [dailySummaries.userId, dailySummaries.date, dailySummaries.metricTypeId],
-          set: {
-            avgValue,
-            minValue,
-            maxValue,
-            count,
-            lastIngestAt: lastIngestAt || null,
-          },
-        })
-        .returning({ id: dailySummaries.id });
-      return inserted.length > 0 ? "accepted" : "skipped";
     },
   );
 }

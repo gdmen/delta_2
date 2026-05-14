@@ -18,7 +18,6 @@ import {
   dashboardWidgets,
   coachCalls,
   reconcileLog,
-  dailySummaries,
   mergeLog,
   eventDuplicateDenylist,
 } from "@/db/schema";
@@ -681,33 +680,10 @@ export async function GET(request: NextRequest) {
     ]),
   );
 
-  // --- daily_summaries.csv -------------------------------------------------
-  const dailySummaryRows = await db
-    .select({
-      date: dailySummaries.date,
-      metric: metricTypes.name,
-      avgValue: dailySummaries.avgValue,
-      minValue: dailySummaries.minValue,
-      maxValue: dailySummaries.maxValue,
-      count: dailySummaries.count,
-      lastIngestAt: dailySummaries.lastIngestAt,
-    })
-    .from(dailySummaries)
-    .innerJoin(metricTypes, eq(dailySummaries.metricTypeId, metricTypes.id))
-    .where(userScope(userId).dailySummaries)
-    .orderBy(asc(dailySummaries.date), asc(metricTypes.name));
-  const dailySummariesCsv = serializeCsv(
-    ["date", "metric", "avg_value", "min_value", "max_value", "count", "last_ingest_at"],
-    dailySummaryRows.map((r) => [
-      r.date,
-      r.metric,
-      r.avgValue ?? "",
-      r.minValue ?? "",
-      r.maxValue ?? "",
-      r.count,
-      r.lastIngestAt ?? "",
-    ]),
-  );
+  // daily_summaries.csv intentionally NOT exported. It's a derived
+  // cache, fully recomputable from metrics rows on import. Round-
+  // tripping the cached values would just overwrite the importer's
+  // freshly-recomputed summaries with potentially-stale data.
 
   // --- merge_log.csv -------------------------------------------------------
   const mergeLogRows = await db
@@ -773,7 +749,6 @@ export async function GET(request: NextRequest) {
   if (!manualOnly) {
     bundle["coach_calls.csv"] = strToU8(coachCallsCsv);
     bundle["reconcile_log.csv"] = strToU8(reconcileLogCsv);
-    bundle["daily_summaries.csv"] = strToU8(dailySummariesCsv);
     bundle["merge_log.csv"] = strToU8(mergeLogCsv);
   }
 

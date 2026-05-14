@@ -8,7 +8,17 @@
  *   start    → phase(done:false) → phase-progress* → phase(done:true) → … → done
  */
 
-/** Canonical execution order — matches the server pipeline. */
+/**
+ * Canonical execution order — matches the server pipeline.
+ *
+ * Notably absent: `daily_summaries`. It's a derived cache, fully
+ * recomputable from `metrics` rows. The bulk metrics import flushes
+ * fresh summaries via flushBulkImportRecomputes after its row loop,
+ * so re-importing exported summary values would just overwrite the
+ * authoritative recomputed cache with potentially-stale data. Old
+ * export ZIPs that still include daily_summaries.csv are silently
+ * ignored — the file doesn't match any pipeline phase.
+ */
 export const IMPORT_TABLES = [
   "sports",
   "metric_types",
@@ -27,7 +37,6 @@ export const IMPORT_TABLES = [
   "event_duplicate_denylist",
   "coach_calls",
   "reconcile_log",
-  "daily_summaries",
   "merge_log",
 ] as const;
 
