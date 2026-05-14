@@ -2,27 +2,25 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { parseSseFrames } from "@/lib/sse-stream";
+import { ProgressBar } from "@/components/progress-bar";
+import {
+  IMPORT_TABLES,
+  type ImportDoneFrame,
+  type ImportPhaseFrame,
+  type ImportPhaseProgressFrame,
+  type ImportStartFrame,
+  type ImportTable,
+  type ImportTableResult,
+} from "@/lib/import/sse-frames";
 
-interface TableResult {
-  accepted: number;
-  skipped: number;
-  updated: number;
-  errors: string[];
-}
+// Re-exports for the local file's existing usage. IMPORT_TABLES doubles
+// as the display order in the result panel — single source of truth
+// with the server's PIPELINE_ORDER.
+type TableName = ImportTable;
+type TableResult = ImportTableResult;
+const TABLE_ORDER = IMPORT_TABLES;
 
-type TableName =
-  | "sports"
-  | "metric_types"
-  | "metric_type_aliases"
-  | "import_sources"
-  | "source_settings"
-  | "goals"
-  | "focuses"
-  | "goal_journal_entries"
-  | "metrics"
-  | "events"
-  | "event_metrics"
-  | "workout_sets";
 type ImportResponse = Partial<Record<TableName, TableResult>> & {
   error?: string;
 };
@@ -34,6 +32,21 @@ interface WipeResponse {
   error?: string;
 }
 
+interface PhaseInfo {
+  /** 0-indexed position in the pipeline. */
+  index: number;
+  total: number;
+  table: TableName;
+  /** Rows imported in the current phase. */
+  rowsDone: number;
+  /** Total rows in the current phase. */
+  rowTotal: number;
+  /** Cumulative rows across all phases so far (including current). */
+  cumulativeRowsDone: number;
+  /** Sum of rowTotal across every phase in this upload. */
+  totalRows: number;
+}
+
 // Inlined by Next.js's compiler for client components, so this gate
 // works without prop drilling. The matching server endpoint also
 // refuses in production — defence in depth.
@@ -43,6 +56,7 @@ export function ImportExportBar() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<"idle" | "uploading">("idle");
+  const [phase, setPhase] = useState<PhaseInfo | null>(null);
   const [result, setResult] = useState<ImportResponse | null>(null);
   const [wiping, setWiping] = useState(false);
   const [wipeResult, setWipeResult] = useState<WipeResponse | null>(null);
@@ -50,16 +64,93 @@ export function ImportExportBar() {
   async function handleFile(file: File) {
     setState("uploading");
     setResult(null);
+    setPhase(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/import", { method: "POST", body: fd });
-      const json = (await res.json()) as ImportResponse;
-      setResult(json);
+
+      // Auth + setup errors come back as JSON (pre-stream). Everything
+      // else is SSE. Branch on Content-Type so we can show the inline
+      // error banner for the JSON path without trying to parse it as
+      // SSE.
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.startsWith("text/event-stream")) {
+        const json = (await res.json()) as ImportResponse;
+        setResult(json);
+        setState("idle");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
+      if (!res.body) {
+        setResult({ error: "Empty response body" });
+        setState("idle");
+        return;
+      }
+
+      // Frames typed via the shared ImportXFrame interfaces; the `as`
+      // casts are bounded by the event-name switch, so a server-side
+      // shape change shows up as a type error in this file too.
+      //
+      // We track `priorPhasesRows` (sum of rowTotal for completed
+      // phases) locally so the bar can be denominated in total rows
+      // across the whole upload — gives a smooth, predictable rate
+      // through long phases instead of equal-width-per-phase jumps.
+      let totalPhases = 0;
+      let totalRows = 0;
+      let priorPhasesRows = 0;
+      const accumulated: ImportResponse = {};
+      for await (const frame of parseSseFrames(res.body)) {
+        if (frame.event === "start") {
+          const data = frame.data as ImportStartFrame;
+          totalPhases = data.totalPhases;
+          totalRows = data.totalRows;
+        } else if (frame.event === "phase") {
+          const data = frame.data as ImportPhaseFrame;
+          const rowsDone = data.done ? data.rowTotal : 0;
+          setPhase({
+            index: data.index,
+            total: data.total,
+            table: data.table,
+            rowsDone,
+            rowTotal: data.rowTotal,
+            cumulativeRowsDone: priorPhasesRows + rowsDone,
+            totalRows,
+          });
+          if (data.done) {
+            priorPhasesRows += data.rowTotal;
+            if (data.result) accumulated[data.table] = data.result;
+          }
+        } else if (frame.event === "phase-progress") {
+          const data = frame.data as ImportPhaseProgressFrame;
+          setPhase({
+            index: data.index,
+            total: data.total,
+            table: data.table,
+            rowsDone: data.rowsDone,
+            rowTotal: data.rowTotal,
+            cumulativeRowsDone: priorPhasesRows + data.rowsDone,
+            totalRows,
+          });
+        } else if (frame.event === "done") {
+          setResult((frame.data as ImportDoneFrame).result);
+        } else if (frame.event === "error") {
+          const data = frame.data as { message: string };
+          setResult({ error: data.message });
+        }
+      }
+      // Stream ended without a done frame — fall back to whatever we
+      // accumulated. Should rarely happen; the server's makeSseStream
+      // catches all errors.
+      if (!result && totalPhases > 0) {
+        setResult(accumulated);
+      }
     } catch (err) {
       setResult({ error: err instanceof Error ? err.message : String(err) });
     }
     setState("idle");
+    setPhase(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -136,6 +227,8 @@ export function ImportExportBar() {
         )}
       </div>
 
+      {state === "uploading" && phase && <ImportProgress phase={phase} />}
+
       {result && <ImportResult result={result} />}
 
       {wipeResult && <WipeResult result={wipeResult} />}
@@ -162,6 +255,44 @@ export function ImportExportBar() {
   );
 }
 
+/**
+ * Progress bar + status line. The bar is denominated in cumulative
+ * rows-of-work across the whole upload (not 1/N per phase), so it
+ * fills at a roughly constant rate — a 3-row sports phase doesn't
+ * claim the same width as a 38K-row metrics phase. Status line
+ * carries per-phase context.
+ */
+function ImportProgress({ phase }: { phase: PhaseInfo }) {
+  // All moving signal stays in one eye-line so the bar feels alive at
+  // any viewport width. Earlier flex-justify-between layout pinned the
+  // row count to the far right and looked stuck on wide screens.
+  return (
+    <div className="p-3 bg-surface border border-border rounded space-y-2">
+      <ProgressBar
+        value={phase.cumulativeRowsDone}
+        max={Math.max(1, phase.totalRows)}
+      />
+      {/* Counter matches the bar's denominator (cumulative rows across
+          the upload), not per-phase. Otherwise the numerator jumps
+          0 → N → 0 → M on every phase transition while the bar moves
+          smoothly — two pieces of signal denominated differently feels
+          jerky. */}
+      <div className="font-mono text-[0.75rem] text-muted">
+        Importing <span className="text-foreground">{phase.table}</span>
+        {" "}({phase.index + 1} of {phase.total})
+        {phase.totalRows > 0 && (
+          <>
+            {" · "}
+            <span className="tabular-nums">
+              {phase.cumulativeRowsDone.toLocaleString()} / {phase.totalRows.toLocaleString()} rows
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ImportResult({ result }: { result: ImportResponse }) {
   if (result.error) {
     return (
@@ -171,20 +302,9 @@ function ImportResult({ result }: { result: ImportResponse }) {
     );
   }
 
-  const tables: Array<[TableName, TableResult | undefined]> = [
-    ["sports", result.sports],
-    ["metric_types", result.metric_types],
-    ["metric_type_aliases", result.metric_type_aliases],
-    ["import_sources", result.import_sources],
-    ["source_settings", result.source_settings],
-    ["goals", result.goals],
-    ["focuses", result.focuses],
-    ["goal_journal_entries", result.goal_journal_entries],
-    ["metrics", result.metrics],
-    ["events", result.events],
-    ["event_metrics", result.event_metrics],
-    ["workout_sets", result.workout_sets],
-  ];
+  const tables = TABLE_ORDER.map(
+    (name) => [name, result[name]] as const,
+  ).filter(([, r]) => r !== undefined);
 
   return (
     <div className="p-3 bg-surface border border-border rounded text-[0.8125rem] font-mono space-y-1">
