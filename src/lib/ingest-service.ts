@@ -2,6 +2,150 @@ import { db } from "@/db";
 import { metrics, events, workoutSets, eventMetrics } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { AnyPgDb } from "@/db/types";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/**
+ * Per-request bulk-import deferral context.
+ *
+ * Live ingest writes one metric at a time and recomputes its daily
+ * summary cell immediately — that keeps widgets consistent in real
+ * time and costs ~1 cheap GROUP BY scan. The bulk import path
+ * (/api/import) feeds tens of thousands of rows through the same
+ * `upsertMetric`, where the per-row recompute scans the same daily
+ * bucket dozens of times. Result: the metrics phase becomes
+ * O(rows × avg_bucket_size) and dominates total import time.
+ *
+ * Solution: when the importer wraps a section in `bulkImportStorage.run`,
+ * `upsertMetric` collects touched (metricTypeId, date) tuples instead
+ * of recomputing per-row. The importer then flushes one recompute per
+ * touched bucket after the row loop completes. Same final state, ~100×
+ * less GROUP BY work on large imports.
+ *
+ * External callers (single-row /api/metrics POST, bodyspec save,
+ * Strava ingest) never wrap, so they keep their immediate-recompute
+ * behavior. The wrap is opt-in per request via AsyncLocalStorage.
+ */
+export interface BulkImportContext {
+  /** "metricTypeId|YYYY-MM-DD" → buckets touched during this import. */
+  touchedBuckets: Set<string>;
+}
+
+export const bulkImportStorage = new AsyncLocalStorage<BulkImportContext>();
+
+/**
+ * Either record the touched bucket for a later batched recompute (when
+ * inside a bulk-import context) or recompute immediately. Internal to
+ * upsertMetric and the small set of other writes that update summary
+ * cells.
+ */
+async function recomputeOrDefer(
+  userId: number,
+  metricTypeId: number,
+  recordedAt: string,
+  conn: DbLike,
+): Promise<void> {
+  const ctx = bulkImportStorage.getStore();
+  if (ctx) {
+    ctx.touchedBuckets.add(`${metricTypeId}|${recordedAt.slice(0, 10)}`);
+    return;
+  }
+  await recomputeDailySummary(userId, metricTypeId, recordedAt, conn);
+}
+
+/**
+ * Flush touched (metricTypeId, date) buckets to their summary cells.
+ * Called once by the bulk importer after its row loop.
+ *
+ * Crucial perf: this CANNOT be a sequential per-bucket loop. Real-world
+ * imports have tens of metric_types × ~365 days = thousands of distinct
+ * buckets. A sequential `recomputeDailySummary` per bucket = thousands
+ * of roundtrips that freeze the UI for tens of seconds with no SSE
+ * progress between rows and phase-done.
+ *
+ * Instead: send the (id, date) tuples as parallel arrays via UNNEST and
+ * let Postgres do all the GROUP BYs and ON CONFLICTs in one query.
+ * Chunked at 1000 tuples to stay well below the Postgres parameter
+ * ceiling. ~2 roundtrips per chunk regardless of bucket density.
+ */
+export async function flushBulkImportRecomputes(
+  userId: number,
+  ctx: BulkImportContext,
+  conn: DbLike = db,
+): Promise<void> {
+  if (ctx.touchedBuckets.size === 0) return;
+
+  // Parse "metricTypeId|date" keys into tuples.
+  const tuples: Array<[number, string]> = [];
+  for (const key of ctx.touchedBuckets) {
+    const [idStr, date] = key.split("|");
+    tuples.push([Number(idStr), date]);
+  }
+
+  // Chunk so we stay well under Postgres' parameter ceiling. 2 params
+  // per tuple → 2000 params per chunk leaves a huge margin.
+  const CHUNK_SIZE = 1000;
+  for (let i = 0; i < tuples.length; i += CHUNK_SIZE) {
+    const chunk = tuples.slice(i, i + CHUNK_SIZE);
+    // Cast the first tuple's columns so Postgres infers the right
+    // types for the virtual `t(mid, d)` columns. Without the casts,
+    // they default to `unknown` and the JOIN comparison fails with
+    // "No operator matches the given name and argument types".
+    const valuesList = sql.join(
+      chunk.map(([id, d], idx) =>
+        idx === 0
+          ? sql`(${id}::int, ${d}::text)`
+          : sql`(${id}, ${d})`,
+      ),
+      sql`, `,
+    );
+
+    // Upsert summary cells for every (metric_type_id, date) tuple in
+    // this chunk, in one INSERT...SELECT GROUP BY. The VALUES list
+    // pairs the (id, date) tuples element-wise as a virtual table.
+    await conn.execute(sql`
+      INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
+      SELECT
+        m.user_id,
+        substr(m.recorded_at, 1, 10) AS date,
+        m.metric_type_id,
+        AVG(m.value),
+        MIN(m.value),
+        MAX(m.value),
+        COUNT(*)::int,
+        MAX(m.recorded_at)
+      FROM metrics m
+      JOIN (VALUES ${valuesList}) AS t(mid, d)
+        ON m.metric_type_id = t.mid
+       AND substr(m.recorded_at, 1, 10) = t.d
+      WHERE m.user_id = ${userId}
+      GROUP BY m.user_id, substr(m.recorded_at, 1, 10), m.metric_type_id
+      ON CONFLICT (user_id, date, metric_type_id)
+      DO UPDATE SET
+        avg_value = excluded.avg_value,
+        min_value = excluded.min_value,
+        max_value = excluded.max_value,
+        count = excluded.count,
+        last_ingest_at = excluded.last_ingest_at;
+    `);
+
+    // Sweep cells in this chunk that ended up with zero rows (e.g. a
+    // deferred update shifted every row out of the bucket). Mirrors
+    // recomputeDailySummary's per-bucket DELETE.
+    await conn.execute(sql`
+      DELETE FROM daily_summaries ds
+      USING (VALUES ${valuesList}) AS t(mid, d)
+      WHERE ds.user_id = ${userId}
+        AND ds.metric_type_id = t.mid
+        AND ds.date = t.d
+        AND NOT EXISTS (
+          SELECT 1 FROM metrics m
+          WHERE m.user_id = ${userId}
+            AND m.metric_type_id = t.mid
+            AND substr(m.recorded_at, 1, 10) = t.d
+        );
+    `);
+  }
+}
 
 /**
  * Type alias for the drizzle handle. Tests pass an in-process pglite
@@ -77,10 +221,12 @@ export async function upsertMetric(
 
       // Recompute the new cell. If the source revised the timestamp into
       // a different calendar day, the old day's cell needs a recompute
-      // too (its rows shifted out).
-      await recomputeDailySummary(input.userId, input.metricTypeId, input.recordedAt, db);
+      // too (its rows shifted out). Both go through recomputeOrDefer
+      // so the bulk-import path can batch them; live ingest still gets
+      // immediate recomputes.
+      await recomputeOrDefer(input.userId, input.metricTypeId, input.recordedAt, db);
       if (existing[0].recordedAt.slice(0, 10) !== input.recordedAt.slice(0, 10)) {
-        await recomputeDailySummary(input.userId, existing[0].metricTypeId, existing[0].recordedAt, db);
+        await recomputeOrDefer(input.userId, existing[0].metricTypeId, existing[0].recordedAt, db);
       }
       return "skipped";
     }
@@ -96,7 +242,7 @@ export async function upsertMetric(
     alias: input.alias,
   });
 
-  await recomputeDailySummary(input.userId, input.metricTypeId, input.recordedAt, db);
+  await recomputeOrDefer(input.userId, input.metricTypeId, input.recordedAt, db);
   return "accepted";
 }
 
