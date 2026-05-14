@@ -20,6 +20,7 @@ import {
   reconcileLog,
   dailySummaries,
   mergeLog,
+  eventDuplicateDenylist,
 } from "@/db/schema";
 import { and, eq, asc, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -314,6 +315,12 @@ export async function GET(request: NextRequest) {
   );
 
   // --- events.csv ----------------------------------------------------------
+  // status + composite_member_ids round-trip the composite-event system.
+  // composite_members is a pipe-separated list of member source_ids
+  // (string, stable across re-import). hidden_by_composite rows are
+  // ALWAYS exported, even in manual mode, when the composite they
+  // belong to is in scope — otherwise the composite would re-import
+  // with dangling member ids.
   const eventsBase = db
     .select({
       id: events.id,
@@ -324,6 +331,8 @@ export async function GET(request: NextRequest) {
       notes: events.notes,
       source: events.source,
       sourceId: events.sourceId,
+      status: events.status,
+      compositeMemberIds: events.compositeMemberIds,
     })
     .from(events)
     .innerJoin(sports, eq(events.sportId, sports.id))
@@ -332,17 +341,103 @@ export async function GET(request: NextRequest) {
     ? eventsBase.where(and(userScope(userId).events, eq(events.source, "manual")))
     : eventsBase.where(userScope(userId).events)
   ).orderBy(asc(events.startedAt));
+
+  // Build id → exported-source_id map using the same fallback
+  // synthesizer as the row mapper, so composite_member_ids can be
+  // serialized as a list of source_ids that the importer will resolve
+  // even when some members had null source_id in the DB.
+  const sourceIdById = new Map<number, string>();
+  for (const r of eventRows) {
+    const sid =
+      r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`;
+    sourceIdById.set(r.id, sid);
+  }
+
   const eventsCsv = serializeCsv(
-    ["started_at", "sport", "type", "duration_minutes", "notes", "source", "source_id"],
-    eventRows.map((r) => [
-      r.startedAt,
-      r.sport,
-      r.type,
-      r.durationMinutes ?? "",
-      r.notes ?? "",
-      r.source,
-      r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`,
-    ]),
+    [
+      "started_at",
+      "sport",
+      "type",
+      "duration_minutes",
+      "notes",
+      "source",
+      "source_id",
+      "status",
+      "composite_members",
+    ],
+    eventRows.map((r) => {
+      const memberSourceIds = (r.compositeMemberIds ?? [])
+        .map((mid) => sourceIdById.get(mid))
+        .filter((s): s is string => !!s);
+      return [
+        r.startedAt,
+        r.sport,
+        r.type,
+        r.durationMinutes ?? "",
+        r.notes ?? "",
+        r.source,
+        sourceIdById.get(r.id) ?? "",
+        r.status,
+        memberSourceIds.join("|"),
+      ];
+    }),
+  );
+
+  // --- event_duplicate_denylist.csv ---------------------------------------
+  // The "don't re-suggest this pair as a duplicate" memory. References
+  // events by source_id (the only stable identifier across re-import).
+  // INHERIT — restricted via the events scope used above.
+  const denylistRows = await db
+    .select({
+      eventAId: eventDuplicateDenylist.eventAId,
+      eventBId: eventDuplicateDenylist.eventBId,
+      createdAt: eventDuplicateDenylist.createdAt,
+    })
+    .from(eventDuplicateDenylist)
+    .where(userScope(userId).eventDuplicateDenylist)
+    .orderBy(asc(eventDuplicateDenylist.createdAt));
+  // Look up source_ids for any denylist members that weren't in
+  // eventRows (manual-mode export, for instance). One round-trip.
+  const denylistMemberIds = new Set<number>();
+  for (const r of denylistRows) {
+    if (!sourceIdById.has(r.eventAId)) denylistMemberIds.add(r.eventAId);
+    if (!sourceIdById.has(r.eventBId)) denylistMemberIds.add(r.eventBId);
+  }
+  if (denylistMemberIds.size > 0) {
+    const extra = await db
+      .select({
+        id: events.id,
+        sourceId: events.sourceId,
+        sport: sports.name,
+        type: events.type,
+        startedAt: events.startedAt,
+      })
+      .from(events)
+      .innerJoin(sports, eq(events.sportId, sports.id))
+      .where(
+        and(
+          userScope(userId).events,
+          inArray(events.id, [...denylistMemberIds]),
+        ),
+      );
+    for (const r of extra) {
+      sourceIdById.set(
+        r.id,
+        r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`,
+      );
+    }
+  }
+  const eventDuplicateDenylistCsv = serializeCsv(
+    ["event_a_source_id", "event_b_source_id", "created_at"],
+    denylistRows
+      .map((r) => [
+        sourceIdById.get(r.eventAId) ?? "",
+        sourceIdById.get(r.eventBId) ?? "",
+        r.createdAt,
+      ])
+      // Drop any rows whose source_ids couldn't be resolved — they'd
+      // be dead-letter on re-import anyway.
+      .filter(([a, b]) => a && b),
   );
 
   // --- event_metrics.csv ---------------------------------------------------
@@ -672,6 +767,8 @@ export async function GET(request: NextRequest) {
     "event_metrics.csv": strToU8(eventMetricsCsv),
     "workout_sets.csv": strToU8(workoutSetsCsv),
   };
+
+  bundle["event_duplicate_denylist.csv"] = strToU8(eventDuplicateDenylistCsv);
 
   if (!manualOnly) {
     bundle["coach_calls.csv"] = strToU8(coachCallsCsv);
