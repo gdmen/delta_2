@@ -17,6 +17,7 @@ import {
   reconcileLog,
   dailySummaries,
   mergeLog,
+  eventDuplicateDenylist,
 } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { parseCsv, headerIndex } from "@/lib/csv";
@@ -135,6 +136,7 @@ export async function POST(request: NextRequest) {
     "events.csv",
     "event_metrics.csv",
     "workout_sets.csv",
+    "event_duplicate_denylist.csv",
     "coach_calls.csv",
     "reconcile_log.csv",
     "daily_summaries.csv",
@@ -239,6 +241,18 @@ export async function POST(request: NextRequest) {
     out.workout_sets = await importWorkoutSets(csvs["workout_sets.csv"], userId);
   }
 
+  // --- event_duplicate_denylist.csv ---------------------------------------
+  // Runs after events.csv so member events exist and can be resolved by
+  // source_id. The denylist is what powers the "don't re-suggest this
+  // pair as a duplicate" memory; round-tripping it preserves the user's
+  // dismissals across export/import.
+  if (csvs["event_duplicate_denylist.csv"]) {
+    out.event_duplicate_denylist = await importEventDuplicateDenylist(
+      csvs["event_duplicate_denylist.csv"],
+      userId,
+    );
+  }
+
   // --- coach_calls.csv -----------------------------------------------------
   // Operational history. Runs after goals so the goal_id FK can be resolved
   // by natural key (sport, metric, deadline).
@@ -338,7 +352,16 @@ async function importMetrics(text: string, userId: number): Promise<TableResult>
 
 async function importEvents(text: string, userId: number): Promise<TableResult> {
   const sportCache = await loadSportCache(userId);
-  return processCsv(
+  // Buffer composite-membership rows so the second pass can resolve
+  // member source_ids → ids after all events are inserted. Without
+  // this, a composite row might reference members that haven't been
+  // upserted yet (especially the composite-first ordering case).
+  const compositeRows: Array<{
+    compositeSourceId: string;
+    memberSourceIds: string[];
+  }> = [];
+
+  const result = await processCsv(
     "events.csv",
     text,
     ["started_at", "sport", "type"],
@@ -350,6 +373,12 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
       const notes = idx.has("notes") ? row[idx.get("notes")!] : "";
       const source = (idx.has("source") ? row[idx.get("source")!] : "") || "custom";
       let sourceId = idx.has("source_id") ? row[idx.get("source_id")!] : "";
+      // Composite-event columns (optional; pre-composites exports won't
+      // have them, defaults are safe).
+      const statusCol = idx.has("status") ? row[idx.get("status")!] : "";
+      const compositeMembersCol = idx.has("composite_members")
+        ? row[idx.get("composite_members")!]
+        : "";
 
       if (!startedAt || !sportName || !type) throw new Error("missing required field");
       const sportId = sportCache.get(sportName);
@@ -364,6 +393,14 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
       }
 
       if (!sourceId) sourceId = `custom-${sportName}-${type}-${startedAt}`;
+
+      // Defer composite-member linking to the second pass.
+      if (statusCol === "composite" && compositeMembersCol) {
+        compositeRows.push({
+          compositeSourceId: sourceId,
+          memberSourceIds: compositeMembersCol.split("|").filter(Boolean),
+        });
+      }
 
       // If an existing row matches on the natural key but has no source_id,
       // adopt the synthesized one so future imports all dedupe against it.
@@ -400,6 +437,65 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
       return status === "accepted" ? "accepted" : "skipped";
     },
   );
+
+  // Second pass: link composite events to their members and flip member
+  // status to 'hidden_by_composite'. Uses source_id lookups so the
+  // round-trip works even when the exporting DB's autoincrement ids
+  // don't match the importer's.
+  if (compositeRows.length > 0) {
+    const allMentioned = new Set<string>();
+    for (const c of compositeRows) {
+      allMentioned.add(c.compositeSourceId);
+      for (const m of c.memberSourceIds) allMentioned.add(m);
+    }
+    const eventBySourceId = new Map<string, number>();
+    const rows = await db
+      .select({ id: events.id, sourceId: events.sourceId })
+      .from(events)
+      .where(
+        and(
+          userScope(userId).events,
+          inArray(events.sourceId, [...allMentioned]),
+        ),
+      );
+    for (const r of rows) {
+      if (r.sourceId) eventBySourceId.set(r.sourceId, r.id);
+    }
+
+    for (const c of compositeRows) {
+      const compositeId = eventBySourceId.get(c.compositeSourceId);
+      if (compositeId === undefined) {
+        result.errors.push(
+          `events.csv composite: source_id "${c.compositeSourceId}" not found after import`,
+        );
+        continue;
+      }
+      const memberIds: number[] = [];
+      const missing: string[] = [];
+      for (const m of c.memberSourceIds) {
+        const mid = eventBySourceId.get(m);
+        if (mid === undefined) missing.push(m);
+        else memberIds.push(mid);
+      }
+      if (missing.length > 0) {
+        result.errors.push(
+          `events.csv composite "${c.compositeSourceId}": missing members ${missing.join(", ")}`,
+        );
+      }
+      if (memberIds.length === 0) continue;
+      memberIds.sort((a, b) => a - b);
+      await db
+        .update(events)
+        .set({ status: "composite", compositeMemberIds: memberIds })
+        .where(and(userScope(userId).events, eq(events.id, compositeId)));
+      await db
+        .update(events)
+        .set({ status: "hidden_by_composite" })
+        .where(and(userScope(userId).events, inArray(events.id, memberIds)));
+    }
+  }
+
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -550,6 +646,76 @@ async function importWorkoutSets(text: string, userId: number): Promise<TableRes
 
       const status = await upsertWorkoutSet(parentId, input);
       return status === "accepted" ? "accepted" : "updated";
+    },
+  );
+}
+
+// -----------------------------------------------------------------------------
+// event_duplicate_denylist.csv
+// -----------------------------------------------------------------------------
+
+/**
+ * Round-trips the "don't re-suggest this pair as a duplicate" memory.
+ * Both endpoints are referenced by source_id (the only stable id across
+ * re-import). Dedupes on (event_a_id, event_b_id) after resolution —
+ * matches the unique constraint on the table.
+ */
+async function importEventDuplicateDenylist(
+  text: string,
+  userId: number,
+): Promise<TableResult> {
+  return processCsv(
+    "event_duplicate_denylist.csv",
+    text,
+    ["event_a_source_id", "event_b_source_id"],
+    async (row, idx) => {
+      const aSourceId = row[idx.get("event_a_source_id")!];
+      const bSourceId = row[idx.get("event_b_source_id")!];
+      const createdAt = idx.has("created_at") ? row[idx.get("created_at")!] : "";
+
+      if (!aSourceId || !bSourceId) throw new Error("missing source_id");
+      if (aSourceId === bSourceId) throw new Error("a == b not allowed");
+
+      // Resolve both endpoints to local ids by source_id (user-scoped).
+      const resolved = await db
+        .select({ id: events.id, sourceId: events.sourceId })
+        .from(events)
+        .where(
+          and(
+            userScope(userId).events,
+            inArray(events.sourceId, [aSourceId, bSourceId]),
+          ),
+        );
+      const bySource = new Map<string, number>();
+      for (const r of resolved) {
+        if (r.sourceId) bySource.set(r.sourceId, r.id);
+      }
+      const aId = bySource.get(aSourceId);
+      const bId = bySource.get(bSourceId);
+      if (aId === undefined || bId === undefined) {
+        throw new Error(
+          `unresolved member(s): ${[
+            aId === undefined ? aSourceId : null,
+            bId === undefined ? bSourceId : null,
+          ]
+            .filter(Boolean)
+            .join(", ")}`,
+        );
+      }
+      // The CHECK constraint requires event_a_id < event_b_id. Sort
+      // before insert.
+      const [lo, hi] = aId < bId ? [aId, bId] : [bId, aId];
+      const inserted = await db
+        .insert(eventDuplicateDenylist)
+        .values({
+          userId,
+          eventAId: lo,
+          eventBId: hi,
+          createdAt: createdAt || new Date().toISOString(),
+        })
+        .onConflictDoNothing()
+        .returning({ id: eventDuplicateDenylist.id });
+      return inserted.length > 0 ? "accepted" : "skipped";
     },
   );
 }
