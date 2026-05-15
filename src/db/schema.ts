@@ -5,6 +5,7 @@ import {
   doublePrecision,
   boolean,
   timestamp,
+  date,
   primaryKey,
   index,
   uniqueIndex,
@@ -14,12 +15,16 @@ import { sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
 import { isoTimestamptz } from "./columns";
 
-// All ISO-8601 timestamp columns (createdAt, updatedAt, ts, at, ingestedAt, …)
-// store JS-format strings (`new Date().toISOString()`). Keeping them as `text`
-// in Postgres preserves the existing consumer API exactly — every site that
-// reads `.createdAt` and does `.slice(0, 10)` or hands it to `new Date(…)`
-// keeps working unchanged. A future PR can migrate to native `timestamptz`
-// when it's worth the consumer-side audit.
+// Timestamp columns use the `isoTimestamptz` custom column type from
+// `./columns` (Postgres `timestamptz` storage, ISO-string JS contract).
+// This gives correct temporal semantics + indexable comparisons while
+// preserving the legacy `.toISOString()`-shaped consumer contract.
+// Date-only columns (e.g. goals.deadline, dailySummaries.date) use
+// native `date({ mode: "string" })` returning canonical `YYYY-MM-DD`.
+//
+// Auth.js's `users.emailVerified` stays as `timestamp({ mode: "date" })`
+// because the adapter owns the contract. That's the one place in this
+// schema where the JS-side type is `Date` instead of string.
 const isoNow = () => new Date().toISOString();
 
 // =============================================================================
@@ -56,7 +61,7 @@ export const users = pgTable("users", {
   // Owner bit drives /preferences/invites visibility + can't-self-delete
   // protection. There's exactly one owner today (id=1).
   isOwner: boolean("is_owner").notNull().default(false),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
 });
 
 // One row per linked OAuth identity (e.g. Google). The Auth.js drizzle
@@ -119,9 +124,9 @@ export const inviteCodes = pgTable("invite_codes", {
     .notNull()
     .references(() => users.id),
   usedByUserId: integer("used_by_user_id").references(() => users.id),
-  expiresAt: text("expires_at"),
-  usedAt: text("used_at"),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  expiresAt: isoTimestamptz("expires_at"),
+  usedAt: isoTimestamptz("used_at"),
+  createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
 });
 
 // Strava OAuth state with user_id binding (replaces the previous cookie-
@@ -131,7 +136,7 @@ export const oauthStates = pgTable("oauth_states", {
   userId: integer("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: text("expires_at").notNull(),
+  expiresAt: isoTimestamptz("expires_at").notNull(),
 });
 
 // JWT revocation list. Sign-out inserts the current request's `jti`. Every
@@ -143,7 +148,7 @@ export const sessionDenylist = pgTable("session_denylist", {
   userId: integer("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  revokedAt: text("revoked_at").$defaultFn(isoNow).notNull(),
+  revokedAt: isoTimestamptz("revoked_at").$defaultFn(isoNow).notNull(),
 });
 
 // Per-dashboard read-only public links. Owner of the dashboard can mint and
@@ -160,8 +165,8 @@ export const dashboardShareTokens = pgTable(
     createdByUserId: integer("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-    revokedAt: text("revoked_at"),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
+    revokedAt: isoTimestamptz("revoked_at"),
   },
   (t) => [
     uniqueIndex("dashboard_share_tokens_one_active_per_dashboard")
@@ -184,7 +189,7 @@ export const sports = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     color: text("color").notNull(),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [uniqueIndex("sports_user_name_uniq").on(t.userId, t.name)],
 );
@@ -217,7 +222,7 @@ export const metricTypes = pgTable(
      * on metric_block headlines.
      */
     higherIsBetter: boolean("higher_is_better").notNull().default(true),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [uniqueIndex("metric_types_user_name_uniq").on(t.userId, t.name)],
 );
@@ -240,7 +245,7 @@ export const metricTypeAliases = pgTable(
     canonicalMetricTypeId: integer("canonical_metric_type_id")
       .notNull()
       .references(() => metricTypes.id, { onDelete: "cascade" }),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.alias] }),
@@ -260,10 +265,10 @@ export const metrics = pgTable(
       .notNull()
       .references(() => metricTypes.id),
     value: doublePrecision("value").notNull(),
-    recordedAt: text("recorded_at").notNull(),
+    recordedAt: isoTimestamptz("recorded_at").notNull(),
     source: text("source").notNull(),
     sourceId: text("source_id"),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
     // Alias key the resolver matched at ingest time (e.g.
     // "fitnotes_bt:weight"). Powers chain-undo of merges: when a merge is
     // reversed, the applier moves metrics whose `alias` matches the
@@ -292,7 +297,7 @@ export const events = pgTable(
     type: text("type").notNull(),
     durationMinutes: integer("duration_minutes"),
     notes: text("notes"),
-    startedAt: text("started_at").notNull(),
+    startedAt: isoTimestamptz("started_at").notNull(),
     source: text("source").notNull().default("manual"),
     sourceId: text("source_id"),
     // 'visible' = normal event. 'hidden_by_composite' = folded into a
@@ -312,7 +317,7 @@ export const events = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::integer[]`),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     index("idx_events_sport_started").on(t.sportId, t.startedAt),
@@ -341,7 +346,7 @@ export const eventDuplicateDenylist = pgTable(
     eventBId: integer("event_b_id")
       .notNull()
       .references(() => events.id, { onDelete: "cascade" }),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     uniqueIndex("event_duplicate_denylist_pair").on(t.eventAId, t.eventBId),
@@ -411,11 +416,11 @@ export const goals = pgTable("goals", {
   // unchanged. Editable from /goals/[id].
   name: text("name"),
   targetValue: doublePrecision("target_value").notNull(),
-  deadline: text("deadline").notNull(),
+  deadline: date("deadline", { mode: "string" }).notNull(),
   status: text("status", { enum: ["active", "completed", "abandoned"] })
     .notNull()
     .default("active"),
-  createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+  createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
@@ -440,15 +445,15 @@ export const focuses = pgTable(
     source: text("source", { enum: ["manual", "llm"] })
       .notNull()
       .default("manual"),
-    startDate: text("start_date").notNull(),
-    endDate: text("end_date"),
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    endDate: date("end_date", { mode: "string" }),
     status: text("status", { enum: ["active", "completed", "abandoned"] })
       .notNull()
       .default("active"),
     technicalNotes: text("technical_notes"),
     evidence: text("evidence"),
-    dismissedAt: text("dismissed_at"),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    dismissedAt: isoTimestamptz("dismissed_at"),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [index("idx_focuses_goal_status").on(t.goalId, t.status)],
 );
@@ -470,7 +475,7 @@ export const goalJournalEntries = pgTable(
       .notNull()
       .references(() => goals.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
     verdictFocusId: integer("verdict_focus_id").references(
       (): AnyPgColumn => focuses.id,
       { onDelete: "set null" },
@@ -502,7 +507,7 @@ export const coachCalls = pgTable(
       onDelete: "set null",
     }),
     deletedUserHash: text("deleted_user_hash"),
-    ts: text("ts").$defaultFn(isoNow).notNull(),
+    ts: isoTimestamptz("ts").$defaultFn(isoNow).notNull(),
     endpoint: text("endpoint").notNull(),
     goalId: integer("goal_id").references(() => goals.id, {
       onDelete: "set null",
@@ -538,7 +543,7 @@ export const ingestConfigs = pgTable(
     // AES-GCM is non-deterministic — we cannot index ciphertext directly,
     // so the hash column is the only way to find a row by token value.
     lookupHash: text("lookup_hash"),
-    lastSyncAt: text("last_sync_at"),
+    lastSyncAt: isoTimestamptz("last_sync_at"),
     enabled: boolean("enabled").notNull().default(true),
   },
   (t) => [
@@ -561,7 +566,7 @@ export const importSources = pgTable(
     // JSON-encoded ImportMapping (see src/lib/import-mapping.ts). Opaque to
     // the DB layer; parsed by the import runner.
     mapping: text("mapping").notNull(),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [uniqueIndex("import_sources_user_name_uniq").on(t.userId, t.name)],
 );
@@ -609,12 +614,12 @@ export const mergeLog = pgTable(
       .default(1)
       .references(() => users.id, { onDelete: "cascade" }),
     kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
     canonicalId: integer("canonical_id").notNull(),
     canonicalName: text("canonical_name").notNull(),
     mergedNames: text("merged_names").notNull(),
     payload: text("payload").notNull(),
-    undoneAt: text("undone_at"),
+    undoneAt: isoTimestamptz("undone_at"),
   },
   (t) => [
     index("idx_merge_log_created_at").on(t.createdAt),
@@ -634,7 +639,7 @@ export const sourceSettings = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     source: text("source").notNull(),
     reconcileEnabled: boolean("reconcile_enabled").notNull().default(false),
-    updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
+    updatedAt: isoTimestamptz("updated_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.source] })],
 );
@@ -657,9 +662,9 @@ export const reconcileLog = pgTable(
     kind: text("kind", { enum: ["metric", "event"] }).notNull(),
     metricTypeId: integer("metric_type_id"),
     deletedCount: integer("deleted_count").notNull(),
-    rangeStart: text("range_start").notNull(),
-    rangeEnd: text("range_end").notNull(),
-    at: text("at").$defaultFn(isoNow).notNull(),
+    rangeStart: isoTimestamptz("range_start").notNull(),
+    rangeEnd: isoTimestamptz("range_end").notNull(),
+    at: isoTimestamptz("at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     index("idx_reconcile_log_source_at").on(t.source, t.at),
@@ -675,7 +680,7 @@ export const dailySummaries = pgTable(
       .notNull()
       .default(1)
       .references(() => users.id, { onDelete: "cascade" }),
-    date: text("date").notNull(),
+    date: date("date", { mode: "string" }).notNull(),
     metricTypeId: integer("metric_type_id")
       .notNull()
       .references(() => metricTypes.id),
@@ -683,7 +688,7 @@ export const dailySummaries = pgTable(
     minValue: doublePrecision("min_value"),
     maxValue: doublePrecision("max_value"),
     count: integer("count").notNull().default(0),
-    lastIngestAt: text("last_ingest_at"),
+    lastIngestAt: isoTimestamptz("last_ingest_at"),
   },
   (t) => [
     uniqueIndex("idx_daily_summaries_user_date_metric").on(
@@ -724,8 +729,8 @@ export const dashboards = pgTable(
     position: integer("position").notNull().default(0),
     isSystem: boolean("is_system").notNull().default(false),
     seededId: text("seeded_id"),
-    createdAt: text("created_at").$defaultFn(isoNow).notNull(),
-    updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
+    updatedAt: isoTimestamptz("updated_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
     uniqueIndex("dashboards_user_slug_uniq").on(t.userId, t.slug),

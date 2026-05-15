@@ -187,7 +187,7 @@ export async function applyMetricTypeUndo(
     INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
     SELECT
       user_id,
-      substr(recorded_at, 1, 10) AS date,
+      (recorded_at AT TIME ZONE 'UTC')::date AS date,
       metric_type_id,
       AVG(value),
       MIN(value),
@@ -199,7 +199,7 @@ export async function applyMetricTypeUndo(
       touchedIds.map((id) => sql`${id}`),
       sql`, `,
     )})
-    GROUP BY user_id, substr(recorded_at, 1, 10), metric_type_id
+    GROUP BY user_id, (recorded_at AT TIME ZONE 'UTC')::date, metric_type_id
   `);
 
   // 6. Re-point aliases first (so the row exists for any merged.name
