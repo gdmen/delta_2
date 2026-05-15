@@ -36,6 +36,13 @@
       "when": 1779235200000,
       "tag": "0004_event_composites",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779321600000,
+      "tag": "0005_appsettings_updatedat_timestamptz",
+      "breakpoints": true
     }
   ]
 }

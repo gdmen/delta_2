@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { AdapterAccountType } from "next-auth/adapters";
+import { isoTimestamptz } from "./columns";
 
 // All ISO-8601 timestamp columns (createdAt, updatedAt, ts, at, ingestedAt, …)
 // store JS-format strings (`new Date().toISOString()`). Keeping them as `text`
@@ -577,7 +578,13 @@ export const appSettings = pgTable("app_settings", {
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
   timezone: text("timezone"),
-  updatedAt: text("updated_at").$defaultFn(isoNow).notNull(),
+  // POC for issue #25 — first column converted to native timestamptz
+  // via the isoTimestamptz wrapper. The JS-side contract (ISO string in
+  // `new Date().toISOString()` format) is preserved exactly; the
+  // underlying storage is now correct timestamptz with indexable
+  // temporal semantics. Other timestamp columns follow once the POC
+  // proves the wrapper end-to-end.
+  updatedAt: isoTimestamptz("updated_at").$defaultFn(isoNow).notNull(),
 });
 
 /**
