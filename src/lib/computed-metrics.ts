@@ -136,13 +136,13 @@ async function sportSessionsCount(sportName: string, userId: number): Promise<Sa
   // YYYY-MM-DD.
   const rows = await db
     .select({
-      day: sql<string>`substr(${events.startedAt}, 1, 10)`,
+      day: sql<string>`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`,
       n: sql<number>`count(*)`,
     })
     .from(events)
     .where(and(userScope(userId).events, eq(events.sportId, sportId)))
-    .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
-    .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
+    .groupBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`)
+    .orderBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`);
   return rows.map((r) => ({ date: r.day, value: Number(r.n) }));
 }
 
@@ -151,13 +151,13 @@ async function sportMinutes(sportName: string, userId: number): Promise<Sample[]
   if (sportId === null) return [];
   const rows = await db
     .select({
-      day: sql<string>`substr(${events.startedAt}, 1, 10)`,
+      day: sql<string>`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`,
       mins: sql<number>`coalesce(sum(${events.durationMinutes}), 0)`,
     })
     .from(events)
     .where(and(userScope(userId).events, eq(events.sportId, sportId)))
-    .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
-    .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
+    .groupBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`)
+    .orderBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`);
   // Drop days where the sum is 0 (events with NULL duration sum to 0). A
   // user reading the chart wants days that actually represent training.
   return rows
@@ -325,7 +325,7 @@ async function exerciseVolumePerDay(slug: string, userId: number): Promise<Sampl
   if (id === null) return [];
   const rows = await db
     .select({
-      day: sql<string>`substr(${events.startedAt}, 1, 10)`,
+      day: sql<string>`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`,
       vol: sql<number>`coalesce(sum(${workoutSets.weight} * ${workoutSets.reps}), 0)`,
     })
     .from(workoutSets)
@@ -336,8 +336,8 @@ async function exerciseVolumePerDay(slug: string, userId: number): Promise<Sampl
         eq(workoutSets.exerciseMetricTypeId, id),
       ),
     )
-    .groupBy(sql`substr(${events.startedAt}, 1, 10)`)
-    .orderBy(sql`substr(${events.startedAt}, 1, 10)`);
+    .groupBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`)
+    .orderBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`);
   return rows
     .filter((r) => Number(r.vol) > 0)
     .map((r) => ({ date: r.day, value: Number(r.vol) }));

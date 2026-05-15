@@ -59,8 +59,8 @@ export default async function DataPage() {
     .select({
       sportId: events.sportId,
       sportName: sports.name,
-      days: sql<number>`count(distinct substr(${events.startedAt}, 1, 10))`,
-      daysWithMinutes: sql<number>`count(distinct case when ${events.durationMinutes} > 0 then substr(${events.startedAt}, 1, 10) end)`,
+      days: sql<number>`count(distinct to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'))`,
+      daysWithMinutes: sql<number>`count(distinct case when ${events.durationMinutes} > 0 then to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') end)`,
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(events)
@@ -80,7 +80,7 @@ export default async function DataPage() {
     .select({
       metricTypeId: workoutSets.exerciseMetricTypeId,
       name: metricTypes.name,
-      days: sql<number>`count(distinct substr(${events.startedAt}, 1, 10))`,
+      days: sql<number>`count(distinct to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'))`,
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(workoutSets)

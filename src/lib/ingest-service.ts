@@ -90,6 +90,10 @@ export async function flushBulkImportRecomputes(
     // types for the virtual `t(mid, d)` columns. Without the casts,
     // they default to `unknown` and the JOIN comparison fails with
     // "No operator matches the given name and argument types".
+    // t.d is text (YYYY-MM-DD); we cast to date for ds.date equality
+    // and concat-then-cast-to-timestamptz with explicit UTC offset for
+    // metrics.recorded_at range bounds. A bare `t.d::timestamptz`
+    // would use the session TimeZone, not UTC.
     const valuesList = sql.join(
       chunk.map(([id, d], idx) =>
         idx === 0
@@ -102,11 +106,15 @@ export async function flushBulkImportRecomputes(
     // Upsert summary cells for every (metric_type_id, date) tuple in
     // this chunk, in one INSERT...SELECT GROUP BY. The VALUES list
     // pairs the (id, date) tuples element-wise as a virtual table.
+    //
+    // Half-open range on recorded_at preserves the
+    // `idx_metrics_type_recorded` index — a `(recorded_at::date = t.d)`
+    // predicate would force a per-row cast and lose the index.
     await conn.execute(sql`
       INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
       SELECT
         m.user_id,
-        substr(m.recorded_at, 1, 10) AS date,
+        (m.recorded_at AT TIME ZONE 'UTC')::date AS date,
         m.metric_type_id,
         AVG(m.value),
         MIN(m.value),
@@ -116,9 +124,10 @@ export async function flushBulkImportRecomputes(
       FROM metrics m
       JOIN (VALUES ${valuesList}) AS t(mid, d)
         ON m.metric_type_id = t.mid
-       AND substr(m.recorded_at, 1, 10) = t.d
+       AND m.recorded_at >= (t.d || ' 00:00:00+00')::timestamptz
+       AND m.recorded_at < ((t.d || ' 00:00:00+00')::timestamptz + INTERVAL '1 day')
       WHERE m.user_id = ${userId}
-      GROUP BY m.user_id, substr(m.recorded_at, 1, 10), m.metric_type_id
+      GROUP BY m.user_id, (m.recorded_at AT TIME ZONE 'UTC')::date, m.metric_type_id
       ON CONFLICT (user_id, date, metric_type_id)
       DO UPDATE SET
         avg_value = excluded.avg_value,
@@ -136,12 +145,13 @@ export async function flushBulkImportRecomputes(
       USING (VALUES ${valuesList}) AS t(mid, d)
       WHERE ds.user_id = ${userId}
         AND ds.metric_type_id = t.mid
-        AND ds.date = t.d
+        AND ds.date = t.d::date
         AND NOT EXISTS (
           SELECT 1 FROM metrics m
           WHERE m.user_id = ${userId}
             AND m.metric_type_id = t.mid
-            AND substr(m.recorded_at, 1, 10) = t.d
+            AND m.recorded_at >= (t.d || ' 00:00:00+00')::timestamptz
+            AND m.recorded_at < ((t.d || ' 00:00:00+00')::timestamptz + INTERVAL '1 day')
         );
     `);
   }
@@ -447,11 +457,15 @@ export async function recomputeDailySummary(
   const db = conn;
   const date = recordedAt.slice(0, 10);
 
+  // Half-open range on recorded_at uses the (metric_type_id, recorded_at)
+  // index. The legacy `substr(recorded_at, 1, 10) = ${date}` predicate
+  // would force a per-row text cast and lose the index after the
+  // text→timestamptz migration.
   await db.execute(sql`
     INSERT INTO daily_summaries (user_id, date, metric_type_id, avg_value, min_value, max_value, count, last_ingest_at)
     SELECT
       user_id,
-      substr(recorded_at, 1, 10) AS date,
+      (recorded_at AT TIME ZONE 'UTC')::date AS date,
       metric_type_id,
       AVG(value),
       MIN(value),
@@ -461,8 +475,9 @@ export async function recomputeDailySummary(
     FROM metrics
     WHERE user_id = ${userId}
       AND metric_type_id = ${metricTypeId}
-      AND substr(recorded_at, 1, 10) = ${date}
-    GROUP BY user_id, substr(recorded_at, 1, 10), metric_type_id
+      AND recorded_at >= (${date} || ' 00:00:00+00')::timestamptz
+      AND recorded_at < ((${date} || ' 00:00:00+00')::timestamptz + INTERVAL '1 day')
+    GROUP BY user_id, (recorded_at AT TIME ZONE 'UTC')::date, metric_type_id
     ON CONFLICT (user_id, date, metric_type_id)
     DO UPDATE SET
       avg_value = excluded.avg_value,
@@ -475,16 +490,22 @@ export async function recomputeDailySummary(
   // Sweep the cell if the last row for it was just deleted. Cheap —
   // bounded by the unique index, runs only when the INSERT branch
   // produced no rows.
+  //
+  // Both sides of every comparison are explicit-offset to avoid the
+  // session-TimeZone trap (`'2026-01-01'::timestamptz` is interpreted
+  // in the session TZ, not UTC). Concatenating ` 00:00:00+00` and
+  // parsing as text pins to UTC unambiguously.
   await db.execute(sql`
     DELETE FROM daily_summaries
     WHERE user_id = ${userId}
       AND metric_type_id = ${metricTypeId}
-      AND date = ${date}
+      AND date = ${date}::date
       AND NOT EXISTS (
         SELECT 1 FROM metrics
         WHERE user_id = ${userId}
           AND metric_type_id = ${metricTypeId}
-          AND substr(recorded_at, 1, 10) = ${date}
+          AND recorded_at >= (${date} || ' 00:00:00+00')::timestamptz
+          AND recorded_at < ((${date} || ' 00:00:00+00')::timestamptz + INTERVAL '1 day')
       );
   `);
 }

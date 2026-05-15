@@ -80,7 +80,7 @@ export async function findDuplicateCandidates(
       sb.name AS b_sport_name, b.type AS b_type, b.started_at AS b_started_at,
       b.duration_minutes AS b_duration_minutes,
       ROUND(
-        ABS(EXTRACT(EPOCH FROM (a.started_at::timestamptz - b.started_at::timestamptz)) / 60.0)::numeric,
+        ABS(EXTRACT(EPOCH FROM (a.started_at - b.started_at)) / 60.0)::numeric,
         1
       ) AS minutes_apart
     FROM events a
@@ -88,7 +88,7 @@ export async function findDuplicateCandidates(
                   AND a.id < b.id
                   AND a.source != b.source
                   AND ABS(
-                    EXTRACT(EPOCH FROM (a.started_at::timestamptz - b.started_at::timestamptz)) / 60.0
+                    EXTRACT(EPOCH FROM (a.started_at - b.started_at)) / 60.0
                   ) <= ${MATCH_WINDOW_MINUTES}
     JOIN sports sa ON sa.id = a.sport_id
     JOIN sports sb ON sb.id = b.sport_id
@@ -96,7 +96,7 @@ export async function findDuplicateCandidates(
       AND a.status = 'visible'
       AND b.status = 'visible'
       ${recent
-        ? sql`AND GREATEST(a.started_at, b.started_at)::timestamptz >= NOW() - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'`
+        ? sql`AND GREATEST(a.started_at, b.started_at) >= NOW() - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'`
         : sql``}
       AND NOT EXISTS (
         SELECT 1 FROM event_duplicate_denylist d
