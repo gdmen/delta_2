@@ -172,16 +172,6 @@ The handler comment (`src/app/api/import/route.ts:945-948`) already acknowledges
 **Effort:** XS (~10min CC).
 **Source:** Surfaced 2026-05-03 in the PR3 outside-agent review.
 
-## P3: Constrain `expires_at` columns to timestamptz (or CHECK on format)
-**What:** `invite_codes.expires_at`, `oauth_states.expires_at`, and friends are stored as TEXT (matching the rest of Delta's "ISO-string-in-text" convention). The atomic invite-claim does a lexicographic string compare on these: `expires_at IS NULL OR expires_at > now-iso`. That works correctly for full ISO-8601 timestamps (`YYYY-MM-DDTHH:mm:ss.sssZ`) because they sort lexicographically AND chronologically. It breaks if a date-only string ever lands in the column — `'2026-12-31'` sorts as "later than" `'2026-05-10T14:30:00.000Z'` because `T < 1` lexicographically.
-**Why:** Defense-in-depth gap, not exploitable today — every write path goes through `new Date(...).toISOString()` which always emits the full ISO-with-T format. But the column type doesn't enforce that. A future code path that writes `'2026-12-31'` (or any non-T format) would silently break the expiry check.
-**Fix sketch:** Two options:
-  - **timestamptz migration** — convert the columns. Postgres `ALTER COLUMN expires_at TYPE timestamptz USING expires_at::timestamptz` works if every existing row is parseable; needs a sentinel-check on prod data before running.
-  - **CHECK constraint** — add `CHECK (expires_at IS NULL OR expires_at ~ '^\d{4}-\d{2}-\d{2}T')`. Smaller migration, keeps the text-storage convention, blocks future divergent writes.
-**Effort:** XS (~15 min CC for the CHECK; ~30 min for timestamptz with a pre-flight sentinel).
-**When:** Bundle with the next migration that touches these tables, or if a date-only string is ever observed in the column.
-**Source:** Surfaced 2026-05-10 during the multi-user PR2 adversarial security review (MEDIUM-2 finding). Skipped in the immediate fix-cluster because no observed exploit and all current write paths go through `.toISOString()`.
-
 ## P3: Enforce singleton owner via partial unique index
 **What:** `users.is_owner BOOLEAN` has no unique constraint. Today the bootstrap script (`scripts/admin-bootstrap-owner.ts`) sets `isOwner: true` on a single row, but with `--force` against a non-bootstrap user (or any direct DB write), you can end up with two rows where `is_owner = true`. Schema and docs both promise singleton; nothing enforces it.
 **Why:** Practical impact at this scale is small — both owners would see `/preferences/invites` and could mint codes; `createdByUserId` filtering on DELETE prevents one owner from revoking another's codes; nothing else breaks. Surfaces as "the docs say singleton but two people are admins now," which is a quiet drift bug if `admin-bootstrap-owner.ts` is ever run twice. Closing the loop matters more once the user count grows past Gary's single-instance EC2 friends-only deploy.
