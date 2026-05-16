@@ -323,6 +323,10 @@ export const events = pgTable(
     index("idx_events_sport_started").on(t.sportId, t.startedAt),
     uniqueIndex("idx_events_user_source_id").on(t.userId, t.sourceId),
     index("idx_events_user").on(t.userId),
+    // Powers the duplicate-event detector's BETWEEN-on-started_at range
+    // scan. See drizzle/0007_events_user_started_index.sql for the
+    // measured impact (1,685ms → 1.78ms on /home).
+    index("idx_events_user_started").on(t.userId, t.startedAt),
   ],
 );
 

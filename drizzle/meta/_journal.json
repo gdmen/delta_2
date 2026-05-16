@@ -50,6 +50,13 @@
       "when": 1779408000000,
       "tag": "0006_text_to_timestamptz_bulk",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779494400000,
+      "tag": "0007_events_user_started_index",
+      "breakpoints": true
     }
   ]
 }

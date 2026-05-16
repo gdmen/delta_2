@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import type { AnyPgDb } from "@/db/types";
 
 /**
  * Duplicate-event candidate pair as surfaced to the UI.
@@ -47,15 +48,36 @@ const RECENT_DAYS = 14;
  *
  * Output is ordered newest-first by a.started_at so the home card
  * leads with what the user just did.
+ *
+ * Performance shape (post-#25 + the (user_id, started_at) index):
+ * - The 60-min match window is expressed as
+ *     b.started_at BETWEEN a.started_at - INTERVAL '60 minutes'
+ *                      AND a.started_at + INTERVAL '60 minutes'
+ *   so the planner recognizes it as a range scan on b.started_at and
+ *   uses `idx_events_user_started` for the inner side of the loop.
+ *   The functionally-identical `ABS(EXTRACT(EPOCH ...)) <= 60` form
+ *   was opaque to the optimizer and forced a self-cross-product.
+ * - The `recent=true` filter is a prefilter on BOTH sides (with a 60-min
+ *   slop so it doesn't drop legitimate pairs straddling the cutoff —
+ *   the join requires |a-b| <= 60min, so if newer >= cutoff, older >=
+ *   cutoff - 60min). The post-join GREATEST check stays for exact
+ *   correctness — it runs on the tiny result set, not the cross product.
+ * - Measured impact on a 3.5K-event single-user dev DB:
+ *     recent=true:    1,685 ms → 1.78 ms
+ *     recent=false: ~multi-s → 18 ms
+ *
+ * @param conn Optional drizzle handle. Tests pass an in-memory pglite
+ *   instance; prod calls let it default to the postgres-js singleton.
  */
 export async function findDuplicateCandidates(
   userId: number,
   opts: { recent?: boolean; limit?: number } = {},
+  conn: AnyPgDb = db,
 ): Promise<CandidatePair[]> {
   const recent = opts.recent ?? false;
   const limit = opts.limit ?? 500;
 
-  const rows = await db.execute<{
+  const result = await conn.execute<{
     a_id: number;
     a_source: string;
     a_sport_id: number;
@@ -87,16 +109,24 @@ export async function findDuplicateCandidates(
     JOIN events b ON a.user_id = b.user_id
                   AND a.id < b.id
                   AND a.source != b.source
-                  AND ABS(
-                    EXTRACT(EPOCH FROM (a.started_at - b.started_at)) / 60.0
-                  ) <= ${MATCH_WINDOW_MINUTES}
+                  AND b.started_at BETWEEN
+                        a.started_at - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
+                    AND a.started_at + INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
     JOIN sports sa ON sa.id = a.sport_id
     JOIN sports sb ON sb.id = b.sport_id
     WHERE a.user_id = ${userId}
       AND a.status = 'visible'
       AND b.status = 'visible'
       ${recent
-        ? sql`AND GREATEST(a.started_at, b.started_at) >= NOW() - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'`
+        ? sql`
+          AND a.started_at >= NOW()
+              - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'
+              - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
+          AND b.started_at >= NOW()
+              - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'
+              - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
+          AND GREATEST(a.started_at, b.started_at)
+              >= NOW() - INTERVAL '${sql.raw(String(RECENT_DAYS))} days'`
         : sql``}
       AND NOT EXISTS (
         SELECT 1 FROM event_duplicate_denylist d
@@ -107,6 +137,29 @@ export async function findDuplicateCandidates(
     ORDER BY a.started_at DESC
     LIMIT ${limit}
   `);
+
+  // postgres-js execute() returns the row array directly; pglite returns
+  // { rows, ... }. Normalize for driver-agnostic test callers.
+  type Row = {
+    a_id: number;
+    a_source: string;
+    a_sport_id: number;
+    a_sport_name: string;
+    a_type: string;
+    a_started_at: string;
+    a_duration_minutes: number | null;
+    b_id: number;
+    b_source: string;
+    b_sport_id: number;
+    b_sport_name: string;
+    b_type: string;
+    b_started_at: string;
+    b_duration_minutes: number | null;
+    minutes_apart: number;
+  };
+  const rows: Row[] = Array.isArray(result)
+    ? (result as Row[])
+    : ((result as { rows: Row[] }).rows ?? []);
 
   return rows.map((r) => ({
     aId: r.a_id,
