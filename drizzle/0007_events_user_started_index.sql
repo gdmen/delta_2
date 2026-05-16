@@ -1,0 +1,25 @@
+-- (user_id, started_at) composite index on events (issue #24 follow-up).
+--
+-- Powers the duplicate-event detector at src/lib/duplicates/detector.ts.
+-- Before #25, the column was text and a btree on raw started_at would
+-- have been lexicographically wrong across mixed-offset writes (Strava
+-- 'Z' vs manual local-offset etc). With #25 landed, started_at is a
+-- real timestamptz, so a plain composite btree gives correct temporal
+-- ordering AND lets the planner turn the join's 60-min window into a
+-- range scan.
+--
+-- Measured impact on a 3.5K-event single-user dev DB:
+--   /home (recent=true):     1,685 ms → 1.78 ms
+--   /data/duplicates (full):     ~2 s →   18 ms
+--
+-- The companion change in src/lib/duplicates/detector.ts rewrites
+--   ABS(EXTRACT(EPOCH FROM (a.started_at - b.started_at))/60) <= 60
+-- as
+--   b.started_at BETWEEN a.started_at - INTERVAL '60 minutes'
+--                    AND a.started_at + INTERVAL '60 minutes'
+-- so the planner recognizes the range and uses this index.
+--
+-- IF NOT EXISTS is paranoia — if a future drizzle-kit pull resurrects
+-- this index from schema.ts the migration shouldn't fail.
+
+CREATE INDEX IF NOT EXISTS idx_events_user_started ON events (user_id, started_at);
