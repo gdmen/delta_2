@@ -50,6 +50,7 @@ export function SelectableDataTable<T, K>({
   rowHrefAriaLabel,
   renderMergeModal,
   onBulkDelete,
+  renderBulkAction,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -69,6 +70,17 @@ export function SelectableDataTable<T, K>({
    * can show successes / errors. The table refreshes the route on
    * success so the deleted rows drop out. */
   onBulkDelete?: (selectedRows: T[]) => Promise<BulkDeleteResult<T>>;
+  /** Extra per-table bulk-action button (and any modal/popover it owns)
+   * rendered into the selection toolbar to the left of the delete button.
+   * Caller owns the button + modal; the table passes the current
+   * `selectedRows` and a `clearSelection` callback so the caller can
+   * dismiss the selection state after the action succeeds. The router
+   * refresh is the caller's responsibility — the table doesn't know what
+   * the action did to the underlying data. */
+  renderBulkAction?: (args: {
+    selectedRows: T[];
+    clearSelection: () => void;
+  }) => ReactNode;
 }) {
   const router = useRouter();
   const sortBys = columns.map((c) => c.sortBy);
@@ -106,7 +118,7 @@ export function SelectableDataTable<T, K>({
 
   return (
     <div>
-      {(filterTextFn || renderMergeModal || onBulkDelete) && (
+      {(filterTextFn || renderMergeModal || onBulkDelete || renderBulkAction) && (
         <div className="mb-3 flex items-center gap-3 flex-wrap">
           {filterTextFn && (
             <input
@@ -117,7 +129,7 @@ export function SelectableDataTable<T, K>({
               className="w-full max-w-xs px-3 py-1.5 border border-border rounded text-[0.875rem]"
             />
           )}
-          {(renderMergeModal || onBulkDelete) && s.selected.size > 0 && (
+          {(renderMergeModal || onBulkDelete || renderBulkAction) && s.selected.size > 0 && (
             <>
               {renderMergeModal && (
                 <button
@@ -129,6 +141,11 @@ export function SelectableDataTable<T, K>({
                   Merge {s.selected.size} selected…
                 </button>
               )}
+              {renderBulkAction &&
+                renderBulkAction({
+                  selectedRows: s.selectedRows,
+                  clearSelection: s.clearSelection,
+                })}
               {onBulkDelete && (
                 <button
                   type="button"

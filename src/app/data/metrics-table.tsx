@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { MergeModal } from "./merge-modal";
+import { BulkReclassifyFrequency } from "./bulk-reclassify-frequency";
 import { formatShort } from "@/lib/format";
 import {
   SelectableDataTable,
@@ -75,6 +76,12 @@ export function MetricsTable({ rows }: { rows: MetricTypeRow[] }) {
             count: r.count,
           }))}
           onClose={onClose}
+        />
+      )}
+      renderBulkAction={({ selectedRows, clearSelection }) => (
+        <BulkReclassifyFrequency
+          selectedIds={selectedRows.map((r) => r.id)}
+          clearSelection={clearSelection}
         />
       )}
       onBulkDelete={async (selectedRows): Promise<BulkDeleteResult<MetricTypeRow>> =>
