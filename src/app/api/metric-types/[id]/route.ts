@@ -18,14 +18,29 @@ interface UpdateMetricTypeBody {
   target?: number | null;
   /** Direction of the target. */
   higherIsBetter?: boolean;
+  /**
+   * Cadence of the metric. "daily" / "weekly" → today's still-mid-flight
+   * value is hidden from charts (it would mislead the trend before the
+   * day/week is done). "occasional" → today's reading IS the complete
+   * reading (DEXA scan, point-in-time body weight) and shows immediately.
+   *
+   * The auto-create path in `src/lib/ingest/metric-resolver.ts` defaults
+   * every orphan to "daily" because that's correct for the high-volume
+   * importers (Apple Health steps, Strava). Point-in-time metrics need
+   * to be reclassified by hand here.
+   */
+  frequencyHint?: "daily" | "weekly" | "occasional";
 }
+
+const VALID_FREQUENCY_HINTS = ["daily", "weekly", "occasional"] as const;
 
 /**
  * PATCH /api/metric-types/:id
  *
- * Edit the metric_type row's target + direction. The metric detail page
- * uses this; widgets read both fields automatically via metric-history's
- * `loadType()` so saving here is the single source of truth.
+ * Edit the metric_type row's target + direction + frequency hint. The
+ * metric detail page uses this; widgets read all three fields via
+ * metric-history's `loadType()` so saving here is the single source of
+ * truth — no per-widget config to keep in sync.
  */
 export async function PATCH(
   request: NextRequest,
@@ -59,6 +74,20 @@ export async function PATCH(
       return NextResponse.json({ error: "higherIsBetter must be a boolean" }, { status: 400 });
     }
     updates.higherIsBetter = body.higherIsBetter;
+  }
+  if (body.frequencyHint !== undefined) {
+    if (
+      typeof body.frequencyHint !== "string" ||
+      !(VALID_FREQUENCY_HINTS as readonly string[]).includes(body.frequencyHint)
+    ) {
+      return NextResponse.json(
+        {
+          error: `frequencyHint must be one of: ${VALID_FREQUENCY_HINTS.join(", ")}`,
+        },
+        { status: 400 },
+      );
+    }
+    updates.frequencyHint = body.frequencyHint;
   }
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
