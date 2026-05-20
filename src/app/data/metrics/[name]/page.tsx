@@ -13,6 +13,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 import { MetricTargetEditor } from "./target-editor";
+import { MetricFrequencyEditor } from "./frequency-editor";
 import { DeleteMetricTypeButton } from "./delete-button";
 import { PaginationControls } from "@/components/pagination-controls";
 import { describeComputedSource, matchComputed } from "@/lib/computed-metrics";
@@ -273,6 +274,12 @@ export default async function MetricHistoryPage({
         initialTarget={type.target}
         initialHigherIsBetter={type.higherIsBetter}
       />
+      {!computed && (
+        <MetricFrequencyEditor
+          metricTypeId={type.id}
+          initialFrequencyHint={type.frequencyHint}
+        />
+      )}
       {!computed && (
         <AliasesSection initialAliases={aliases.map((a) => a.alias)} />
       )}
