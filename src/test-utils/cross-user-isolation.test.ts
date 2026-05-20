@@ -437,6 +437,42 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
     expect(stillThere).toHaveLength(1);
   });
 
+  it("/api/metric-types/bulk-frequency (POST) refuses Bob for Alice's metric_type", async () => {
+    // Bulk endpoint: Bob POSTs Alice's id, the UPDATE's per-user
+    // scope filters it out → result is { updated: 0, skipped: [aliceId] }.
+    // Alice's row stays at its original frequency_hint.
+    asBob();
+    const route = await import("@/app/api/metric-types/bulk-frequency/route");
+    const res = await route.POST(
+      req("http://test/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: [fx.aliceMetricTypeId],
+          frequencyHint: "weekly",
+        }),
+      }),
+    );
+    expect(NON_LEAKY_STATUSES.has(res.status)).toBe(true);
+    if (res.status === 200) {
+      const body = await res.json();
+      expect(body.updated).toBe(0);
+      expect(body.skipped).toContain(fx.aliceMetricTypeId);
+    }
+
+    // Alice's row is unchanged — frequencyHint should still be the seed default.
+    asAlice();
+    const db = ctx.getDb();
+    const aliceRow = await db
+      .select({ freq: metricTypes.frequencyHint })
+      .from(metricTypes)
+      .where(eq(metricTypes.id, fx.aliceMetricTypeId));
+    expect(aliceRow).toHaveLength(1);
+    // Default is "daily" per the schema; Bob's request asked for "weekly"
+    // which should NOT have taken effect.
+    expect(aliceRow[0].freq).toBe("daily");
+  });
+
   it("/api/import-sources/[id] (PATCH, DELETE) refuses Bob for Alice's source", async () => {
     asBob();
     const route = await import("@/app/api/import-sources/[id]/route");
