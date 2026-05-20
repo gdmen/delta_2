@@ -82,6 +82,41 @@ export function useTableSelection<T, K>(
     setSelected(new Set());
   }
 
+  /**
+   * Tri-state for the header-row checkbox: "none of the filtered rows
+   * selected" / "all of them" / "some but not all" (indeterminate). The
+   * comparison is against `filtered`, not `rows` — when the user has a
+   * search filter active, "select all" should mean "all visible," not
+   * "all rows in the table." That matches user intent for the common
+   * case (filter to `bodyspec_dexa:`, then select all to bulk-edit) and
+   * keeps the hidden rows from being silently swept into the action.
+   */
+  const filteredAllSelected =
+    filtered.length > 0 && filtered.every((r) => selected.has(getKey(r)));
+  const filteredSomeSelected =
+    !filteredAllSelected && filtered.some((r) => selected.has(getKey(r)));
+
+  /** Add every currently-filtered row to the selection set. Keeps any
+   * already-selected rows that happen to be hidden by the current
+   * filter (so toggling the filter doesn't lose your selection). */
+  function selectAllFiltered() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of filtered) next.add(getKey(r));
+      return next;
+    });
+  }
+
+  /** Remove every currently-filtered row from the selection set. Mirror
+   * of `selectAllFiltered` — preserves selections outside the filter. */
+  function clearFilteredSelection() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of filtered) next.delete(getKey(r));
+      return next;
+    });
+  }
+
   // Bulk-delete progress state. `busy` blocks repeated clicks.
   // `errorMsg` surfaces a one-line summary for the user; per-row errors
   // are returned by the caller via the result object.
@@ -108,6 +143,10 @@ export function useTableSelection<T, K>(
     toggle,
     clearSelection,
     selectedRows,
+    filteredAllSelected,
+    filteredSomeSelected,
+    selectAllFiltered,
+    clearFilteredSelection,
     mergeOpen,
     openMerge: () => setMergeOpen(true),
     closeMergeAndClear: () => {
