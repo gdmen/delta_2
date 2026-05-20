@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTableSelection } from "@/components/use-table-selection";
@@ -86,6 +86,17 @@ export function SelectableDataTable<T, K>({
   const sortBys = columns.map((c) => c.sortBy);
   const s = useTableSelection(rows, getKey, filterTextFn, sortBys);
   const colCount = columns.length + 1; // +1 for checkbox column
+
+  // Native `<input type="checkbox" indeterminate>` isn't an HTML attribute —
+  // it's only settable via the DOM property. Manage it via ref so the
+  // header checkbox shows the standard "some-but-not-all" dash glyph when
+  // the filtered set is partially selected.
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = s.filteredSomeSelected;
+    }
+  }, [s.filteredSomeSelected]);
 
   async function handleBulkDelete() {
     if (!onBulkDelete || s.selectedRows.length === 0 || s.busy) return;
@@ -181,7 +192,27 @@ export function SelectableDataTable<T, K>({
         <table className="w-full text-[0.8125rem]">
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
             <tr>
-              <th className="w-8 px-2 py-2" />
+              <th className="w-8 px-2 py-2 text-center">
+                <input
+                  ref={headerCheckboxRef}
+                  type="checkbox"
+                  checked={s.filteredAllSelected}
+                  onChange={() => {
+                    // Tri-state click semantics:
+                    // - all selected → clear (only the filtered ones)
+                    // - some selected (indeterminate) → select all filtered
+                    // - none selected → select all filtered
+                    if (s.filteredAllSelected) s.clearFilteredSelection();
+                    else s.selectAllFiltered();
+                  }}
+                  disabled={s.filtered.length === 0 || s.busy}
+                  aria-label={
+                    s.filteredAllSelected
+                      ? "Clear selection of all visible rows"
+                      : "Select all visible rows"
+                  }
+                />
+              </th>
               {columns.map((col, i) => {
                 const sortable = !!col.sortBy;
                 const active = s.sort?.colIdx === i;
