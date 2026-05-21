@@ -12,6 +12,8 @@ import {
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
+import { backfillScheduledDoses, MAX_BACKFILL_DAYS } from "@/lib/scheduled-doses";
+import { loadUserTimezone } from "@/lib/app-settings";
 
 interface UpdateMetricTypeBody {
   /** Target value. Pass null to clear (== "no target"). */
@@ -30,9 +32,27 @@ interface UpdateMetricTypeBody {
    * to be reclassified by hand here.
    */
   frequencyHint?: "daily" | "weekly" | "occasional";
+  /**
+   * Scheduled-doses opt-in. Non-null = the lazy materializer stamps
+   * one metrics row per local-calendar day with `value =
+   * autoLogDose`, `source = 'scheduled'`. NULL = stop scheduling
+   * (existing historical rows are preserved). See issue #30.
+   */
+  autoLogDose?: number | null;
+  /**
+   * One-shot backfill date when turning auto-log on. YYYY-MM-DD,
+   * inclusive. If set with `autoLogDose != null` and `< today_local`,
+   * the handler runs `insertScheduledDoseIfMissing` once per local
+   * day from this date through today. Idempotent: re-submitting the
+   * same `autoLogSince` is a no-op (unique index catches dupes).
+   *
+   * Capped server-side at ~400 days back. Reject if > today.
+   */
+  autoLogSince?: string;
 }
 
 const VALID_FREQUENCY_HINTS = ["daily", "weekly", "occasional"] as const;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * PATCH /api/metric-types/:id
@@ -89,6 +109,68 @@ export async function PATCH(
     }
     updates.frequencyHint = body.frequencyHint;
   }
+  if (body.autoLogDose !== undefined) {
+    if (body.autoLogDose !== null) {
+      if (typeof body.autoLogDose !== "number" || !Number.isFinite(body.autoLogDose)) {
+        return NextResponse.json(
+          { error: "autoLogDose must be a finite number or null" },
+          { status: 400 },
+        );
+      }
+      if (body.autoLogDose <= 0) {
+        return NextResponse.json(
+          { error: "autoLogDose must be > 0 (use null to clear the schedule)" },
+          { status: 400 },
+        );
+      }
+    }
+    updates.autoLogDose = body.autoLogDose;
+  }
+
+  // Validate `autoLogSince` before doing any writes — if it's bad we
+  // want a 400 with no state change. Defer the actual backfill to
+  // after the UPDATE so the schedule row reflects the new dose first.
+  let backfillSince: string | null = null;
+  if (body.autoLogSince !== undefined) {
+    if (body.autoLogDose === undefined || body.autoLogDose === null) {
+      return NextResponse.json(
+        { error: "autoLogSince requires autoLogDose to be set in the same request" },
+        { status: 400 },
+      );
+    }
+    if (typeof body.autoLogSince !== "string" || !ISO_DATE_RE.test(body.autoLogSince)) {
+      return NextResponse.json(
+        { error: "autoLogSince must be YYYY-MM-DD" },
+        { status: 400 },
+      );
+    }
+    const tz = await loadUserTimezone(user.id);
+    const localToday = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    if (body.autoLogSince > localToday) {
+      return NextResponse.json(
+        { error: "autoLogSince cannot be in the future" },
+        { status: 400 },
+      );
+    }
+    const startMs = Date.parse(`${body.autoLogSince}T00:00:00Z`);
+    const todayMs = Date.parse(`${localToday}T00:00:00Z`);
+    const days = Math.floor((todayMs - startMs) / (24 * 3600 * 1000)) + 1;
+    if (days > MAX_BACKFILL_DAYS) {
+      return NextResponse.json(
+        {
+          error: `autoLogSince too far in the past (${days} days exceeds cap of ${MAX_BACKFILL_DAYS})`,
+        },
+        { status: 400 },
+      );
+    }
+    backfillSince = body.autoLogSince;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
@@ -101,7 +183,22 @@ export async function PATCH(
   if (result.length === 0) {
     return NextResponse.json({ error: "metric_type not found" }, { status: 404 });
   }
-  return NextResponse.json({ ok: true });
+
+  // Backfill is best-effort — if it fails partway, the schedule is
+  // still saved and the daily materializer will fill in today's row
+  // on the next request. Report inserted count so the UI can show
+  // "Backfilled 16 doses from May 6" feedback.
+  let backfilled: { inserted: number; days: number } | null = null;
+  if (backfillSince !== null && body.autoLogDose !== null && body.autoLogDose !== undefined) {
+    backfilled = await backfillScheduledDoses(
+      user.id,
+      id,
+      body.autoLogDose,
+      backfillSince,
+    );
+  }
+
+  return NextResponse.json({ ok: true, backfilled });
 }
 
 /**

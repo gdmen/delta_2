@@ -8,6 +8,7 @@ import { loadAllDashboards } from "@/lib/dashboards/load";
 import { auth } from "@/lib/auth/config";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import { ensureScheduledDoses } from "@/lib/scheduled-doses";
 
 export const metadata: Metadata = {
   title: "Delta",
@@ -75,6 +76,20 @@ export default async function RootLayout({
         .limit(1)
     : [];
   const sidebarUser = userRows[0] ?? { displayName: "User", isOwner: false };
+
+  // Lazy-materialize today's scheduled doses (medications, etc.) for
+  // this user. Cached per-process; after the first hit of the local
+  // calendar day, this short-circuits to a Map lookup. Issue #30.
+  // Best-effort: a failure here shouldn't block the page render, so
+  // swallow + log instead of throwing.
+  if (Number.isFinite(userId)) {
+    try {
+      await ensureScheduledDoses(userId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("ensureScheduledDoses failed", err);
+    }
+  }
 
   return (
     <html lang="en" className="h-full antialiased">

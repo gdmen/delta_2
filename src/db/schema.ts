@@ -222,10 +222,39 @@ export const metricTypes = pgTable(
      * on metric_block headlines.
      */
     higherIsBetter: boolean("higher_is_better").notNull().default(true),
+    /**
+     * If non-null, the lazy "scheduled doses" materializer stamps one
+     * metrics row per local-calendar day with `value = auto_log_dose`,
+     * `source = 'scheduled'`, `source_id = 'schedule:<typeId>:<date>'`.
+     * Used for medications + other daily-take-this metrics. Issue #30.
+     */
+    autoLogDose: doublePrecision("auto_log_dose"),
     createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [uniqueIndex("metric_types_user_name_uniq").on(t.userId, t.name)],
 );
+
+/**
+ * Tombstones for "user deleted today's auto-logged dose row." Keyed on
+ * (metric_type_id, local_date) — no FK to a schedule row because the
+ * schedule lives on metric_types itself via `autoLogDose`. The
+ * materializer checks both "is there already a metric row for this
+ * slot?" AND "is there a skip row?" before inserting. Lets the user
+ * delete an auto-row to mean "I missed this day" without it being
+ * re-created on the next request. Issue #30.
+ */
+export const metricScheduleSkips = pgTable("metric_schedule_skips", {
+  metricTypeId: integer("metric_type_id")
+    .notNull()
+    .references(() => metricTypes.id, { onDelete: "cascade" }),
+  /**
+   * Local-calendar date the user skipped (YYYY-MM-DD). Local-not-UTC
+   * because the user thinks "I missed Wednesday," not "I missed
+   * 00:00-00:00 UTC."
+   */
+  skippedDate: date("skipped_date", { mode: "string" }).notNull(),
+  createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
+}, (t) => [primaryKey({ columns: [t.metricTypeId, t.skippedDate] })]);
 
 /**
  * Routes a raw import name onto a canonical metric_types row. The `alias` key
