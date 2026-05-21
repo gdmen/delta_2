@@ -320,11 +320,26 @@ export default async function MetricHistoryPage({
         />
       )}
       {!computed && (
-        // key forces a remount when paginating — the editor uses useState
-        // to host optimistic edits, so without a key change it keeps showing
-        // page 1's rows after navigation.
+        // key forces a remount on three triggers:
+        //   - pagination (currentPage) — without it, page-1's rows stick
+        //     after navigation. The editor uses useState to host
+        //     optimistic edits, so prop changes alone don't update it.
+        //   - row-count change (total) — needed when an external
+        //     operation grows the table while the user is on this page:
+        //     the inline "+ Add" form's `router.refresh()`, the
+        //     "Auto-log daily" backfill landing N new rows, a Strava
+        //     sync, etc. Without `total` in the key, the editor's
+        //     local `rows` state shows stale (empty) data until a
+        //     hard page reload.
+        //   - metric-type id (type.id) — defensive; the parent route
+        //     already remounts on `name` change, but including this
+        //     keeps the key semantically complete.
+        // Trade-off: in-flight optimistic edits (mid-row-edit before
+        // server confirms) get dropped when `total` changes. In a
+        // single-user app the only realistic trigger is "user did two
+        // things in two tabs" — acceptable.
         <MetricHistoryEditor
-          key={`${type.id}-${currentPage}`}
+          key={`${type.id}-${currentPage}-${total}`}
           metricTypeId={type.id}
           unit={type.unit}
           initialRows={rows}
