@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { metrics } from "@/db/schema";
+import { metrics, metricScheduleSkips } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
@@ -86,10 +86,16 @@ export async function DELETE(
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   // Same pre-read shape as PATCH — we need the cell coordinates to
-  // recompute after the row is gone. Idempotent: if the row was already
-  // gone, skip the recompute (nothing to invalidate).
+  // recompute after the row is gone. Pulls source + sourceId too so we
+  // can detect "this was a scheduled auto-log" and write a skip
+  // tombstone instead of letting the next materializer recreate it.
   const before = await db
-    .select({ recordedAt: metrics.recordedAt, metricTypeId: metrics.metricTypeId })
+    .select({
+      recordedAt: metrics.recordedAt,
+      metricTypeId: metrics.metricTypeId,
+      source: metrics.source,
+      sourceId: metrics.sourceId,
+    })
     .from(metrics)
     .where(and(userScope(user.id).metrics, eq(metrics.id, id)))
     .limit(1);
@@ -99,7 +105,27 @@ export async function DELETE(
     .where(and(userScope(user.id).metrics, eq(metrics.id, id)));
 
   if (before.length > 0) {
-    await recomputeDailySummary(user.id, before[0].metricTypeId, before[0].recordedAt);
+    const row = before[0];
+
+    // Scheduled rows have `source_id = 'schedule:<typeId>:<localDate>'`.
+    // Parse the localDate out and tombstone (typeId, date) so the lazy
+    // materializer doesn't re-create the row on the next request.
+    // ON CONFLICT DO NOTHING keeps repeated deletes harmless.
+    if (row.source === "scheduled" && row.sourceId) {
+      const m = row.sourceId.match(/^schedule:(\d+):(\d{4}-\d{2}-\d{2})$/);
+      if (m) {
+        const typeId = parseInt(m[1], 10);
+        const localDate = m[2];
+        if (typeId === row.metricTypeId) {
+          await db
+            .insert(metricScheduleSkips)
+            .values({ metricTypeId: typeId, skippedDate: localDate })
+            .onConflictDoNothing();
+        }
+      }
+    }
+
+    await recomputeDailySummary(user.id, row.metricTypeId, row.recordedAt);
   }
 
   return NextResponse.json({ ok: true });

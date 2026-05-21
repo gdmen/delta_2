@@ -14,6 +14,7 @@ import { MetricHistoryEditor } from "./editor";
 import { AliasesSection } from "./aliases-section";
 import { MetricTargetEditor } from "./target-editor";
 import { MetricFrequencyEditor } from "./frequency-editor";
+import { AutoLogEditor } from "./auto-log-editor";
 import { DeleteMetricTypeButton } from "./delete-button";
 import { PaginationControls } from "@/components/pagination-controls";
 import { describeComputedSource, matchComputed } from "@/lib/computed-metrics";
@@ -219,6 +220,24 @@ export default async function MetricHistoryPage({
     )
     .orderBy(asc(metricTypeAliases.alias));
 
+  // For the AutoLogEditor's "since YYYY-MM-DD" display: the earliest
+  // scheduled row's UTC date. Good enough for the label (PT vs UTC
+  // boundaries shift by at most one day for a 12:00-UTC stamp).
+  // Cheap: scheduled rows for one metric are tiny — handful at most.
+  const sinceRow = await db
+    .select({
+      since: sql<string | null>`min(to_char((${metrics.recordedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'))`,
+    })
+    .from(metrics)
+    .where(
+      and(
+        userScope(user.id).metrics,
+        eq(metrics.metricTypeId, type.id),
+        eq(metrics.source, "scheduled"),
+      ),
+    );
+  const scheduledSince = sinceRow[0]?.since ?? null;
+
   const linkWithPage = (p: number) => {
     const base = `/data/metrics/${encodeURIComponent(decoded)}`;
     return p === 1 ? base : `${base}?page=${p}`;
@@ -278,6 +297,15 @@ export default async function MetricHistoryPage({
         <MetricFrequencyEditor
           metricTypeId={type.id}
           initialFrequencyHint={type.frequencyHint}
+        />
+      )}
+      {!computed && (
+        <AutoLogEditor
+          metricTypeId={type.id}
+          unit={type.unit}
+          initialDose={type.autoLogDose}
+          initialSince={scheduledSince}
+          defaultDose={type.target}
         />
       )}
       {!computed && (

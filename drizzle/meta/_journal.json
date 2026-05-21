@@ -57,6 +57,13 @@
       "when": 1779494400000,
       "tag": "0007_events_user_started_index",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779667200000,
+      "tag": "0008_metric_schedules",
+      "breakpoints": true
     }
   ]
 }
