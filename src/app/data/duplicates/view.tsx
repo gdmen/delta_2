@@ -36,6 +36,12 @@ export function DuplicatesView({
   const [mergeTarget, setMergeTarget] = useState<CandidatePair | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [individualRunning, setIndividualRunning] = useState<string | null>(null);
+  // Bulk merge is single-group only (multiple selected groups would each
+  // need their own composite sport, so they stay dismiss-only). When one
+  // group is selected, this dialog picks the composite sport once.
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeSportId, setMergeSportId] = useState<number | null>(null);
+  const [bulkMergeRunning, setBulkMergeRunning] = useState(false);
 
   // Multi-select state for the top section, keyed by the stable group key
   // (all fields come off the canonicalized group object). The selection
@@ -75,6 +81,43 @@ export function DuplicatesView({
     router.refresh();
   }
 
+  function openMergeDialog() {
+    const g = selectedGroups[0];
+    if (!g) return;
+    // Default to the clean, non-source-prefixed sport name if either side
+    // has one (mirrors the per-pair modal's pickDefaultSport).
+    const defaultSport = !g.sportNameA.includes(":")
+      ? g.sportIdA
+      : !g.sportNameB.includes(":")
+        ? g.sportIdB
+        : g.sportIdA;
+    setMergeSportId(defaultSport);
+    setMergeDialogOpen(true);
+  }
+
+  async function runBulkMerge() {
+    const g = selectedGroups[0];
+    if (!g || mergeSportId === null || bulkMergeRunning) return;
+    setBulkMergeRunning(true);
+    await fetch("/api/events/duplicates/bulk-merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        group: {
+          sourceA: g.sourceA,
+          sportIdA: g.sportIdA,
+          sourceB: g.sourceB,
+          sportIdB: g.sportIdB,
+        },
+        sportId: mergeSportId,
+      }),
+    });
+    setBulkMergeRunning(false);
+    setMergeDialogOpen(false);
+    sel.clearSelection();
+    router.refresh();
+  }
+
   async function dismissOne(p: CandidatePair) {
     const key = `${p.aId}-${p.bId}`;
     setIndividualRunning(key);
@@ -104,16 +147,30 @@ export function DuplicatesView({
             Bulk dismiss by source/sport pair
           </h2>
           {selectedGroups.length > 0 && (
-            <button
-              type="button"
-              onClick={dismissSelected}
-              disabled={bulkRunning}
-              className="px-3 py-1 text-[0.75rem] font-medium border border-accent-red/40 text-accent-red rounded hover:bg-accent-red/10 disabled:opacity-50 whitespace-nowrap"
-            >
-              {bulkRunning
-                ? "Dismissing…"
-                : `Dismiss ${selectedGroups.length} selected`}
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Bulk merge is single-group only; with 2+ groups selected
+                  the only action is dismiss. */}
+              {selectedGroups.length === 1 && (
+                <button
+                  type="button"
+                  onClick={openMergeDialog}
+                  disabled={bulkRunning || bulkMergeRunning}
+                  className="px-3 py-1 text-[0.75rem] font-medium bg-foreground text-background rounded hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                >
+                  Merge {selectedPairCount} pair{selectedPairCount === 1 ? "" : "s"}…
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={dismissSelected}
+                disabled={bulkRunning || bulkMergeRunning}
+                className="px-3 py-1 text-[0.75rem] font-medium border border-accent-red/40 text-accent-red rounded hover:bg-accent-red/10 disabled:opacity-50 whitespace-nowrap"
+              >
+                {bulkRunning
+                  ? "Dismissing…"
+                  : `Dismiss ${selectedGroups.length} selected`}
+              </button>
+            </div>
           )}
         </div>
         <div className="space-y-2">
@@ -215,6 +272,63 @@ export function DuplicatesView({
           typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setMergeTarget(null)}
         />
+      )}
+
+      {mergeDialogOpen && selectedGroups.length === 1 && mergeSportId !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !bulkMergeRunning && setMergeDialogOpen(false)}
+        >
+          <div
+            className="bg-background border border-border rounded-lg max-w-sm w-full p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-[1rem] font-semibold">
+              Merge {selectedPairCount} pair{selectedPairCount === 1 ? "" : "s"}
+            </h2>
+            <p className="text-[0.8125rem] text-muted">
+              {selectedGroups[0].sourceA} {selectedGroups[0].sportNameA} +{" "}
+              {selectedGroups[0].sourceB} {selectedGroups[0].sportNameB}.
+              Overlapping recordings of one session are combined into a single
+              composite.
+            </p>
+            <div>
+              <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
+                Composite sport
+              </label>
+              <select
+                value={mergeSportId}
+                onChange={(e) => setMergeSportId(Number(e.target.value))}
+                disabled={bulkMergeRunning}
+                className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
+              >
+                {sportOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setMergeDialogOpen(false)}
+                disabled={bulkMergeRunning}
+                className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={runBulkMerge}
+                disabled={bulkMergeRunning}
+                className="px-3 py-1.5 text-[0.8125rem] bg-foreground text-background rounded hover:opacity-90 disabled:opacity-50"
+              >
+                {bulkMergeRunning ? "Merging…" : "Merge"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
