@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatShort } from "@/lib/format";
-import { computeRange, headerNextState } from "@/lib/selection";
+import { useRowSelection } from "@/components/use-row-selection";
+import { SelectAllCheckbox } from "@/components/select-all-checkbox";
+import { RowSelectCheckbox } from "@/components/row-select-checkbox";
 import {
   CompositeMergeModal,
   type MergeMember,
@@ -46,81 +48,24 @@ export function EventsTable({
   typeSuggestionsBySportId?: Record<number, string[]>;
 }) {
   const router = useRouter();
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [modalOpen, setModalOpen] = useState(false);
-  // Anchor for shift-click range select (#37): the last row toggled
-  // WITHOUT shift. Stored by id so it survives re-sorts/pagination;
-  // resolved against the current visible-selectable order at click time.
-  const anchorRef = useRef<number | null>(null);
 
+  // Only `visible` rows are selectable; the shared selection machine is fed
+  // those ids in display order, so a shift range skips interleaved disabled
+  // (composite / hidden_by_composite) rows. Deriving the working set from
+  // the current `rows` also means ids that paginated/filtered out of view
+  // simply drop from the count and the merge payload.
   const selectableRows = rows.filter((r) => r.status === "visible");
-  const selectableIds = new Set(selectableRows.map((r) => r.id));
-  // Drop stale ids when filters/pagination change the row set out from
-  // under us, otherwise the action-bar count diverges from the visible
-  // checkmarks.
-  const cleanSelected = new Set(
-    [...selectedIds].filter((id) => selectableIds.has(id)),
-  );
+  const sel = useRowSelection(selectableRows.map((r) => r.id));
+  const selectedRows = rows.filter((r) => sel.isSelected(r.id));
 
-  const allSelectableChecked =
-    selectableRows.length > 0 && cleanSelected.size === selectableRows.length;
-  const someSelectableChecked = cleanSelected.size > 0 && !allSelectableChecked;
-
-  function toggle(id: number) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  /**
-   * Checkbox handler with shift-click range select (#37). Without shift
-   * (or no anchor yet) it's a single toggle that sets the anchor. With
-   * shift it fills the inclusive range from the anchor to this row over
-   * the SELECTABLE (visible) ids only — interleaved disabled rows are
-   * skipped — setting every key in the span to this row's RESULTING
-   * state (Behavior B: shift a checked box clears the range, an unchecked
-   * box selects it). The range accretes; anchor unchanged on a shift-click.
-   */
-  function toggleRange(id: number, withShift: boolean) {
-    if (withShift && anchorRef.current !== null) {
-      const range = computeRange(
-        selectableRows.map((r) => r.id),
-        anchorRef.current,
-        id,
-      );
-      if (range.length > 0) {
-        const target = !cleanSelected.has(id);
-        setSelectedIds((prev) => {
-          const next = new Set(prev);
-          for (const k of range) {
-            if (target) next.add(k);
-            else next.delete(k);
-          }
-          return next;
-        });
-        return;
-      }
-    }
-    toggle(id);
-    anchorRef.current = id;
-  }
-
-  function clearSelection() {
-    setSelectedIds(new Set());
-    anchorRef.current = null;
-  }
-
-  const selectedList = rows.filter((r) => cleanSelected.has(r.id));
-  const canMerge = selectedList.length >= 1;
+  const canMerge = selectedRows.length >= 1;
   const cta =
-    selectedList.length === 0
+    selectedRows.length === 0
       ? "Merge"
-      : selectedList.length === 1
+      : selectedRows.length === 1
         ? "Promote to composite →"
-        : `Merge ${selectedList.length} → composite →`;
+        : `Merge ${selectedRows.length} → composite →`;
 
   function toMember(r: EventRow): MergeMember {
     return {
@@ -141,34 +86,14 @@ export function EventsTable({
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
             <tr>
               <th className="px-3 py-2 w-8">
-                <input
-                  type="checkbox"
-                  checked={allSelectableChecked}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someSelectableChecked;
-                  }}
-                  onChange={() => {
-                    // Tri-state click semantics (headerNextState, #37):
-                    // - none selected → select all selectable
-                    // - some (the "-" dash) OR all → clear (clicking the
-                    //   dash clears; it does NOT select-all)
-                    if (
-                      headerNextState(
-                        allSelectableChecked,
-                        someSelectableChecked,
-                      ) === "clear"
-                    ) {
-                      clearSelection();
-                    } else {
-                      setSelectedIds(new Set(selectableIds));
-                    }
-                  }}
+                <SelectAllCheckbox
+                  allSelected={sel.allSelected}
+                  someSelected={sel.someSelected}
+                  onSelectAll={sel.selectAll}
+                  onClear={sel.clearSelection}
                   disabled={selectableRows.length === 0}
-                  aria-label={
-                    allSelectableChecked
-                      ? "Clear selection of all visible events"
-                      : "Select all visible events on this page"
-                  }
+                  selectAllLabel="Select all visible events on this page"
+                  clearLabel="Clear selection of all visible events"
                 />
               </th>
               <th className="text-left font-mono font-semibold px-3 py-2">Started at</th>
@@ -188,24 +113,18 @@ export function EventsTable({
             ) : (
               rows.map((e) => {
                 const isSelectable = e.status === "visible";
-                const isChecked = cleanSelected.has(e.id);
+                const isChecked = sel.isSelected(e.id);
                 return (
                   <tr
                     key={e.id}
                     className="relative border-t border-border hover:bg-surface/40"
                   >
                     <td className="px-3 py-2 w-8 relative z-10">
-                      <input
-                        type="checkbox"
+                      <RowSelectCheckbox
                         checked={isChecked}
-                        // Shift-click range select (#37): shiftKey is read
-                        // from the click MouseEvent (a checkbox's onChange
-                        // nativeEvent is a `change`, which has no shiftKey).
-                        // No-op onChange satisfies React's controlled input.
-                        onClick={(ev) => toggleRange(e.id, ev.shiftKey)}
-                        onChange={() => {}}
+                        onToggle={(shiftKey) => sel.toggleRange(e.id, shiftKey)}
                         disabled={!isSelectable}
-                        aria-label={
+                        ariaLabel={
                           isSelectable
                             ? `Select event ${e.id}`
                             : `Event ${e.id} cannot be selected (status: ${e.status})`
@@ -245,14 +164,14 @@ export function EventsTable({
 
       {/* Floating action bar — pinned to the bottom of the viewport when
           anything is selected. Stays out of the way otherwise. */}
-      {cleanSelected.size > 0 && (
+      {selectedRows.length > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-background border border-border rounded-lg shadow-lg px-4 py-2.5 flex items-center gap-4">
           <span className="text-[0.8125rem] font-mono">
-            {cleanSelected.size} selected
+            {selectedRows.length} selected
           </span>
           <button
             type="button"
-            onClick={clearSelection}
+            onClick={sel.clearSelection}
             className="text-[0.8125rem] text-muted hover:text-foreground"
           >
             Clear
@@ -270,12 +189,12 @@ export function EventsTable({
 
       {modalOpen && canMerge && (
         <CompositeMergeModal
-          members={selectedList.map(toMember)}
+          members={selectedRows.map(toMember)}
           sportOptions={sportOptions}
           typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setModalOpen(false)}
           onSuccess={(compositeId) => {
-            clearSelection();
+            sel.clearSelection();
             router.push(`/data/events/${compositeId}`);
             router.refresh();
           }}
