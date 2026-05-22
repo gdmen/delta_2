@@ -12,6 +12,7 @@ import {
   CompositeMergeModal,
   type SportOption,
 } from "@/components/composite-merge-modal";
+import { computeRange, headerNextState } from "@/lib/selection";
 
 /**
  * Two-tier view:
@@ -40,6 +41,11 @@ export function DuplicatesView({
   const groupKey = (g: CandidateGroup) =>
     `${g.sportIdA}-${g.sportIdB}-${g.sourceA}-${g.sourceB}`;
 
+  // Anchor for shift-click range select (#37): the last group toggled
+  // WITHOUT shift, stored by group key and resolved against the current
+  // group order at click time.
+  const anchorRef = useRef<string | null>(null);
+
   const allSelected =
     groups.length > 0 && groups.every((g) => selected.has(groupKey(g)));
   const someSelected =
@@ -65,8 +71,38 @@ export function DuplicatesView({
     });
   }
 
-  function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(groups.map(groupKey)));
+  /**
+   * Group-checkbox handler with shift-click range select (#37). Without
+   * shift (or no anchor yet) it's a single toggle that sets the anchor.
+   * With shift it fills the inclusive range from the anchor to this group
+   * over the current group order, setting every key in the span to this
+   * group's RESULTING state (Behavior B). The range accretes; anchor is
+   * unchanged on a shift-click.
+   */
+  function toggleRange(g: CandidateGroup, withShift: boolean) {
+    const key = groupKey(g);
+    if (withShift && anchorRef.current !== null) {
+      const range = computeRange(groups.map(groupKey), anchorRef.current, key);
+      if (range.length > 0) {
+        const target = !selected.has(key);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const k of range) {
+            if (target) next.add(k);
+            else next.delete(k);
+          }
+          return next;
+        });
+        return;
+      }
+    }
+    toggleGroup(g);
+    anchorRef.current = key;
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+    anchorRef.current = null;
   }
 
   async function dismissSelected() {
@@ -94,7 +130,7 @@ export function DuplicatesView({
       }),
     });
     setBulkRunning(false);
-    setSelected(new Set());
+    clearSelection();
     router.refresh();
   }
 
@@ -146,9 +182,23 @@ export function DuplicatesView({
               ref={headerRef}
               type="checkbox"
               checked={allSelected}
-              onChange={toggleAll}
+              onChange={() => {
+                // Tri-state click semantics (headerNextState, #37):
+                // - none selected → select all groups
+                // - some (the "-" dash) OR all → clear (clicking the dash
+                //   clears; it does NOT select-all)
+                if (headerNextState(allSelected, someSelected) === "clear") {
+                  clearSelection();
+                } else {
+                  setSelected(new Set(groups.map(groupKey)));
+                }
+              }}
               disabled={bulkRunning || groups.length === 0}
-              aria-label="Select all source/sport groups"
+              aria-label={
+                allSelected
+                  ? "Clear selection of all source/sport groups"
+                  : "Select all source/sport groups"
+              }
             />
             Select all ({groups.length})
           </label>
@@ -166,7 +216,12 @@ export function DuplicatesView({
                   <input
                     type="checkbox"
                     checked={isChecked}
-                    onChange={() => toggleGroup(g)}
+                    // Shift-click range select (#37): shiftKey is read from
+                    // the click MouseEvent (a checkbox's onChange nativeEvent
+                    // is a `change`, no shiftKey). No-op onChange keeps the
+                    // input controlled.
+                    onClick={(ev) => toggleRange(g, ev.shiftKey)}
+                    onChange={() => {}}
                     disabled={bulkRunning}
                     aria-label={`Select ${g.sourceA} ${g.sportNameA} plus ${g.sourceB} ${g.sportNameB}`}
                     className="flex-shrink-0"
