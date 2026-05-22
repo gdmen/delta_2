@@ -522,6 +522,33 @@ export const goalJournalEntries = pgTable(
 );
 
 /**
+ * Free-form journal entries on events (issue #19). Same shape as
+ * goal_journal_entries but keyed on events.id, so notes can live on any
+ * event — regular or composite. INHERIT: no user_id; scope through the
+ * parent events.user_id (like workout_sets / event_metrics).
+ *
+ * `updated_at` is set on create and on every PATCH (full edit/delete,
+ * unlike the append-only goal journal — see #33 to bring that to parity).
+ *
+ * Composite unmerge copies a composite's entries onto selected member
+ * events before the composite row (and its entries, via cascade) is
+ * deleted — see src/app/api/events/[id]/unmerge/route.ts.
+ */
+export const eventJournalEntries = pgTable(
+  "event_journal_entries",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
+    updatedAt: isoTimestamptz("updated_at").$defaultFn(isoNow).notNull(),
+  },
+  (t) => [index("idx_event_journal_event_created").on(t.eventId, t.createdAt)],
+);
+
+/**
  * One row per LLM call. Metadata only (no message content — content lives in
  * focuses.evidence or goal_journal_entries). Lets us track cost, latency, and
  * failure rates without joining to external service logs.

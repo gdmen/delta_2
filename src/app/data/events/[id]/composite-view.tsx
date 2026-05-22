@@ -12,6 +12,8 @@ import { userScope } from "@/lib/auth/scope";
 import { formatShort } from "@/lib/format";
 import { EventEditor } from "./editor";
 import { UnmergeButton } from "./unmerge-button";
+import { EventJournal } from "./event-journal";
+import { loadEventJournal } from "./journal-data";
 
 interface CompositeEventRow {
   id: number;
@@ -132,6 +134,10 @@ export async function CompositeView({
     .from(sports)
     .where(userScope(userId).sports)
     .orderBy(asc(sports.name));
+
+  // Journal entries written on the composite itself. On unmerge these
+  // get copied to the member events the user selects (see UnmergeButton).
+  const journalEntries = await loadEventJournal(event.id, userId);
 
   return (
     <div className="max-w-[940px] space-y-8">
@@ -262,8 +268,17 @@ export async function CompositeView({
         </section>
       )}
 
+      <EventJournal eventId={event.id} initialEntries={journalEntries} />
+
       <section className="pt-4 border-t border-border">
-        <UnmergeButton compositeId={event.id} />
+        <UnmergeButton
+          compositeId={event.id}
+          journalCount={journalEntries.length}
+          members={members.map((m) => ({
+            id: m.id,
+            label: `${m.source} · ${m.sportName} · ${m.type}`,
+          }))}
+        />
       </section>
     </div>
   );

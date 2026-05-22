@@ -18,6 +18,7 @@ import {
   mergeLog,
   dashboardShareTokens,
   inviteCodes,
+  eventJournalEntries,
 } from "@/db/schema";
 import { encrypt, lookupHash } from "@/lib/auth/secrets";
 
@@ -85,6 +86,7 @@ interface Fixture {
   aliceMergeLogId: number;
   aliceShareToken: string;
   aliceInviteCode: string;
+  aliceEventJournalEntryId: number;
 }
 
 let fx: Fixture;
@@ -150,6 +152,12 @@ beforeEach(async () => {
       startedAt: "2026-01-01T00:00:00Z",
     })
     .returning({ id: events.id });
+
+  // Alice's journal entry on her event (for the event-journal routes).
+  const [eje] = await db
+    .insert(eventJournalEntries)
+    .values({ eventId: ev.id, content: "alice event journal" })
+    .returning({ id: eventJournalEntries.id });
 
   const [g] = await db
     .insert(goals)
@@ -225,6 +233,7 @@ beforeEach(async () => {
     aliceMergeLogId: ml.id,
     aliceShareToken: tok,
     aliceInviteCode: "ALIC-INVT-CODE",
+    aliceEventJournalEntryId: eje.id,
   };
 });
 
@@ -471,6 +480,70 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
     // Default is "daily" per the schema; Bob's request asked for "weekly"
     // which should NOT have taken effect.
     expect(aliceRow[0].freq).toBe("daily");
+  });
+
+  it("/api/events/[id]/journal (POST) refuses Bob for Alice's event", async () => {
+    asBob();
+    const route = await import("@/app/api/events/[id]/journal/route");
+    const params = aliceParam("aliceEventId");
+    const res = await route.POST(
+      req("http://test/", {
+        method: "POST",
+        body: JSON.stringify({ content: "bob was here" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+      params,
+    );
+    expect(NON_LEAKY_STATUSES.has(res.status)).toBe(true);
+
+    // No entry created on Alice's event by Bob.
+    asAlice();
+    const db = ctx.getDb();
+    const rows = await db
+      .select()
+      .from(eventJournalEntries)
+      .where(eq(eventJournalEntries.eventId, fx.aliceEventId));
+    expect(rows.every((r) => r.content !== "bob was here")).toBe(true);
+  });
+
+  it("/api/events/[id]/journal/[entryId] (PATCH, DELETE) refuses Bob for Alice's entry", async () => {
+    asBob();
+    const route = await import("@/app/api/events/[id]/journal/[entryId]/route");
+    const params = {
+      params: Promise.resolve({
+        id: String(fx.aliceEventId),
+        entryId: String(fx.aliceEventJournalEntryId),
+      }),
+    };
+    expect(
+      NON_LEAKY_STATUSES.has(
+        (
+          await route.PATCH(
+            req("http://test/", {
+              method: "PATCH",
+              body: JSON.stringify({ content: "hijacked" }),
+              headers: { "Content-Type": "application/json" },
+            }),
+            params,
+          )
+        ).status,
+      ),
+    ).toBe(true);
+    expect(
+      NON_LEAKY_STATUSES.has(
+        (await route.DELETE(req("http://test/", { method: "DELETE" }), params)).status,
+      ),
+    ).toBe(true);
+
+    // Alice's entry is unchanged and still exists.
+    asAlice();
+    const db = ctx.getDb();
+    const rows = await db
+      .select()
+      .from(eventJournalEntries)
+      .where(eq(eventJournalEntries.id, fx.aliceEventJournalEntryId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe("alice event journal");
   });
 
   it("/api/import-sources/[id] (PATCH, DELETE) refuses Bob for Alice's source", async () => {
