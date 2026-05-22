@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -31,30 +31,70 @@ export function DuplicatesView({
 }) {
   const router = useRouter();
   const [mergeTarget, setMergeTarget] = useState<CandidatePair | null>(null);
-  const [bulkRunning, setBulkRunning] = useState<string | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [individualRunning, setIndividualRunning] = useState<string | null>(null);
 
-  async function bulkDismiss(g: CandidateGroup) {
-    const key = `${g.sportIdA}-${g.sportIdB}-${g.sourceA}-${g.sourceB}`;
+  // Multi-select state for the top section. Keyed by the stable group
+  // key (all fields come off the canonicalized group object).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const groupKey = (g: CandidateGroup) =>
+    `${g.sportIdA}-${g.sportIdB}-${g.sourceA}-${g.sourceB}`;
+
+  const allSelected =
+    groups.length > 0 && groups.every((g) => selected.has(groupKey(g)));
+  const someSelected =
+    !allSelected && groups.some((g) => selected.has(groupKey(g)));
+  const selectedGroups = groups.filter((g) => selected.has(groupKey(g)));
+  const selectedPairCount = selectedGroups.reduce((n, g) => n + g.count, 0);
+
+  // Tri-state header checkbox: `indeterminate` is a DOM property, not an
+  // HTML attribute, so it must be set via ref (a bare `checked` can't
+  // render the dash glyph).
+  const headerRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerRef.current) headerRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
+  function toggleGroup(g: CandidateGroup) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const k = groupKey(g);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(groups.map(groupKey)));
+  }
+
+  async function dismissSelected() {
+    if (selectedGroups.length === 0 || bulkRunning) return;
+    const nPairs = selectedPairCount;
+    const nGroups = selectedGroups.length;
     if (
       !confirm(
-        `Dismiss all ${g.count} pairs of ${g.sourceA}/${g.sportNameA} + ${g.sourceB}/${g.sportNameB}?`,
+        `Dismiss ${nPairs} pair${nPairs === 1 ? "" : "s"} across ${nGroups} source/sport group${nGroups === 1 ? "" : "s"}?`,
       )
     ) {
       return;
     }
-    setBulkRunning(key);
+    setBulkRunning(true);
     await fetch("/api/events/duplicates/bulk-dismiss", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sourceA: g.sourceA,
-        sportIdA: g.sportIdA,
-        sourceB: g.sourceB,
-        sportIdB: g.sportIdB,
+        groups: selectedGroups.map((g) => ({
+          sourceA: g.sourceA,
+          sportIdA: g.sportIdA,
+          sourceB: g.sourceB,
+          sportIdB: g.sportIdB,
+        })),
       }),
     });
-    setBulkRunning(null);
+    setBulkRunning(false);
+    setSelected(new Set());
     router.refresh();
   }
 
@@ -82,41 +122,70 @@ export function DuplicatesView({
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted mb-3 border-b border-border pb-2">
-          Bulk dismiss by source/sport pair
-        </h2>
+        <div className="flex items-center justify-between mb-3 border-b border-border pb-2 gap-3">
+          <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
+            Bulk dismiss by source/sport pair
+          </h2>
+          {selected.size > 0 && (
+            <button
+              type="button"
+              onClick={dismissSelected}
+              disabled={bulkRunning}
+              className="px-3 py-1 text-[0.75rem] font-medium border border-accent-red/40 text-accent-red rounded hover:bg-accent-red/10 disabled:opacity-50 whitespace-nowrap"
+            >
+              {bulkRunning
+                ? "Dismissing…"
+                : `Dismiss ${selected.size} selected`}
+            </button>
+          )}
+        </div>
         <div className="space-y-2">
+          {/* Select-all header */}
+          <label className="flex items-center gap-3 px-3 py-1.5 text-[0.6875rem] font-mono uppercase tracking-wider text-muted cursor-pointer select-none">
+            <input
+              ref={headerRef}
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              disabled={bulkRunning || groups.length === 0}
+              aria-label="Select all source/sport groups"
+            />
+            Select all ({groups.length})
+          </label>
           {groups.map((g) => {
-            const key = `${g.sportIdA}-${g.sportIdB}-${g.sourceA}-${g.sourceB}`;
+            const key = groupKey(g);
+            const isChecked = selected.has(key);
             return (
               <div
                 key={key}
-                className="flex justify-between items-center border border-border rounded px-3 py-2 font-mono text-[0.8125rem]"
+                className={`flex justify-between items-center border border-border rounded px-3 py-2 font-mono text-[0.8125rem] ${
+                  isChecked ? "bg-surface/60" : ""
+                }`}
               >
-                <div className="flex gap-3 items-baseline truncate">
-                  <span className="text-muted uppercase tracking-wider whitespace-nowrap">
-                    {g.sourceA}
-                  </span>
-                  <span className="truncate">{g.sportNameA}</span>
-                  <span className="text-muted">+</span>
-                  <span className="text-muted uppercase tracking-wider whitespace-nowrap">
-                    {g.sourceB}
-                  </span>
-                  <span className="truncate">{g.sportNameB}</span>
+                <div className="flex gap-3 items-center truncate min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleGroup(g)}
+                    disabled={bulkRunning}
+                    aria-label={`Select ${g.sourceA} ${g.sportNameA} plus ${g.sourceB} ${g.sportNameB}`}
+                    className="flex-shrink-0"
+                  />
+                  <div className="flex gap-3 items-baseline truncate min-w-0">
+                    <span className="text-muted uppercase tracking-wider whitespace-nowrap">
+                      {g.sourceA}
+                    </span>
+                    <span className="truncate">{g.sportNameA}</span>
+                    <span className="text-muted">+</span>
+                    <span className="text-muted uppercase tracking-wider whitespace-nowrap">
+                      {g.sourceB}
+                    </span>
+                    <span className="truncate">{g.sportNameB}</span>
+                  </div>
                 </div>
-                <div className="flex gap-3 items-baseline whitespace-nowrap">
-                  <span className="text-muted text-[0.6875rem]">
-                    {g.count} pair{g.count === 1 ? "" : "s"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => bulkDismiss(g)}
-                    disabled={bulkRunning === key}
-                    className="px-2 py-1 text-[0.75rem] text-muted hover:text-accent-red disabled:opacity-50"
-                  >
-                    {bulkRunning === key ? "Dismissing…" : "Dismiss all"}
-                  </button>
-                </div>
+                <span className="text-muted text-[0.6875rem] whitespace-nowrap">
+                  {g.count} pair{g.count === 1 ? "" : "s"}
+                </span>
               </div>
             );
           })}
