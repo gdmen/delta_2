@@ -1,10 +1,11 @@
 "use client";
 
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTableSelection } from "@/components/use-table-selection";
-import { headerNextState } from "@/lib/selection";
+import { SelectAllCheckbox } from "@/components/select-all-checkbox";
+import { RowSelectCheckbox } from "@/components/row-select-checkbox";
 import { cn } from "@/lib/cn";
 
 /** Per-row outcome from a bulk delete pass. Caller returns one entry per
@@ -87,17 +88,6 @@ export function SelectableDataTable<T, K>({
   const sortBys = columns.map((c) => c.sortBy);
   const s = useTableSelection(rows, getKey, filterTextFn, sortBys);
   const colCount = columns.length + 1; // +1 for checkbox column
-
-  // Native `<input type="checkbox" indeterminate>` isn't an HTML attribute —
-  // it's only settable via the DOM property. Manage it via ref so the
-  // header checkbox shows the standard "some-but-not-all" dash glyph when
-  // the filtered set is partially selected.
-  const headerCheckboxRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (headerCheckboxRef.current) {
-      headerCheckboxRef.current.indeterminate = s.filteredSomeSelected;
-    }
-  }, [s.filteredSomeSelected]);
 
   async function handleBulkDelete() {
     if (!onBulkDelete || s.selectedRows.length === 0 || s.busy) return;
@@ -194,30 +184,14 @@ export function SelectableDataTable<T, K>({
           <thead className="bg-surface text-foreground text-[0.6875rem] uppercase tracking-wider border-b border-border">
             <tr>
               <th className="w-8 px-2 py-2 text-center">
-                <input
-                  ref={headerCheckboxRef}
-                  type="checkbox"
-                  checked={s.filteredAllSelected}
-                  onChange={() => {
-                    // Tri-state click semantics (headerNextState, #37):
-                    // - none selected → select all filtered
-                    // - some (indeterminate) OR all → clear the filtered set
-                    //   (clicking the "-" dash clears; it does NOT select-all)
-                    if (
-                      headerNextState(s.filteredAllSelected, s.filteredSomeSelected) ===
-                      "clear"
-                    ) {
-                      s.clearFilteredSelection();
-                    } else {
-                      s.selectAllFiltered();
-                    }
-                  }}
+                <SelectAllCheckbox
+                  allSelected={s.filteredAllSelected}
+                  someSelected={s.filteredSomeSelected}
+                  onSelectAll={s.selectAllFiltered}
+                  onClear={s.clearFilteredSelection}
                   disabled={s.filtered.length === 0 || s.busy}
-                  aria-label={
-                    s.filteredAllSelected
-                      ? "Clear selection of all visible rows"
-                      : "Select all visible rows"
-                  }
+                  selectAllLabel="Select all visible rows"
+                  clearLabel="Clear selection of all visible rows"
                 />
               </th>
               {columns.map((col, i) => {
@@ -277,18 +251,10 @@ export function SelectableDataTable<T, K>({
                     )}
                   >
                     <td className={cn("px-2 py-2 text-center", href && "relative z-10")}>
-                      <input
-                        type="checkbox"
+                      <RowSelectCheckbox
                         checked={checked}
-                        // Shift-click range select (#37). shiftKey must be
-                        // read from the click MouseEvent — React's onChange
-                        // for a checkbox wraps the `change` event, which has
-                        // no shiftKey. So do the toggle in onClick (a real
-                        // MouseEvent) and keep a no-op onChange to satisfy
-                        // React's controlled-input requirement.
-                        onClick={(e) => s.toggleRange(row, e.shiftKey)}
-                        onChange={() => {}}
-                        aria-label={`Select ${rowHrefAriaLabel?.(row) ?? String(getKey(row))}`}
+                        onToggle={(shiftKey) => s.toggleRange(row, shiftKey)}
+                        ariaLabel={`Select ${rowHrefAriaLabel?.(row) ?? String(getKey(row))}`}
                       />
                     </td>
                     {columns.map((col, i) => (
