@@ -19,6 +19,7 @@ import {
   dashboardShareTokens,
   inviteCodes,
   eventJournalEntries,
+  eventDuplicateDenylist,
 } from "@/db/schema";
 import { encrypt, lookupHash } from "@/lib/auth/secrets";
 
@@ -514,6 +515,53 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
       .from(eventJournalEntries)
       .where(eq(eventJournalEntries.eventId, fx.aliceEventId));
     expect(rows.every((r) => r.content !== "bob was here")).toBe(true);
+  });
+
+  it("/api/events/duplicates/bulk-dismiss (POST) can't dismiss Alice's pairs as Bob", async () => {
+    // Give Alice a candidate pair: a second event, different source,
+    // within 60 min of her fixture event (manual @ 00:00).
+    asAlice();
+    await ctx.getDb().insert(events).values({
+      userId: 10,
+      sportId: fx.aliceSportId,
+      type: "lift",
+      startedAt: "2026-01-01T00:30:00Z",
+      source: "strava",
+    });
+
+    // Bob POSTs a tuple describing Alice's source/sport group.
+    asBob();
+    const route = await import("@/app/api/events/duplicates/bulk-dismiss/route");
+    const res = await route.POST(
+      req("http://test/", {
+        method: "POST",
+        body: JSON.stringify({
+          groups: [
+            {
+              sourceA: "manual",
+              sportIdA: fx.aliceSportId,
+              sourceB: "strava",
+              sportIdB: fx.aliceSportId,
+            },
+          ],
+        }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    expect(NON_LEAKY_STATUSES.has(res.status)).toBe(true);
+    if (res.status === 200) {
+      // Bob's detector returns none of Alice's pairs → nothing dismissed.
+      expect((await res.json()).dismissed).toBe(0);
+    }
+
+    // Alice's pair was NOT denylisted by Bob.
+    asAlice();
+    const denyRows = await ctx
+      .getDb()
+      .select()
+      .from(eventDuplicateDenylist)
+      .where(eq(eventDuplicateDenylist.userId, 10));
+    expect(denyRows).toHaveLength(0);
   });
 
   it("/api/events/[id]/journal/[entryId] (PATCH, DELETE) refuses Bob for Alice's entry", async () => {
