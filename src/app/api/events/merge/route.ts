@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { events, sports } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
-import { userScope } from "@/lib/auth/scope";
+import { createComposite } from "@/lib/events/composite";
 
 interface MergeBody {
   /**
@@ -91,53 +88,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Owner-scoped lookup of the member event(s) + sport. Ensures the
-  // caller owns each ref.
-  const members = await db
-    .select({
-      id: events.id,
-      sportId: events.sportId,
-      type: events.type,
-      startedAt: events.startedAt,
-      durationMinutes: events.durationMinutes,
-      status: events.status,
-    })
-    .from(events)
-    .where(
-      and(
-        userScope(user.id).events,
-        inArray(events.id, memberIdsRequested),
-      ),
-    );
-  if (members.length !== memberIdsRequested.length) {
-    return NextResponse.json(
-      { error: "Member event(s) must exist and be owned by the caller" },
-      { status: 404 },
-    );
-  }
-  for (const m of members) {
-    if (m.status !== "visible") {
-      return NextResponse.json(
-        { error: `Event ${m.id} has status='${m.status}'; only 'visible' events can be merged` },
-        { status: 409 },
-      );
-    }
-  }
-  // Same-source members are allowed: two devices syncing one real session
-  // to the same integration (e.g. Garmin + Whoop → Strava) are a valid
-  // composite. See the body docstring.
-
-  const ownsSport = await db
-    .select({ id: sports.id })
-    .from(sports)
-    .where(and(userScope(user.id).sports, eq(sports.id, body.sportId)))
-    .limit(1);
-  if (ownsSport.length === 0) {
-    return NextResponse.json({ error: "sportId not found" }, { status: 400 });
-  }
-
-  // started_at: caller override wins, else earliest member start.
-  let compositeStartedAt: string;
+  // Validate the optional started_at / duration overrides here (HTTP
+  // shape); createComposite applies the earliest-start + computed-span
+  // defaults when they're omitted, and does the ownership/status/sport
+  // checks + the DB mutation.
+  let startedAtOverride: string | undefined;
   if (body.startedAt !== undefined) {
     const parsed = new Date(body.startedAt);
     if (Number.isNaN(parsed.getTime())) {
@@ -146,20 +101,13 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    compositeStartedAt = parsed.toISOString();
-  } else {
-    compositeStartedAt = members.reduce(
-      (acc, m) => (m.startedAt < acc ? m.startedAt : acc),
-      members[0].startedAt,
-    );
+    startedAtOverride = parsed.toISOString();
   }
 
-  // duration: caller override wins (including explicit null), else
-  // computed span between earliest member start and latest member end.
-  let compositeDurationMinutes: number | null;
+  let durationOverride: number | null | undefined;
   if (body.durationMinutes !== undefined) {
     if (body.durationMinutes === null) {
-      compositeDurationMinutes = null;
+      durationOverride = null;
     } else if (
       !Number.isFinite(body.durationMinutes) ||
       body.durationMinutes < 1
@@ -169,57 +117,19 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     } else {
-      compositeDurationMinutes = Math.round(body.durationMinutes);
+      durationOverride = Math.round(body.durationMinutes);
     }
-  } else {
-    const earliestStart = members.reduce(
-      (acc, m) => (m.startedAt < acc ? m.startedAt : acc),
-      members[0].startedAt,
-    );
-    const ends = members.map((m) =>
-      m.durationMinutes
-        ? new Date(new Date(m.startedAt).getTime() + m.durationMinutes * 60_000).toISOString()
-        : m.startedAt,
-    );
-    const latestEnd = ends.reduce((acc, e) => (e > acc ? e : acc), ends[0]);
-    compositeDurationMinutes = Math.max(
-      1,
-      Math.round((new Date(latestEnd).getTime() - new Date(earliestStart).getTime()) / 60_000),
-    );
   }
 
-  const compositeType = body.type ?? members[0].type;
-  const compositeNotes = body.notes ?? null;
-
-  // sourceId is unique per user — synthesize from sorted member ids.
-  const sortedIds = [...memberIdsRequested].sort((a, b) => a - b);
-  const sourceId = `composite-${sortedIds.join("-")}`;
-
-  const inserted = await db
-    .insert(events)
-    .values({
-      userId: user.id,
-      sportId: body.sportId,
-      type: compositeType,
-      durationMinutes: compositeDurationMinutes,
-      notes: compositeNotes,
-      startedAt: compositeStartedAt,
-      source: "composite",
-      sourceId,
-      status: "composite",
-      compositeMemberIds: sortedIds,
-    })
-    .returning({ id: events.id });
-
-  await db
-    .update(events)
-    .set({ status: "hidden_by_composite" })
-    .where(
-      and(
-        userScope(user.id).events,
-        inArray(events.id, sortedIds),
-      ),
-    );
-
-  return NextResponse.json({ id: inserted[0].id });
+  const result = await createComposite(user.id, memberIdsRequested, {
+    sportId: body.sportId,
+    type: body.type,
+    startedAt: startedAtOverride,
+    durationMinutes: durationOverride,
+    notes: body.notes ?? null,
+  });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+  return NextResponse.json({ id: result.id });
 }
