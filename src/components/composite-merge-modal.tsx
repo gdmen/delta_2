@@ -25,14 +25,14 @@ export interface SportOption {
  *  - N=1: promote — retag a single event with a corrected canonical
  *    sport while keeping the source row's data accessible via the
  *    composite. Title reads "Promote to composite event".
- *  - N≥2: merge — fold multiple cross-source rows for the same physical
- *    session into one composite. Title reads "Merge into composite
- *    event".
+ *  - N≥2: merge — fold multiple rows for the same physical session into
+ *    one composite. Title reads "Merge into composite event".
  *
  * Either way: user picks the sport (defaults to the least
  * source-prefixed sport name across members), tweaks type / started_at
  * / duration / notes, and confirms. Sends POST /api/events/merge with
- * `memberIds: number[]`. No two members may share a source.
+ * `memberIds: number[]`. Members may share a source (two devices syncing
+ * one session to the same integration is a valid composite).
  */
 export function CompositeMergeModal({
   members,

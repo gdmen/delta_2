@@ -5,15 +5,23 @@ import type { AnyPgDb } from "@/db/types";
 /**
  * Duplicate-event candidate pair as surfaced to the UI.
  *
- * "Candidate" here means: two events for the same user, from different
- * sources, started within 60 min of each other, both currently visible,
- * and not in the dismiss-once denylist. The user makes the final
- * "same session?" call per-pair via the Merge / Not-a-duplicate buttons.
+ * "Candidate" here means: two events for the same user, started within
+ * 60 min of each other, both currently visible, and not in the
+ * dismiss-once denylist. The user makes the final "same session?" call
+ * per-pair via the Merge / Not-a-duplicate buttons.
  *
- * Sport-id equality is intentionally NOT a filter (see issue #4): the
- * source-prefixed sports table means even "same lifting session" pairs
- * have different sport_ids until manually merged. The user picks the
- * composite's sport at merge time.
+ * Source equality is intentionally NOT a filter. `source` is the
+ * sync/integration layer (strava, apple_health), not the recording
+ * device — two devices that both push to one integration (e.g. a Garmin
+ * and a Whoop syncing the same ride to Strava) arrive as two
+ * `source='strava'` events for one real session. Those are legitimate
+ * same-session pairs, so detection is source-agnostic and the merge
+ * folds same-source members into a composite just like cross-source ones.
+ *
+ * Sport-id equality is intentionally NOT a filter either (see issue #4):
+ * the source-prefixed sports table means even "same lifting session"
+ * pairs have different sport_ids until manually merged. The user picks
+ * the composite's sport at merge time.
  */
 export interface CandidatePair {
   aId: number;
@@ -108,7 +116,6 @@ export async function findDuplicateCandidates(
     FROM events a
     JOIN events b ON a.user_id = b.user_id
                   AND a.id < b.id
-                  AND a.source != b.source
                   AND b.started_at BETWEEN
                         a.started_at - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
                     AND a.started_at + INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'

@@ -15,10 +15,11 @@ interface MergeBody {
    * - N≥3 covers multi-source single sessions (Strava + Apple Health
    *   + Whoop all reporting the same morning lift).
    *
-   * No two members may share a `source` — composites combine
-   * cross-source data; two events from the same source for the same
-   * time are almost always one being a duplicate-import rather than
-   * truly distinct sessions.
+   * Members MAY share a `source`. `source` is the sync/integration layer
+   * (e.g. strava), not the recording device — two devices both pushing to
+   * one integration (a Garmin and a Whoop syncing the same ride to
+   * Strava) produce two `source='strava'` events for one real session,
+   * which is a legitimate composite.
    */
   memberIds: number[];
   /** Sport for the composite. Must belong to the calling user. */
@@ -100,7 +101,6 @@ export async function POST(request: NextRequest) {
       startedAt: events.startedAt,
       durationMinutes: events.durationMinutes,
       status: events.status,
-      source: events.source,
     })
     .from(events)
     .where(
@@ -123,24 +123,9 @@ export async function POST(request: NextRequest) {
       );
     }
   }
-  // No two members may share a source. Generalizes the prior 2-member
-  // check to N members; finds the first colliding pair for a helpful
-  // error.
-  if (members.length > 1) {
-    const seen = new Map<string, number>();
-    for (const m of members) {
-      const prevId = seen.get(m.source);
-      if (prevId !== undefined) {
-        return NextResponse.json(
-          {
-            error: `Events ${prevId} and ${m.id} share source='${m.source}'; merging same-source events isn't supported`,
-          },
-          { status: 409 },
-        );
-      }
-      seen.set(m.source, m.id);
-    }
-  }
+  // Same-source members are allowed: two devices syncing one real session
+  // to the same integration (e.g. Garmin + Whoop → Strava) are a valid
+  // composite. See the body docstring.
 
   const ownsSport = await db
     .select({ id: sports.id })
