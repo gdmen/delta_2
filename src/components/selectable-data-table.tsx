@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTableSelection } from "@/components/use-table-selection";
+import { headerNextState } from "@/lib/selection";
 import { cn } from "@/lib/cn";
 
 /** Per-row outcome from a bulk delete pass. Caller returns one entry per
@@ -198,12 +199,18 @@ export function SelectableDataTable<T, K>({
                   type="checkbox"
                   checked={s.filteredAllSelected}
                   onChange={() => {
-                    // Tri-state click semantics:
-                    // - all selected → clear (only the filtered ones)
-                    // - some selected (indeterminate) → select all filtered
+                    // Tri-state click semantics (headerNextState, #37):
                     // - none selected → select all filtered
-                    if (s.filteredAllSelected) s.clearFilteredSelection();
-                    else s.selectAllFiltered();
+                    // - some (indeterminate) OR all → clear the filtered set
+                    //   (clicking the "-" dash clears; it does NOT select-all)
+                    if (
+                      headerNextState(s.filteredAllSelected, s.filteredSomeSelected) ===
+                      "clear"
+                    ) {
+                      s.clearFilteredSelection();
+                    } else {
+                      s.selectAllFiltered();
+                    }
                   }}
                   disabled={s.filtered.length === 0 || s.busy}
                   aria-label={
@@ -273,7 +280,14 @@ export function SelectableDataTable<T, K>({
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => s.toggle(row)}
+                        // Shift-click range select (#37). shiftKey must be
+                        // read from the click MouseEvent — React's onChange
+                        // for a checkbox wraps the `change` event, which has
+                        // no shiftKey. So do the toggle in onClick (a real
+                        // MouseEvent) and keep a no-op onChange to satisfy
+                        // React's controlled-input requirement.
+                        onClick={(e) => s.toggleRange(row, e.shiftKey)}
+                        onChange={() => {}}
                         aria-label={`Select ${rowHrefAriaLabel?.(row) ?? String(getKey(row))}`}
                       />
                     </td>
