@@ -175,7 +175,8 @@ export function setupRouteTest() {
     await testDb.execute(
       sql.raw(
         `TRUNCATE TABLE
-          workout_sets, event_metrics, goal_journal_entries, coach_calls,
+          workout_sets, event_metrics, goal_journal_entries,
+          event_journal_entries, coach_calls,
           focuses, goals, events, metrics, metric_type_aliases, metric_types,
           sports, daily_summaries, reconcile_log, merge_log, source_settings,
           import_sources, dashboard_widgets, dashboards,

@@ -6,6 +6,8 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { EventEditor } from "./editor";
 import { CompositeView } from "./composite-view";
 import { PromoteToCompositeButton } from "./promote-to-composite";
+import { EventJournal } from "./event-journal";
+import { loadEventJournal } from "./journal-data";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
@@ -123,6 +125,8 @@ export default async function EventDetailPage({
     .where(userScope(user.id).metricTypes)
     .orderBy(asc(metricTypes.name));
 
+  const journalEntries = await loadEventJournal(id, user.id);
+
   // For hidden_by_composite members, look up the parent composite so
   // the banner can link out. Composite ownership is guaranteed
   // (composite_member_ids only points at events owned by the same
@@ -182,6 +186,8 @@ export default async function EventDetailPage({
         metricTypes={metricTypesList}
         typeSuggestionsBySportId={typeSuggestionsBySportId}
       />
+
+      <EventJournal eventId={event.id} initialEntries={journalEntries} />
 
       {/* Single-event promote action — only on regular visible events.
           Composites render through the CompositeView branch above;
