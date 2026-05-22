@@ -648,6 +648,26 @@ function applyWorkoutSet(
   };
 }
 
+/**
+ * Heuristic for the workout-sets "Session ID" field: does the chosen
+ * grouping column look like it identifies an EXERCISE (or row) rather than
+ * a whole session? If a column has many more distinct values than there are
+ * distinct dates, grouping events on it will split each day's workout into
+ * lots of one-exercise events (the TeamBuildr WorkoutId trap). The wizard
+ * uses this to warn the user to leave the field blank (→ group by date).
+ *
+ * ~1 id/day = one session per day (fine). The 1.5× cushion tolerates the
+ * occasional two-a-day without nagging; 3.5×, like TeamBuildr, trips it.
+ * Pure + exported for unit tests.
+ */
+export function sessionIdLooksTooGranular(
+  distinctIds: number,
+  distinctDates: number,
+): boolean {
+  if (distinctIds <= 0 || distinctDates <= 0) return false;
+  return distinctIds > distinctDates * 1.5;
+}
+
 // -----------------------------------------------------------------------------
 // Header auto-match (wizard pre-fill)
 // -----------------------------------------------------------------------------
@@ -690,7 +710,12 @@ export function autoMatchHeaders(kind: ImportMapping["kind"], headers: string[])
   // workout_sets
   return {
     startedAt: pick("completeddate", "date", "assigneddate"),
-    eventSourceId: pick("workoutid", "sessionid"),
+    // Deliberately NOT auto-matching "workoutid": in several exporters
+    // (TeamBuildr) that id is per-EXERCISE, not per-session, so grouping on
+    // it splits one day's workout into one event per exercise. Only match a
+    // clear session id; otherwise leave blank → group by date. See the
+    // eventSourceId help text in mapping-editor + sessionIdLooksTooGranular.
+    eventSourceId: pick("sessionid"),
     exerciseName: pick("exercise", "movement", "lift"),
     setNumber: pick("setnumber", "set"),
     reps: pick("reps", "repetitions"),

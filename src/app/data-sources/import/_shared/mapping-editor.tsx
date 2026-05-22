@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { sessionIdLooksTooGranular } from "@/lib/import-mapping";
 import type {
   ColumnRef,
   DateFormat,
@@ -527,6 +528,28 @@ function WorkoutSetsEditor({
       }
     }
   }
+
+  // Warn if the chosen Session ID column looks per-exercise (far more
+  // distinct values than dates) — the TeamBuildr WorkoutId trap, where each
+  // exercise has its own id so grouping on it splits a day into many events.
+  let sessionIdLooksGranular = false;
+  const idSlot = mapping.eventSourceId;
+  if (idSlot && idSlot.source === "column" && distinctValuesByColumn) {
+    const idRef = idSlot.ref;
+    const idCol = "column" in idRef ? idRef.column : headers[idRef.index - 1];
+    const dateRef = mapping.startedAt.ref;
+    const dateCol =
+      "column" in dateRef ? dateRef.column : headers[dateRef.index - 1];
+    const idVals = idCol ? distinctValuesByColumn[idCol] : undefined;
+    const dateVals = dateCol ? distinctValuesByColumn[dateCol] : undefined;
+    if (idVals && dateVals) {
+      sessionIdLooksGranular = sessionIdLooksTooGranular(
+        idVals.length,
+        dateVals.length,
+      );
+    }
+  }
+
   return (
     <div className="space-y-5">
       <Field label="Started-at column" required>
@@ -554,12 +577,24 @@ function WorkoutSetsEditor({
           onChange={(eventType) => onChange({ ...mapping, eventType })}
         />
       </Field>
-      <Field label="Event source ID (groups sets into one workout - TeamBuildr's WorkoutId)">
+      <Field label="Session ID (optional)">
         <SlotPicker
           slot={mapping.eventSourceId ?? { source: "none" }}
           headers={headers}
           onChange={(eventSourceId) => onChange({ ...mapping, eventSourceId })}
         />
+        <p className="mt-1 text-[0.6875rem] text-muted">
+          A column shared by all sets of one session, so they group into a
+          single workout. Leave blank to group everything on the same date into
+          one workout (correct for most sources). Do not use a per-exercise id.
+        </p>
+        {sessionIdLooksGranular && (
+          <p className="mt-1 text-[0.6875rem] text-accent-red">
+            ⚠ This column has far more distinct values than dates — it looks
+            per-exercise, not per-session. Using it splits each day into many
+            one-exercise workouts. Leave blank to group by date.
+          </p>
+        )}
       </Field>
       <Field label="Exercise name" required>
         <SlotPicker
