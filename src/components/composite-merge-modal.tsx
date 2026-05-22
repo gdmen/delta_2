@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatShort, utcIsoToLocalInput } from "@/lib/format";
 
@@ -13,6 +13,10 @@ export interface MergeMember {
   startedAt: string;
   durationMinutes: number | null;
 }
+
+/** One per-event metric (distance, avg HR, …) as returned by
+ * GET /api/events/metrics. */
+type EventMetric = { name: string; unit: string | null; value: number };
 
 export interface SportOption {
   id: number;
@@ -72,6 +76,31 @@ export function CompositeMergeModal({
   );
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Member metrics (distance, avg HR, …), fetched on open so the user can
+  // compare recordings before merging — e.g. which Strava ride carries the
+  // real distance/duration. null = still loading.
+  const [metricsByEvent, setMetricsByEvent] = useState<Record<
+    number,
+    EventMetric[]
+  > | null>(null);
+  const memberIdsKey = members.map((m) => m.id).join(",");
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/events/metrics?ids=${memberIdsKey}`)
+      .then((r) =>
+        r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)),
+      )
+      .then((j: { metrics: Record<number, EventMetric[]> }) => {
+        if (!cancelled) setMetricsByEvent(j.metrics ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setMetricsByEvent({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [memberIdsKey]);
 
   const typeSuggestions =
     typeSuggestionsBySportId?.[sportId]?.filter((t) => t.trim().length > 0) ?? [];
@@ -145,7 +174,12 @@ export function CompositeMergeModal({
 
         <div className="space-y-2 text-[0.8125rem]">
           {members.map((m) => (
-            <MemberRow key={m.id} m={m} />
+            <MemberRow
+              key={m.id}
+              m={m}
+              metrics={metricsByEvent?.[m.id]}
+              loading={metricsByEvent === null}
+            />
           ))}
         </div>
 
@@ -264,22 +298,52 @@ export function CompositeMergeModal({
   );
 }
 
-function MemberRow({ m }: { m: MergeMember }) {
+function MemberRow({
+  m,
+  metrics,
+  loading,
+}: {
+  m: MergeMember;
+  metrics?: EventMetric[];
+  loading: boolean;
+}) {
   const time = formatShort(m.startedAt);
   return (
-    <div className="border border-border rounded px-3 py-2 flex justify-between gap-3 font-mono text-[0.75rem]">
-      <span className="text-muted uppercase tracking-wider truncate">
-        {m.source}
-      </span>
-      <span className="truncate">
-        {m.sportName} · {m.type}
-      </span>
-      <span className="text-muted whitespace-nowrap">
-        {time}
-        {m.durationMinutes ? ` · ${m.durationMinutes}m` : ""}
-      </span>
+    <div className="border border-border rounded px-3 py-2 font-mono text-[0.75rem] space-y-1">
+      <div className="flex justify-between gap-3">
+        <span className="text-muted uppercase tracking-wider truncate">
+          {m.source}
+        </span>
+        <span className="truncate">
+          {m.sportName} · {m.type}
+        </span>
+        <span className="text-muted whitespace-nowrap">
+          {time}
+          {m.durationMinutes ? ` · ${m.durationMinutes}m` : ""}
+        </span>
+      </div>
+      {/* Per-event metrics so the user can compare recordings (which
+          distance/HR/duration is real) before merging. */}
+      {loading ? (
+        <div className="text-[0.6875rem] text-muted/70">loading metrics…</div>
+      ) : metrics && metrics.length > 0 ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[0.6875rem] text-muted">
+          {metrics.map((mm) => (
+            <span key={mm.name}>
+              {mm.name} {formatMetricValue(mm.value)}
+              {mm.unit ? ` ${mm.unit}` : ""}
+            </span>
+          ))}
+        </div>
+      ) : metrics ? (
+        <div className="text-[0.6875rem] text-muted/50">no metrics</div>
+      ) : null}
     </div>
   );
+}
+
+function formatMetricValue(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
 }
 
 function defaultStartedAt(members: MergeMember[]): string {
