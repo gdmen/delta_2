@@ -109,4 +109,15 @@ describe("SelectableDataTable selection (#37)", () => {
     expect([1, 2, 3, 4].every((id) => cb(id).checked)).toBe(true);
     expect(header().checked).toBe(true);
   });
+
+  it("after a header clear, a shift-click starts a fresh range (anchor reset)", () => {
+    renderTable();
+    fireEvent.click(cb(1)); // anchor at 1
+    fireEvent.click(header()); // dash → clear, which resets the anchor
+    fireEvent.click(cb(3), { shiftKey: true }); // no anchor → single toggle
+    expect(cb(3).checked).toBe(true);
+    expect(cb(1).checked).toBe(false);
+    expect(cb(2).checked).toBe(false);
+    expect(cb(4).checked).toBe(false);
+  });
 });

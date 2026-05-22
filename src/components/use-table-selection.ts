@@ -154,6 +154,13 @@ export function useTableSelection<T, K>(
       for (const r of filtered) next.delete(getKey(r));
       return next;
     });
+    // Reset the anchor on a header-dash clear, mirroring clearSelection
+    // and the events/duplicates surfaces: once the user clears, the next
+    // shift-click should start a fresh range rather than extend from the
+    // now-cleared (and invisible) last anchor. selectAllFiltered keeps the
+    // anchor on purpose, so shift-clicking after "select all" can deselect
+    // a block. (#37 review nit.)
+    anchorRef.current = null;
   }
 
   // Bulk-delete progress state. `busy` blocks repeated clicks.
