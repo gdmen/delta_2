@@ -482,10 +482,20 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
     expect(aliceRow[0].freq).toBe("daily");
   });
 
-  it("/api/events/[id]/journal (POST) refuses Bob for Alice's event", async () => {
+  it("/api/events/[id]/journal (GET, POST) refuses Bob for Alice's event", async () => {
     asBob();
     const route = await import("@/app/api/events/[id]/journal/route");
     const params = aliceParam("aliceEventId");
+
+    // GET must not leak Alice's entries to Bob — INHERIT scope returns
+    // an empty list (the event isn't in Bob's owned-event subquery).
+    const getRes = await route.GET(req("http://test/"), params);
+    expect(NON_LEAKY_STATUSES.has(getRes.status)).toBe(true);
+    if (getRes.status === 200) {
+      const leaked = await getRes.json();
+      expect(Array.isArray(leaked) ? leaked.length : 0).toBe(0);
+    }
+
     const res = await route.POST(
       req("http://test/", {
         method: "POST",

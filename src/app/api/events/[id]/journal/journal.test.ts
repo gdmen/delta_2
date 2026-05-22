@@ -6,7 +6,7 @@ vi.mock("@/db", () => buildDbMock());
 
 import { eq } from "drizzle-orm";
 import { sports, events, eventJournalEntries } from "@/db/schema";
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { PATCH, DELETE } from "./[entryId]/route";
 import { POST as UNMERGE } from "../unmerge/route";
 
@@ -120,6 +120,21 @@ describe("event journal CRUD (#19)", () => {
     // Try to edit A's entry via event B's path → 404.
     const res = await PATCH(req({ content: "x" }), pe(eventB, created.id));
     expect(res.status).toBe(404);
+  });
+
+  it("J7: GET returns the event's entries newest-first (live count for unmerge dialog)", async () => {
+    const eventId = await seedEvent();
+    await POST(req({ content: "first" }), p(eventId));
+    await new Promise((r) => setTimeout(r, 5));
+    await POST(req({ content: "second" }), p(eventId));
+
+    const res = await GET(req(), p(eventId));
+    expect(res.status).toBe(200);
+    const rows = await res.json();
+    expect(rows).toHaveLength(2);
+    // Newest first.
+    expect(rows[0].content).toBe("second");
+    expect(rows[1].content).toBe("first");
   });
 });
 

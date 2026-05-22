@@ -32,6 +32,11 @@ export function UnmergeButton({
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Live journal count, fetched on click. Seeded from the server-rendered
+  // prop so the button label is right on first paint, but the click path
+  // never trusts it — a note added this session would make the prop stale,
+  // and trusting it would silently destroy notes on unmerge.
+  const [liveCount, setLiveCount] = useState(journalCount);
   // member id → receive a copy of the composite's notes (default all on)
   const [checked, setChecked] = useState<Record<number, boolean>>(() =>
     Object.fromEntries(members.map((m) => [m.id, true])),
@@ -55,13 +60,35 @@ export function UnmergeButton({
     router.refresh();
   }
 
-  function onClick() {
-    if (journalCount > 0 && members.length > 0) {
+  async function onClick() {
+    setErr(null);
+    // Fetch the LIVE journal count — never trust the (possibly stale)
+    // server-rendered prop. A note added in this session must still
+    // trigger the copy-to-members dialog.
+    let count = journalCount;
+    if (members.length > 0) {
+      setRunning(true);
+      try {
+        const res = await fetch(`/api/events/${compositeId}/journal`);
+        if (res.ok) {
+          const entries = (await res.json()) as unknown[];
+          count = Array.isArray(entries) ? entries.length : journalCount;
+        }
+      } catch {
+        // Network hiccup — fall back to the prop. Worst case the dialog
+        // doesn't show and the confirm path warns about note loss below.
+      } finally {
+        setRunning(false);
+      }
+      setLiveCount(count);
+    }
+
+    if (count > 0 && members.length > 0) {
       // Notes on the composite need a destination decision first.
       setDialogOpen(true);
       return;
     }
-    // No composite-level notes → behave as before.
+    // No composite-level notes → plain confirm + unmerge.
     if (
       !confirm(
         "Unmerge this composite? The source events will be visible again and won't re-flag as duplicates.",
@@ -94,13 +121,13 @@ export function UnmergeButton({
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-[1rem] font-semibold mb-2">
-              Unmerge — keep {journalCount} journal{" "}
-              {journalCount === 1 ? "note" : "notes"}?
+              Unmerge — keep {liveCount} journal{" "}
+              {liveCount === 1 ? "note" : "notes"}?
             </h2>
             <p className="text-[0.8125rem] text-text-secondary mb-4">
-              This merged record has {journalCount} journal{" "}
-              {journalCount === 1 ? "note" : "notes"} that will be deleted with
-              it. Copy {journalCount === 1 ? "it" : "them"} onto which source
+              This merged record has {liveCount} journal{" "}
+              {liveCount === 1 ? "note" : "notes"} that will be deleted with
+              it. Copy {liveCount === 1 ? "it" : "them"} onto which source
               events? (Notes written directly on a source event aren&apos;t
               affected.)
             </p>
