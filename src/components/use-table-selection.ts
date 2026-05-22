@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { computeRange } from "@/lib/selection";
 
 export type SortDir = "asc" | "desc";
 export type SortState = { colIdx: number; dir: SortDir } | null;
@@ -76,10 +77,48 @@ export function useTableSelection<T, K>(
       else next.add(k);
       return next;
     });
+    anchorRef.current = getKey(row);
+  }
+
+  // Anchor for shift-click range select: the last key toggled WITHOUT
+  // shift. Stored by key (not index) so it survives re-sorts/filters —
+  // resolved against the current `filtered` order at click time.
+  const anchorRef = useRef<K | null>(null);
+
+  /**
+   * Checkbox handler that supports shift-click range select (#37).
+   * Without shift (or with no anchor yet) it's a single toggle that
+   * sets the anchor. With shift it fills the inclusive range from the
+   * anchor to this row, setting every key in the span to this row's
+   * RESULTING state (Behavior B: shift a checked box clears the range,
+   * an unchecked box selects it). The range accretes — keys outside the
+   * span are untouched. Anchor is unchanged on a shift-click.
+   */
+  function toggleRange(row: T, withShift: boolean) {
+    const key = getKey(row);
+    if (withShift && anchorRef.current !== null) {
+      const range = computeRange(filtered.map(getKey), anchorRef.current, key);
+      if (range.length > 0) {
+        const target = !selected.has(key);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const k of range) {
+            if (target) next.add(k);
+            else next.delete(k);
+          }
+          return next;
+        });
+        return;
+      }
+      // Anchor fell out of the visible set → treat as a fresh single
+      // toggle (the `toggle` below re-sets the anchor).
+    }
+    toggle(row);
   }
 
   function clearSelection() {
     setSelected(new Set());
+    anchorRef.current = null;
   }
 
   /**
@@ -141,6 +180,7 @@ export function useTableSelection<T, K>(
     selected,
     isSelected,
     toggle,
+    toggleRange,
     clearSelection,
     selectedRows,
     filteredAllSelected,
