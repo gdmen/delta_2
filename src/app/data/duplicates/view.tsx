@@ -39,7 +39,10 @@ export function DuplicatesView({
   // Bulk merge is single-group only (multiple selected groups would each
   // need their own composite sport, so they stay dismiss-only). When one
   // group is selected, this dialog picks the composite sport once.
-  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  // The group is snapshotted when the dialog opens (not read live) so
+  // changing the selection while it's open can't merge a different group
+  // than the one shown.
+  const [mergeGroup, setMergeGroup] = useState<CandidateGroup | null>(null);
   const [mergeSportId, setMergeSportId] = useState<number | null>(null);
   const [bulkMergeRunning, setBulkMergeRunning] = useState(false);
 
@@ -92,11 +95,11 @@ export function DuplicatesView({
         ? g.sportIdB
         : g.sportIdA;
     setMergeSportId(defaultSport);
-    setMergeDialogOpen(true);
+    setMergeGroup(g);
   }
 
   async function runBulkMerge() {
-    const g = selectedGroups[0];
+    const g = mergeGroup;
     if (!g || mergeSportId === null || bulkMergeRunning) return;
     setBulkMergeRunning(true);
     await fetch("/api/events/duplicates/bulk-merge", {
@@ -113,7 +116,7 @@ export function DuplicatesView({
       }),
     });
     setBulkMergeRunning(false);
-    setMergeDialogOpen(false);
+    setMergeGroup(null);
     sel.clearSelection();
     router.refresh();
   }
@@ -274,23 +277,22 @@ export function DuplicatesView({
         />
       )}
 
-      {mergeDialogOpen && selectedGroups.length === 1 && mergeSportId !== null && (
+      {mergeGroup && mergeSportId !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => !bulkMergeRunning && setMergeDialogOpen(false)}
+          onClick={() => !bulkMergeRunning && setMergeGroup(null)}
         >
           <div
             className="bg-background border border-border rounded-lg max-w-sm w-full p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-[1rem] font-semibold">
-              Merge {selectedPairCount} pair{selectedPairCount === 1 ? "" : "s"}
+              Merge {mergeGroup.count} pair{mergeGroup.count === 1 ? "" : "s"}
             </h2>
             <p className="text-[0.8125rem] text-muted">
-              {selectedGroups[0].sourceA} {selectedGroups[0].sportNameA} +{" "}
-              {selectedGroups[0].sourceB} {selectedGroups[0].sportNameB}.
-              Overlapping recordings of one session are combined into a single
-              composite.
+              {mergeGroup.sourceA} {mergeGroup.sportNameA} + {mergeGroup.sourceB}{" "}
+              {mergeGroup.sportNameB}. Overlapping recordings of one session are
+              combined into a single composite.
             </p>
             <div>
               <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
@@ -312,7 +314,7 @@ export function DuplicatesView({
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setMergeDialogOpen(false)}
+                onClick={() => setMergeGroup(null)}
                 disabled={bulkMergeRunning}
                 className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground disabled:opacity-50"
               >
