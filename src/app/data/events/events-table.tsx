@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatShort } from "@/lib/format";
+import { computeRange, headerNextState } from "@/lib/selection";
 import {
   CompositeMergeModal,
   type MergeMember,
@@ -47,6 +48,10 @@ export function EventsTable({
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [modalOpen, setModalOpen] = useState(false);
+  // Anchor for shift-click range select (#37): the last row toggled
+  // WITHOUT shift. Stored by id so it survives re-sorts/pagination;
+  // resolved against the current visible-selectable order at click time.
+  const anchorRef = useRef<number | null>(null);
 
   const selectableRows = rows.filter((r) => r.status === "visible");
   const selectableIds = new Set(selectableRows.map((r) => r.id));
@@ -70,12 +75,42 @@ export function EventsTable({
     });
   }
 
-  function toggleAll() {
-    if (allSelectableChecked) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(selectableIds));
+  /**
+   * Checkbox handler with shift-click range select (#37). Without shift
+   * (or no anchor yet) it's a single toggle that sets the anchor. With
+   * shift it fills the inclusive range from the anchor to this row over
+   * the SELECTABLE (visible) ids only — interleaved disabled rows are
+   * skipped — setting every key in the span to this row's RESULTING
+   * state (Behavior B: shift a checked box clears the range, an unchecked
+   * box selects it). The range accretes; anchor unchanged on a shift-click.
+   */
+  function toggleRange(id: number, withShift: boolean) {
+    if (withShift && anchorRef.current !== null) {
+      const range = computeRange(
+        selectableRows.map((r) => r.id),
+        anchorRef.current,
+        id,
+      );
+      if (range.length > 0) {
+        const target = !cleanSelected.has(id);
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const k of range) {
+            if (target) next.add(k);
+            else next.delete(k);
+          }
+          return next;
+        });
+        return;
+      }
     }
+    toggle(id);
+    anchorRef.current = id;
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    anchorRef.current = null;
   }
 
   const selectedList = rows.filter((r) => cleanSelected.has(r.id));
@@ -112,9 +147,28 @@ export function EventsTable({
                   ref={(el) => {
                     if (el) el.indeterminate = someSelectableChecked;
                   }}
-                  onChange={toggleAll}
+                  onChange={() => {
+                    // Tri-state click semantics (headerNextState, #37):
+                    // - none selected → select all selectable
+                    // - some (the "-" dash) OR all → clear (clicking the
+                    //   dash clears; it does NOT select-all)
+                    if (
+                      headerNextState(
+                        allSelectableChecked,
+                        someSelectableChecked,
+                      ) === "clear"
+                    ) {
+                      clearSelection();
+                    } else {
+                      setSelectedIds(new Set(selectableIds));
+                    }
+                  }}
                   disabled={selectableRows.length === 0}
-                  aria-label="Select all visible events on this page"
+                  aria-label={
+                    allSelectableChecked
+                      ? "Clear selection of all visible events"
+                      : "Select all visible events on this page"
+                  }
                 />
               </th>
               <th className="text-left font-mono font-semibold px-3 py-2">Started at</th>
@@ -144,7 +198,12 @@ export function EventsTable({
                       <input
                         type="checkbox"
                         checked={isChecked}
-                        onChange={() => toggle(e.id)}
+                        // Shift-click range select (#37): shiftKey is read
+                        // from the click MouseEvent (a checkbox's onChange
+                        // nativeEvent is a `change`, which has no shiftKey).
+                        // No-op onChange satisfies React's controlled input.
+                        onClick={(ev) => toggleRange(e.id, ev.shiftKey)}
+                        onChange={() => {}}
                         disabled={!isSelectable}
                         aria-label={
                           isSelectable
@@ -193,7 +252,7 @@ export function EventsTable({
           </span>
           <button
             type="button"
-            onClick={() => setSelectedIds(new Set())}
+            onClick={clearSelection}
             className="text-[0.8125rem] text-muted hover:text-foreground"
           >
             Clear
@@ -216,7 +275,7 @@ export function EventsTable({
           typeSuggestionsBySportId={typeSuggestionsBySportId}
           onClose={() => setModalOpen(false)}
           onSuccess={(compositeId) => {
-            setSelectedIds(new Set());
+            clearSelection();
             router.push(`/data/events/${compositeId}`);
             router.refresh();
           }}
