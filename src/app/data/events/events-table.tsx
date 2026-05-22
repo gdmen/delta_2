@@ -34,9 +34,9 @@ export interface EventRow {
  *     other events; merging a composite into another composite isn't a
  *     thing we support (use Unmerge first).
  *   - 1 selected → "Promote to composite" (sport retag).
- *   - 2+ selected → "Merge N → composite". The API rejects any two
- *     members sharing a source, so the modal surfaces the error
- *     in-line if the user picks colliding rows.
+ *   - 2+ selected → "Merge N → composite". Members may share a source
+ *     (e.g. a Garmin and a Whoop both syncing one ride to Strava); the
+ *     user picks the composite's canonical sport at merge time.
  */
 export function EventsTable({
   rows,

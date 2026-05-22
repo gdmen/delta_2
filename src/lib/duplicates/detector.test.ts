@@ -106,19 +106,43 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
     expect(pairs).toHaveLength(0);
   });
 
-  it("D4: same-source pairs are NOT flagged", async () => {
-    // Two manual events seconds apart — should still not flag because
-    // the source-not-equal filter excludes them.
+  it("D4: same-source pairs ARE flagged (two devices syncing to one integration)", async () => {
+    // `source` is the sync layer, not the device: a Garmin and a Whoop
+    // both pushing one ride to Strava arrive as two source='strava'
+    // events. Source equality is not a filter, so these are flagged.
     await db.insert(events).values([
       {
         userId: 1, sportId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
-        source: "manual", sourceId: "same-a",
+        source: "strava", sourceId: "same-a",
       },
       {
         userId: 1, sportId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:30.000Z",
-        source: "manual", sourceId: "same-b",
+        source: "strava", sourceId: "same-b",
+      },
+    ]);
+
+    const pairs = await findDuplicateCandidates(1, { recent: false }, db);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].aSource).toBe("strava");
+    expect(pairs[0].bSource).toBe("strava");
+    expect(pairs[0].minutesApart).toBe(0.5);
+  });
+
+  it("D4b: same-source events outside the 60-min window are NOT flagged", async () => {
+    // Source-agnostic detection still respects the time window — two real,
+    // distinct same-source activities far apart aren't paired.
+    await db.insert(events).values([
+      {
+        userId: 1, sportId: 1, type: "Run",
+        startedAt: "2026-05-14T12:00:00.000Z",
+        source: "strava", sourceId: "far-a",
+      },
+      {
+        userId: 1, sportId: 1, type: "Run",
+        startedAt: "2026-05-14T13:01:00.000Z", // +61min
+        source: "strava", sourceId: "far-b",
       },
     ]);
 
