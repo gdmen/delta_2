@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { events, sports } from "@/db/schema";
-import { and, asc, desc, eq, gte, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { PaginationControls } from "@/components/pagination-controls";
 import { requireUserOrSignin } from "@/lib/auth/require";
@@ -48,13 +48,14 @@ export default async function AllEventsPage({
   if (from) conditions.push(gte(events.startedAt, `${from}T00:00:00.000Z`));
   if (to) conditions.push(lte(events.startedAt, `${to}T23:59:59.999Z`));
   if (q) {
+    // ilike = case-insensitive match (Postgres `like` is case-sensitive).
     const needle = `%${q}%`;
     conditions.push(
       or(
-        like(sports.name, needle),
-        like(events.type, needle),
-        like(events.source, needle),
-        like(events.notes, needle)
+        ilike(sports.name, needle),
+        ilike(events.type, needle),
+        ilike(events.source, needle),
+        ilike(events.notes, needle)
       )!
     );
   }
