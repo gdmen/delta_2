@@ -84,6 +84,7 @@ export function DuplicatesView({
     });
     setBulkRunning(false);
     sel.clearSelection();
+    setPairPage(0);
     router.refresh();
   }
 
@@ -121,6 +122,7 @@ export function DuplicatesView({
     setBulkMergeRunning(false);
     setMergeGroup(null);
     sel.clearSelection();
+    setPairPage(0);
     router.refresh();
   }
 
@@ -133,6 +135,7 @@ export function DuplicatesView({
       body: JSON.stringify({ aId: p.aId, bId: p.bId }),
     });
     setIndividualRunning(null);
+    setPairPage(0);
     router.refresh();
   }
 
