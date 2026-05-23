@@ -57,8 +57,12 @@ export async function POST(request: NextRequest) {
   }
   const group = body.group;
 
-  // One detector pass; keep the pairs in this group.
-  const pairs = await findDuplicateCandidates(user.id, { recent: false });
+  // One detector pass; keep the pairs in this group. No limit — must see
+  // every pair so the whole group merges, not just its first 500.
+  const pairs = await findDuplicateCandidates(user.id, {
+    recent: false,
+    limit: null,
+  });
   const matching = pairs.filter((p) => pairMatchesTuple(p, group));
   if (matching.length === 0) {
     return NextResponse.json({ ok: true, merged: 0, events: 0 });

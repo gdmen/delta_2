@@ -5,23 +5,23 @@ import type { AnyPgDb } from "@/db/types";
 /**
  * Duplicate-event candidate pair as surfaced to the UI.
  *
- * "Candidate" here means: two events for the same user, started within
- * 60 min of each other, both currently visible, and not in the
- * dismiss-once denylist. The user makes the final "same session?" call
- * per-pair via the Merge / Not-a-duplicate buttons.
+ * "Candidate" here means: two events for the same user, from DIFFERENT
+ * sources, started within 60 min of each other, both currently visible,
+ * and not in the dismiss-once denylist. The user makes the final
+ * "same session?" call per-pair via the Merge / Not-a-duplicate buttons.
  *
- * Source equality is intentionally NOT a filter. `source` is the
- * sync/integration layer (strava, apple_health), not the recording
- * device — two devices that both push to one integration (e.g. a Garmin
- * and a Whoop syncing the same ride to Strava) arrive as two
- * `source='strava'` events for one real session. Those are legitimate
- * same-session pairs, so detection is source-agnostic and the merge
- * folds same-source members into a composite just like cross-source ones.
+ * Same-source pairs are intentionally EXCLUDED. Detection targets one real
+ * session recorded by multiple apps. Source-agnostic detection was tried
+ * (#41) but flooded the list with same-day, shared-timestamp events from a
+ * single strength logger (FitNotes/Fitocracy log many entries per day at one
+ * timestamp) that aren't duplicates. Genuine same-source double-recordings
+ * (e.g. a Garmin and a Whoop both syncing one ride to Strava) are rare and
+ * can be merged by hand — the merge route still permits same-source members.
  *
- * Sport-id equality is intentionally NOT a filter either (see issue #4):
- * the source-prefixed sports table means even "same lifting session"
- * pairs have different sport_ids until manually merged. The user picks
- * the composite's sport at merge time.
+ * Sport-id equality is intentionally NOT a filter (see issue #4): the
+ * source-prefixed sports table means even "same lifting session" pairs have
+ * different sport_ids until manually merged. The user picks the composite's
+ * sport at merge time.
  */
 export interface CandidatePair {
   aId: number;
@@ -79,11 +79,14 @@ const RECENT_DAYS = 14;
  */
 export async function findDuplicateCandidates(
   userId: number,
-  opts: { recent?: boolean; limit?: number } = {},
+  opts: { recent?: boolean; limit?: number | null } = {},
   conn: AnyPgDb = db,
 ): Promise<CandidatePair[]> {
   const recent = opts.recent ?? false;
-  const limit = opts.limit ?? 500;
+  // Default to 500 (the /home card). Pass `limit: null` for an unbounded
+  // result — the /data/duplicates cleanup queue + bulk routes need EVERY
+  // pair so grouping is complete and dismissing a group is monotonic.
+  const limit = opts.limit === undefined ? 500 : opts.limit;
 
   const result = await conn.execute<{
     a_id: number;
@@ -116,6 +119,7 @@ export async function findDuplicateCandidates(
     FROM events a
     JOIN events b ON a.user_id = b.user_id
                   AND a.id < b.id
+                  AND a.source != b.source
                   AND b.started_at BETWEEN
                         a.started_at - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
                     AND a.started_at + INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
@@ -142,7 +146,7 @@ export async function findDuplicateCandidates(
           AND d.event_b_id = GREATEST(a.id, b.id)
       )
     ORDER BY a.started_at DESC
-    LIMIT ${limit}
+    ${limit === null ? sql`` : sql`LIMIT ${limit}`}
   `);
 
   // postgres-js execute() returns the row array directly; pglite returns

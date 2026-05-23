@@ -20,7 +20,12 @@ export const dynamic = "force-dynamic";
  */
 export default async function DuplicatesPage() {
   const user = await requireUserOrSignin();
-  const pairs = await findDuplicateCandidates(user.id, { recent: false });
+  // No limit: this cleanup queue needs every pair so the grouped table is
+  // complete and dismissing a group is monotonic (no truncation churn).
+  const pairs = await findDuplicateCandidates(user.id, {
+    recent: false,
+    limit: null,
+  });
   const groups = groupCandidates(pairs);
   const sportOptions = await db
     .select({ id: sports.id, name: sports.name })
