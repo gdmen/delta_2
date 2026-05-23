@@ -45,6 +45,9 @@ export function DuplicatesView({
   const [mergeGroup, setMergeGroup] = useState<CandidateGroup | null>(null);
   const [mergeSportId, setMergeSportId] = useState<number | null>(null);
   const [bulkMergeRunning, setBulkMergeRunning] = useState(false);
+  // The "All pairs" list is unbounded now (no detector LIMIT), so paginate
+  // it client-side rather than rendering thousands of rows.
+  const [pairPage, setPairPage] = useState(0);
 
   // Multi-select state for the top section, keyed by the stable group key
   // (all fields come off the canonicalized group object). The selection
@@ -234,18 +237,60 @@ export function DuplicatesView({
           All pairs ({pairs.length})
         </h2>
         <div className="space-y-2">
-          {pairs.map((p) => {
-            const key = `${p.aId}-${p.bId}`;
+          {(() => {
+            const PER_PAGE = 50;
+            const pageCount = Math.max(1, Math.ceil(pairs.length / PER_PAGE));
+            const page = Math.min(pairPage, pageCount - 1);
+            const start = page * PER_PAGE;
+            const visible = pairs.slice(start, start + PER_PAGE);
             return (
-              <PairRow
-                key={key}
-                p={p}
-                onMerge={() => setMergeTarget(p)}
-                onDismiss={() => dismissOne(p)}
-                dismissing={individualRunning === key}
-              />
+              <>
+                {visible.map((p) => {
+                  const key = `${p.aId}-${p.bId}`;
+                  return (
+                    <PairRow
+                      key={key}
+                      p={p}
+                      onMerge={() => setMergeTarget(p)}
+                      onDismiss={() => dismissOne(p)}
+                      dismissing={individualRunning === key}
+                    />
+                  );
+                })}
+                {pageCount > 1 && (
+                  <div className="flex items-center justify-between pt-2 text-[0.75rem] text-muted">
+                    <span>
+                      {start + 1}–{Math.min(start + PER_PAGE, pairs.length)} of{" "}
+                      {pairs.length}
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPairPage(Math.max(0, page - 1))}
+                        disabled={page === 0}
+                        className="px-2 py-1 border border-border rounded hover:bg-surface/40 disabled:opacity-40"
+                      >
+                        Prev
+                      </button>
+                      <span className="px-1 py-1 font-mono">
+                        {page + 1}/{pageCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPairPage(Math.min(pageCount - 1, page + 1))
+                        }
+                        disabled={page >= pageCount - 1}
+                        className="px-2 py-1 border border-border rounded hover:bg-surface/40 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
       </section>
 

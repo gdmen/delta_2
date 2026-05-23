@@ -54,8 +54,13 @@ export async function POST(request: NextRequest) {
   }
   const tuples = body.groups;
 
-  // One detector pass; filter to pairs matching any selected tuple.
-  const pairs = await findDuplicateCandidates(user.id, { recent: false });
+  // One detector pass; filter to pairs matching any selected tuple. No
+  // limit — must see every pair so a group is fully dismissed, not just its
+  // first 500.
+  const pairs = await findDuplicateCandidates(user.id, {
+    recent: false,
+    limit: null,
+  });
   const matching = pairs.filter((p) => tuples.some((t) => pairMatchesTuple(p, t)));
 
   if (matching.length === 0) {
