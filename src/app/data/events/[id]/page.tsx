@@ -100,7 +100,10 @@ export default async function EventDetailPage({
         inArray(workoutSets.eventId, ownedEventIds),
       ),
     )
-    .orderBy(asc(workoutSets.setNumber));
+    // Sort exercise-first so all sets of one lift stay contiguous, then
+    // set # within each exercise. Tie-break on id so the order is fully
+    // deterministic when two rows somehow share (exercise, set #).
+    .orderBy(asc(metricTypes.name), asc(workoutSets.setNumber), asc(workoutSets.id));
 
   const emRows = await db
     .select({

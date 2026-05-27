@@ -102,7 +102,14 @@ export async function CompositeView({
             inArray(workoutSets.eventId, ownedEventIds),
           ),
         )
-        .orderBy(asc(events.startedAt), asc(workoutSets.setNumber))
+        // Per member event (startedAt), then exercise-first so all sets of
+        // one lift stay contiguous, then set #. Tie-break on id.
+        .orderBy(
+          asc(events.startedAt),
+          asc(metricTypes.name),
+          asc(workoutSets.setNumber),
+          asc(workoutSets.id),
+        )
     : [];
 
   const ems = memberIds.length
