@@ -9,7 +9,7 @@ interface GoalBarProps {
   requiredRate: string;
   status: "complete" | "on-track" | "behind" | "critical";
   href?: string;
-  sportColor?: string;
+  activityColor?: string;
 }
 
 export function GoalBar({
@@ -21,7 +21,7 @@ export function GoalBar({
   requiredRate,
   status,
   href,
-  sportColor,
+  activityColor,
 }: GoalBarProps) {
   const fillColor = {
     complete: "bg-accent-green",
@@ -41,10 +41,10 @@ export function GoalBar({
     <>
       <div className="flex justify-between items-baseline mb-[3px] gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          {sportColor && (
+          {activityColor && (
             <span
               className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-              style={{ backgroundColor: sportColor }}
+              style={{ backgroundColor: activityColor }}
             />
           )}
           <span className="text-[0.8125rem] font-medium truncate">{name}</span>

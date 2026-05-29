@@ -4,18 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { slugify } from "@/lib/dashboards/slug";
 
-interface SportRow {
+interface ActivityRow {
   id: number;
   name: string;
   color: string;
 }
 
-export function NewDashboardForm({ sports }: { sports: SportRow[] }) {
+export function NewDashboardForm({ activities }: { activities: ActivityRow[] }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
-  const [sportId, setSportId] = useState<number | "">("");
+  const [activityId, setActivityId] = useState<number | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +35,7 @@ export function NewDashboardForm({ sports }: { sports: SportRow[] }) {
         body: JSON.stringify({
           name: name.trim(),
           slug: derivedSlug || undefined,
-          sportId: sportId === "" ? null : sportId,
+          activityId: activityId === "" ? null : activityId,
         }),
       });
       const json = (await res.json()) as { dashboard?: { slug: string }; error?: string };
@@ -89,15 +89,15 @@ export function NewDashboardForm({ sports }: { sports: SportRow[] }) {
         />
       </Field>
 
-      <Field label="Sport (optional)" htmlFor="sport">
+      <Field label="Activity (optional)" htmlFor="activity">
         <select
-          id="sport"
-          value={sportId}
-          onChange={(e) => setSportId(e.target.value === "" ? "" : Number(e.target.value))}
+          id="activity"
+          value={activityId}
+          onChange={(e) => setActivityId(e.target.value === "" ? "" : Number(e.target.value))}
           className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground bg-background"
         >
           <option value="">— None —</option>
-          {sports.map((s) => (
+          {activities.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>

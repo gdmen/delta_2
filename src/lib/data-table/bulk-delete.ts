@@ -64,17 +64,17 @@ export async function deleteMetricTypesBulk<T>(
 }
 
 /**
- * Same shape but for sports. Hits DELETE /api/sports/:id which
+ * Same shape but for activities. Hits DELETE /api/activities/:id which
  * applies the same FK-reference policy as metric_types.
  */
-export async function deleteSportsBulk<T>(
+export async function deleteActivitiesBulk<T>(
   rows: T[],
   getId: (row: T) => number,
   getName: (row: T) => string,
 ): Promise<BulkDeleteResult<T>> {
   const settled = await Promise.allSettled(
     rows.map(async (row) => {
-      const res = await fetch(`/api/sports/${getId(row)}`, { method: "DELETE" });
+      const res = await fetch(`/api/activities/${getId(row)}`, { method: "DELETE" });
       if (res.ok) return { row, ok: true as const };
       let message = `${getName(row)}: HTTP ${res.status}`;
       try {

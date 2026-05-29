@@ -16,7 +16,7 @@ export function GoalListComponent({
 }) {
   const raw = data.get(dataKey(config));
   const goals: GoalRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as GoalRow[]);
-  const heading = config.sportFilter ? `${config.sportFilter} goals` : "Goals";
+  const heading = config.activityFilter ? `${config.activityFilter} goals` : "Goals";
 
   return (
     <div>
@@ -62,7 +62,7 @@ export function GoalListComponent({
               requiredRate={formatRate(p.requiredRatePerWeek, g.metricUnit)}
               status={uiStatus}
               href={shareMode ? undefined : `/goals/${g.id}`}
-              sportColor={g.sportColor}
+              activityColor={g.activityColor}
             />
           );
         })

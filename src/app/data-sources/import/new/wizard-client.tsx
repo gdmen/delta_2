@@ -14,7 +14,7 @@ import {
   MappingEditor,
   defaultMappingForKind,
   useMetricTypeNames,
-  useSportNames,
+  useActivityNames,
   type Kind,
 } from "../_shared/mapping-editor";
 
@@ -41,7 +41,7 @@ export function WizardClient() {
   const [saving, setSaving] = useState(false);
 
   const metricNames = useMetricTypeNames();
-  const sportNames = useSportNames();
+  const activityNames = useActivityNames();
 
   async function handleFile(file: File, currentKind: Kind) {
     setCsvFile(file);
@@ -216,7 +216,7 @@ export function WizardClient() {
           headers={preview.headers}
           onChange={updateMapping}
           metricNameSuggestions={metricNames}
-          sportSuggestions={sportNames}
+          activitySuggestions={activityNames}
           distinctValuesByColumn={distinctValuesByColumn}
         />
 

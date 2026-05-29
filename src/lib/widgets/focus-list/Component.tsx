@@ -14,7 +14,7 @@ export function FocusListComponent({
 }) {
   const raw = data.get(dataKey(config));
   const focuses: FocusRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as FocusRow[]);
-  const heading = config.sportFilter ? `${config.sportFilter} focuses` : "Focuses";
+  const heading = config.activityFilter ? `${config.activityFilter} focuses` : "Focuses";
 
   return (
     <div>
@@ -35,7 +35,7 @@ export function FocusListComponent({
           <FocusCard
             key={f.id}
             name={f.name}
-            sportColor={f.sportColor}
+            activityColor={f.activityColor}
             weekNumber={f.weekNumber}
             sparklineData={[]}
             valueLabel="-"

@@ -1,5 +1,5 @@
 import { db } from "./index";
-import { metricTypes, sports, workoutSets } from "./schema";
+import { metricTypes, activities, workoutSets } from "./schema";
 import { eq, sql } from "drizzle-orm";
 import { slugifyExercise } from "../lib/computed-metrics";
 
@@ -11,9 +11,9 @@ import { slugifyExercise } from "../lib/computed-metrics";
 // driven entirely by what the user actually uses, instead of starting
 // every DB with 21 rows that may or may not match the user's intent.
 //
-// Sports follow the same model: they auto-create on first import via
-// src/lib/ingest/sport-resolver.ts as `<source>:<rawName>`; user merges
-// into canonical names via /data/sports.
+// Activities follow the same model: they auto-create on first import via
+// src/lib/ingest/activity-resolver.ts as `<source>:<rawName>`; user merges
+// into canonical names via /data/activities.
 //
 // Computed metric_types are still seeded — those are synthesized at
 // read time from workout_sets and need a metric_types row to exist for
@@ -34,20 +34,20 @@ async function seed() {
  *   - target / higher-is-better edits via /data/metrics/<name> work
  *
  * Idempotent: re-running the seed is safe (INSERT OR IGNORE on the
- * unique-name index). Adding a new sport or starting to record a new
+ * unique-name index). Adding a new activity or starting to record a new
  * exercise will pick up its computed entries on the next seed run.
  */
 async function seedComputedMetricTypes() {
   console.log("Seeding computed metric types...");
 
-  const sportRows = await db.select({ id: sports.id, name: sports.name }).from(sports);
-  for (const s of sportRows) {
+  const activityRows = await db.select({ id: activities.id, name: activities.name }).from(activities);
+  for (const s of activityRows) {
     await db
       .insert(metricTypes)
       .values({
         name: `sport_sessions_count_${s.name}`,
         unit: "sessions",
-        sportId: s.id,
+        activityId: s.id,
         frequencyHint: "daily",
       })
       .onConflictDoNothing();
@@ -56,7 +56,7 @@ async function seedComputedMetricTypes() {
       .values({
         name: `sport_minutes_${s.name}`,
         unit: "min",
-        sportId: s.id,
+        activityId: s.id,
         frequencyHint: "daily",
       })
       .onConflictDoNothing();

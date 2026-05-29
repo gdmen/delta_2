@@ -8,7 +8,7 @@ export type SortState = { colIdx: number; dir: SortDir } | null;
 
 /**
  * Catalog-table state: filter + sort + the shared row-selection machine +
- * merge/delete chrome (metrics, sports, exercises, aliases). The selection
+ * merge/delete chrome (metrics, activities, exercises, aliases). The selection
  * itself lives in `useRowSelection` (shared with the events list and the
  * duplicates view); this hook layers the catalog-only concerns on top and
  * adapts the key-based selection API to the row objects the table renders.

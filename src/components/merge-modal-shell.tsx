@@ -3,7 +3,7 @@
 import { ReactNode } from "react";
 
 /**
- * Chrome + footer for the three merge modals (metric-types, sports,
+ * Chrome + footer for the three merge modals (metric-types, activities,
  * exercises). Wraps an overlay + bordered panel with title/description,
  * Cancel/Merge footer buttons, and a standard error region. Per-kind
  * content (canonical picker, summary stats, unit rescale) renders as

@@ -3,7 +3,7 @@ import { DataTabs, type DataTab } from "@/app/data/tabs";
 import { ImportExportBar } from "@/app/data/import-export-bar";
 
 /**
- * Unified chrome for /data, /data/events, /data/sports, /data/exercises:
+ * Unified chrome for /data, /data/events, /data/activities, /data/exercises:
  * page header + import/export bar + tab nav + an optional sub-header row
  * (section label + count). Each tab's unique content renders as children.
  */

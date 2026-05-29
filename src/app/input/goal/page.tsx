@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
-interface Sport {
+interface Activity {
   id: number;
   name: string;
   color: string;
@@ -13,7 +13,7 @@ interface MetricType {
   id: number;
   name: string;
   unit: string;
-  sportId: number | null;
+  activityId: number | null;
 }
 
 interface Goal {
@@ -21,8 +21,8 @@ interface Goal {
   name: string | null;
   metricName: string;
   metricUnit: string;
-  sportName: string;
-  sportColor: string;
+  activityName: string;
+  activityColor: string;
   targetValue: number;
   deadline: string;
   status: string;
@@ -31,11 +31,11 @@ interface Goal {
 }
 
 export default function GoalInputPage() {
-  const [sportList, setSportList] = useState<Sport[]>([]);
+  const [activityList, setActivityList] = useState<Activity[]>([]);
   const [metricList, setMetricList] = useState<MetricType[]>([]);
   const [goalList, setGoalList] = useState<Goal[]>([]);
 
-  const [sportId, setSportId] = useState<number | null>(null);
+  const [activityId, setActivityId] = useState<number | null>(null);
   const [metricTypeId, setMetricTypeId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [targetValue, setTargetValue] = useState("");
@@ -43,15 +43,15 @@ export default function GoalInputPage() {
   const [submitting, setSubmitting] = useState(false);
 
   async function loadData() {
-    const [sportsRes, metricsRes, goalsRes] = await Promise.all([
-      fetch("/api/sports"),
+    const [activitiesRes, metricsRes, goalsRes] = await Promise.all([
+      fetch("/api/activities"),
       fetch("/api/metric-types"),
       fetch("/api/goals"),
     ]);
-    const sportsData = await sportsRes.json();
+    const activitiesData = await activitiesRes.json();
     const metricsData = await metricsRes.json();
     const goalsData = await goalsRes.json();
-    setSportList(sportsData);
+    setActivityList(activitiesData);
     setMetricList(metricsData);
     setGoalList(goalsData);
   }
@@ -62,16 +62,16 @@ export default function GoalInputPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [sportsRes, metricsRes, goalsRes] = await Promise.all([
-        fetch("/api/sports"),
+      const [activitiesRes, metricsRes, goalsRes] = await Promise.all([
+        fetch("/api/activities"),
         fetch("/api/metric-types"),
         fetch("/api/goals"),
       ]);
-      const sportsData = await sportsRes.json();
+      const activitiesData = await activitiesRes.json();
       const metricsData = await metricsRes.json();
       const goalsData = await goalsRes.json();
       if (cancelled) return;
-      setSportList(sportsData);
+      setActivityList(activitiesData);
       setMetricList(metricsData);
       setGoalList(goalsData);
     })();
@@ -80,12 +80,12 @@ export default function GoalInputPage() {
     };
   }, []);
 
-  // When sport changes, restrict metric options to that sport or cross-sport.
+  // When activity changes, restrict metric options to that activity or cross-activity.
   const availableMetrics = metricList.filter(
-    (m) => m.sportId === null || m.sportId === sportId
+    (m) => m.activityId === null || m.activityId === activityId
   );
 
-  // Clear invalid metric selection when sport changes — derived during
+  // Clear invalid metric selection when activity changes — derived during
   // render rather than reset via useEffect+setState, per React 19's
   // "you might not need an effect" guidance.
   const effectiveMetricTypeId =
@@ -97,14 +97,14 @@ export default function GoalInputPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!sportId || !effectiveMetricTypeId || !targetValue || !deadline) return;
+    if (!activityId || !effectiveMetricTypeId || !targetValue || !deadline) return;
     setSubmitting(true);
 
     const res = await fetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sportId,
+        activityId,
         metricTypeId: effectiveMetricTypeId,
         name: name.trim() || null,
         targetValue: parseFloat(targetValue),
@@ -133,15 +133,15 @@ export default function GoalInputPage() {
         <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">Add a New Goal</h2>
 
         <div>
-          <label className="block text-[0.75rem] text-muted mb-1">Sport</label>
+          <label className="block text-[0.75rem] text-muted mb-1">Activity</label>
           <select
-            value={sportId ?? ""}
-            onChange={(e) => setSportId(e.target.value === "" ? null : parseInt(e.target.value, 10))}
+            value={activityId ?? ""}
+            onChange={(e) => setActivityId(e.target.value === "" ? null : parseInt(e.target.value, 10))}
             className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground"
             required
           >
-            <option value="">Pick a sport...</option>
-            {sportList.map((s) => (
+            <option value="">Pick a activity...</option>
+            {activityList.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name === "bjj" ? "BJJ" : s.name.charAt(0).toUpperCase() + s.name.slice(1)}
               </option>
@@ -209,7 +209,7 @@ export default function GoalInputPage() {
 
         <button
           type="submit"
-          disabled={submitting || !sportId || !metricTypeId || !targetValue || !deadline}
+          disabled={submitting || !activityId || !metricTypeId || !targetValue || !deadline}
           className="px-6 py-2.5 bg-foreground text-background text-[0.875rem] font-medium rounded hover:opacity-90 disabled:opacity-50"
         >
           Create Goal
@@ -254,14 +254,14 @@ function GoalList({ title, items, dim = false, emptyMessage }: { title: string; 
               <div className="flex items-center gap-3 min-w-0">
                 <span
                   className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-                  style={{ backgroundColor: g.sportColor }}
+                  style={{ backgroundColor: g.activityColor }}
                 />
                 <div className="min-w-0">
                   <div className="text-[0.875rem] font-medium">
                     {g.name?.trim() || `${g.metricName} ${g.targetValue}${g.metricUnit}`}
                   </div>
                   <div className="font-mono text-[0.6875rem] text-muted">
-                    {g.sportName.toUpperCase()} · {g.metricName} {g.targetValue}{g.metricUnit} · by {g.deadline} · {daysLeft}d left
+                    {g.activityName.toUpperCase()} · {g.metricName} {g.targetValue}{g.metricUnit} · by {g.deadline} · {daysLeft}d left
                   </div>
                 </div>
               </div>

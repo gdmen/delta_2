@@ -6,8 +6,8 @@ import { utcIsoToLocalInput } from "@/lib/format";
 
 interface Event {
   id: number;
-  sportId: number;
-  sportName: string;
+  activityId: number;
+  activityName: string;
   type: string;
   durationMinutes: number | null;
   notes: string | null;
@@ -34,20 +34,20 @@ interface EventMetricRow {
   value: number;
 }
 
-interface Sport { id: number; name: string; }
+interface Activity { id: number; name: string; }
 interface MetricTypeOption { id: number; name: string; unit: string; }
 
 export function EventEditor({
   event,
-  sports,
+  activities,
   initialSets,
   initialEventMetrics,
   metricTypes,
   headerOnly = false,
-  typeSuggestionsBySportId,
+  typeSuggestionsByActivityId,
 }: {
   event: Event;
-  sports: Sport[];
+  activities: Activity[];
   initialSets: WorkoutSetRow[];
   initialEventMetrics: EventMetricRow[];
   metricTypes: MetricTypeOption[];
@@ -60,12 +60,12 @@ export function EventEditor({
    */
   headerOnly?: boolean;
   /**
-   * Existing `events.type` values seen for each sport_id. Drives the
-   * Type input's datalist + the "existing types for this sport: …"
+   * Existing `events.type` values seen for each activity_id. Drives the
+   * Type input's datalist + the "existing types for this activity: …"
    * hint, mirroring the New Event form. Free-text; the input doesn't
    * restrict to these. Omit for no suggestions.
    */
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
@@ -73,7 +73,7 @@ export function EventEditor({
 
   // Event header editable draft.
   const [header, setHeader] = useState({
-    sportId: event.sportId,
+    activityId: event.activityId,
     type: event.type,
     startedAt: utcIsoToLocalInput(event.startedAt),
     durationMinutes: event.durationMinutes?.toString() ?? "",
@@ -99,7 +99,7 @@ export function EventEditor({
   const imported = event.source !== "manual" && event.source !== "composite";
 
   const typeSuggestions =
-    typeSuggestionsBySportId?.[header.sportId]?.filter(
+    typeSuggestionsByActivityId?.[header.activityId]?.filter(
       (t) => t.trim().length > 0,
     ) ?? [];
 
@@ -111,7 +111,7 @@ export function EventEditor({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sportId: header.sportId,
+        activityId: header.activityId,
         type: header.type,
         startedAt: new Date(header.startedAt).toISOString(),
         durationMinutes: dur,
@@ -253,13 +253,13 @@ export function EventEditor({
           Event
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-border rounded p-4">
-          <Field label="Sport">
+          <Field label="Activity">
             <select
-              value={header.sportId}
-              onChange={(e) => { setHeader((h) => ({ ...h, sportId: Number(e.target.value) })); setHeaderDirty(true); }}
+              value={header.activityId}
+              onChange={(e) => { setHeader((h) => ({ ...h, activityId: Number(e.target.value) })); setHeaderDirty(true); }}
               className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
             >
-              {sports.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {activities.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
           <Field label="Type">
@@ -279,7 +279,7 @@ export function EventEditor({
             )}
             {typeSuggestions.length > 0 && (
               <p className="mt-1 text-[0.6875rem] font-mono text-muted">
-                existing types for this sport: {typeSuggestions.join(", ")}
+                existing types for this activity: {typeSuggestions.join(", ")}
               </p>
             )}
           </Field>

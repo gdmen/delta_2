@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-interface Sport {
+interface Activity {
   id: number;
   name: string;
   color: string;
@@ -12,10 +12,10 @@ interface Sport {
 
 export default function NewMetricPage() {
   const router = useRouter();
-  const [sportList, setSportList] = useState<Sport[]>([]);
+  const [activityList, setActivityList] = useState<Activity[]>([]);
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
-  const [sportId, setSportId] = useState<number | "">("");
+  const [activityId, setActivityId] = useState<number | "">("");
   const [frequencyHint, setFrequencyHint] = useState<
     "daily" | "weekly" | "occasional"
   >("daily");
@@ -23,10 +23,10 @@ export default function NewMetricPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/sports")
+    fetch("/api/activities")
       .then((r) => r.json())
-      .then((data: Sport[]) => setSportList(data))
-      .catch(() => setSportList([]));
+      .then((data: Activity[]) => setActivityList(data))
+      .catch(() => setActivityList([]));
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -45,7 +45,7 @@ export default function NewMetricPage() {
         body: JSON.stringify({
           name: name.trim(),
           unit: unit.trim(),
-          sportId: sportId === "" ? null : sportId,
+          activityId: activityId === "" ? null : activityId,
           frequencyHint,
         }),
       });
@@ -117,25 +117,25 @@ export default function NewMetricPage() {
 
         <div>
           <label className="block text-[0.8125rem] font-medium mb-1">
-            Sport <span className="text-muted">(optional)</span>
+            Activity <span className="text-muted">(optional)</span>
           </label>
           <select
-            value={sportId}
+            value={activityId}
             onChange={(e) =>
-              setSportId(e.target.value === "" ? "" : Number(e.target.value))
+              setActivityId(e.target.value === "" ? "" : Number(e.target.value))
             }
             className="w-full px-3 py-1.5 border border-border rounded text-[0.875rem] bg-background"
             disabled={submitting}
           >
-            <option value="">— none (cross-sport) —</option>
-            {sportList.map((s) => (
+            <option value="">— none (cross-activity) —</option>
+            {activityList.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
           </select>
           <p className="text-[0.75rem] text-muted mt-1">
-            Cross-sport metrics like body weight or sleep usually have no sport.
+            Cross-activity metrics like body weight or sleep usually have no activity.
           </p>
         </div>
 

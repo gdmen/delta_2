@@ -14,7 +14,7 @@ export function SessionsListComponent({
 }) {
   const raw = data.get(dataKey(config));
   const rows: SessionRow[] = isDataDepError(raw) || raw === undefined ? [] : (raw as SessionRow[]);
-  const heading = config.sportFilter ? `${config.sportFilter} sessions` : "Recent sessions";
+  const heading = config.activityFilter ? `${config.activityFilter} sessions` : "Recent sessions";
 
   return (
     <div>
@@ -39,7 +39,7 @@ export function SessionsListComponent({
               >
                 <span
                   className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-                  style={{ backgroundColor: s.sportColor }}
+                  style={{ backgroundColor: s.activityColor }}
                 />
                 <span className="truncate">{s.type}</span>
               </MaybeLink>

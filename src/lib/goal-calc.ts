@@ -14,8 +14,8 @@ export interface GoalSummary {
   metricTypeId: number;
   metricName: string;
   metricUnit: string;
-  sportName: string;
-  sportColor: string;
+  activityName: string;
+  activityColor: string;
   /** User-facing name. Null = display the derived `<metric> <target><unit>` string. */
   name: string | null;
   targetValue: number;

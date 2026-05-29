@@ -10,12 +10,12 @@
   --color-text-secondary: #404040;
   --color-text-tertiary: #737373;
 
-  /* Sport colors */
-  --color-sport-pl: #2563eb;
-  --color-sport-bjj: #db2777;
-  --color-sport-run: #059669;
-  --color-sport-hike: #7c3aed;
-  --color-sport-bike: #d97706;
+  /* Activity colors */
+  --color-activity-pl: #2563eb;
+  --color-activity-bjj: #db2777;
+  --color-activity-run: #059669;
+  --color-activity-hike: #7c3aed;
+  --color-activity-bike: #d97706;
 
   /* Status colors */
   --color-accent-orange: #f97316;

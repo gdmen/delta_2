@@ -13,7 +13,7 @@
  *
  *   const ctx = setupRouteTest();
  *   it("does the thing", async () => {
- *     await ctx.db.insert(sports).values({ ... });
+ *     await ctx.db.insert(activities).values({ ... });
  *     const res = await POST();
  *     expect(res.status).toBe(200);
  *   });
@@ -178,7 +178,7 @@ export function setupRouteTest() {
           workout_sets, event_metrics, goal_journal_entries,
           event_journal_entries, coach_calls,
           focuses, goals, events, metrics, metric_type_aliases, metric_types,
-          sports, daily_summaries, reconcile_log, merge_log, source_settings,
+          activities, daily_summaries, reconcile_log, merge_log, source_settings,
           import_sources, dashboard_widgets, dashboards,
           ingest_configs, invite_codes, session_denylist, oauth_states,
           dashboard_share_tokens, users, accounts, sessions, verification_tokens

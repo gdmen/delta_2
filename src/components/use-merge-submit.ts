@@ -15,7 +15,7 @@ import { dispatchUndoToast } from "@/components/undo-toast";
 export function useMergeSubmit(
   url: string,
   onSuccess: () => void,
-  toastKind: "metric_type" | "sport",
+  toastKind: "metric_type" | "activity",
 ) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);

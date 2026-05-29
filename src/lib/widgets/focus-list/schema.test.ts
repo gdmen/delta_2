@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { focusListSchema } from "./schema";
 
 describe("focusListSchema", () => {
-  it("defaults sourceFilter to manual and sportFilter to null", () => {
+  it("defaults sourceFilter to manual and activityFilter to null", () => {
     const parsed = focusListSchema.parse({});
-    expect(parsed.sportFilter).toBeNull();
+    expect(parsed.activityFilter).toBeNull();
     expect(parsed.sourceFilter).toBe("manual");
   });
 
   it("accepts the seeded Today config", () => {
-    const parsed = focusListSchema.parse({ sportFilter: null, sourceFilter: "manual" });
+    const parsed = focusListSchema.parse({ activityFilter: null, sourceFilter: "manual" });
     expect(parsed.sourceFilter).toBe("manual");
   });
 

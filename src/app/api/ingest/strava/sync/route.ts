@@ -10,7 +10,7 @@ import {
   resolveMetricTypeId,
   MetricTypeCache,
 } from "@/lib/ingest/metric-resolver";
-import { buildSportCache, resolveSportId, SportCache } from "@/lib/ingest/sport-resolver";
+import { buildActivityCache, resolveActivityId, ActivityCache } from "@/lib/ingest/activity-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
 // Strava emits SI (meters). distance_km for the canonical metric;
@@ -81,11 +81,11 @@ export async function POST(request: NextRequest) {
     afterUnix = Math.floor(fallback / 1000);
   }
 
-  // Sport cache feeds resolveSportId; metric_type cache attaches
+  // Activity cache feeds resolveActivityId; metric_type cache attaches
   // canonical per-event metrics (distance_km, elevation_gain_m, etc.).
-  // Sport names that don't already exist auto-create as `strava:<sport_type>`
-  // — see src/lib/ingest/sport-resolver.ts for the rationale.
-  const sportCache = await buildSportCache(userId);
+  // Activity names that don't already exist auto-create as `strava:<activity_type>`
+  // — see src/lib/ingest/activity-resolver.ts for the rationale.
+  const activityCache = await buildActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
 
   const result: SyncResult = {
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
   try {
     for await (const activity of iterateActivities(userId, afterUnix)) {
       result.fetched++;
-      await ingestOne(userId, activity, sportCache, typeCache, result, tracker);
+      await ingestOne(userId, activity, activityCache, typeCache, result, tracker);
     }
   } catch (err) {
     result.errors.push(err instanceof Error ? err.message : String(err));
@@ -124,26 +124,26 @@ export async function POST(request: NextRequest) {
 async function ingestOne(
   userId: number,
   activity: StravaActivity,
-  sportCache: SportCache,
+  activityCache: ActivityCache,
   typeCache: MetricTypeCache,
   result: SyncResult,
   tracker: ReconcileTracker,
 ): Promise<void> {
-  // Strava's `sport_type` is newer/more specific than `type`; prefer it
+  // Strava's `activity_type` is newer/more specific than `type`; prefer it
   // when present. Falling back to `type` covers older activities that
-  // predate the sport_type field.
-  const rawSport = activity.sport_type ?? activity.type;
-  if (!rawSport) {
+  // predate the activity_type field.
+  const rawActivity = activity.activity_type ?? activity.type;
+  if (!rawActivity) {
     result.skipped++;
     return;
   }
 
-  // Auto-create the sport if it's never been seen. The user merges
-  // `strava:Ride` etc. into canonical names via /data/sports.
-  const sportId = await resolveSportId({
-    rawName: rawSport,
+  // Auto-create the activity if it's never been seen. The user merges
+  // `strava:Ride` etc. into canonical names via /data/activities.
+  const activityId = await resolveActivityId({
+    rawName: rawActivity,
     sourceSystem: "strava",
-    cache: sportCache,
+    cache: activityCache,
   });
 
   // Compose notes from activity metadata that doesn't fit the schema columns.
@@ -167,10 +167,10 @@ async function ingestOne(
     const { status, eventId } = await upsertEvent({
       
       userId,
-      sportId,
-      // Raw Strava sport_type / type goes into events.type verbatim.
+      activityId,
+      // Raw Strava activity_type / type goes into events.type verbatim.
       // No canonical translation — events.type is a free-text label.
-      type: rawSport,
+      type: rawActivity,
       durationMinutes: Math.round((activity.moving_time ?? activity.elapsed_time ?? 0) / 60),
       notes,
       startedAt: activity.start_date,

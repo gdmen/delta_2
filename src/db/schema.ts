@@ -179,8 +179,8 @@ export const dashboardShareTokens = pgTable(
 // OWNED TABLES (every row has a user_id; cascade-delete on user removal)
 // =============================================================================
 
-export const sports = pgTable(
-  "sports",
+export const activities = pgTable(
+  "activities",
   {
     id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
     userId: integer("user_id")
@@ -191,7 +191,7 @@ export const sports = pgTable(
     color: text("color").notNull(),
     createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
-  (t) => [uniqueIndex("sports_user_name_uniq").on(t.userId, t.name)],
+  (t) => [uniqueIndex("activities_user_name_uniq").on(t.userId, t.name)],
 );
 
 export const metricTypes = pgTable(
@@ -203,7 +203,7 @@ export const metricTypes = pgTable(
       .default(1)
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    sportId: integer("sport_id").references(() => sports.id),
+    activityId: integer("activity_id").references(() => activities.id),
     unit: text("unit").notNull(),
     frequencyHint: text("frequency_hint", {
       enum: ["daily", "weekly", "occasional"],
@@ -322,7 +322,7 @@ export const events = pgTable(
       .notNull()
       .default(1)
       .references(() => users.id, { onDelete: "cascade" }),
-    sportId: integer("sport_id").notNull().references(() => sports.id),
+    activityId: integer("activity_id").notNull().references(() => activities.id),
     type: text("type").notNull(),
     durationMinutes: integer("duration_minutes"),
     notes: text("notes"),
@@ -349,7 +349,7 @@ export const events = pgTable(
     createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
   },
   (t) => [
-    index("idx_events_sport_started").on(t.sportId, t.startedAt),
+    index("idx_events_sport_started").on(t.activityId, t.startedAt),
     uniqueIndex("idx_events_user_source_id").on(t.userId, t.sourceId),
     index("idx_events_user").on(t.userId),
     // Powers the duplicate-event detector's BETWEEN-on-started_at range
@@ -443,7 +443,7 @@ export const goals = pgTable("goals", {
   metricTypeId: integer("metric_type_id")
     .notNull()
     .references(() => metricTypes.id),
-  sportId: integer("sport_id").notNull().references(() => sports.id),
+  activityId: integer("activity_id").notNull().references(() => activities.id),
   // Optional user-facing label. When null, every UI surface falls back
   // to the derived `<metric> <target><unit>` string so legacy rows look
   // unchanged. Editable from /goals/[id].
@@ -462,7 +462,7 @@ export const goals = pgTable("goals", {
  * `source: 'llm'` is what the LLM proposed from training data, with `evidence`
  * carrying the workout_ids / metric trends that drove the suggestion.
  *
- * Sport is reachable via the goal — focuses don't carry sport_id directly.
+ * Activity is reachable via the goal — focuses don't carry activity_id directly.
  * Promote-an-llm-focus = update source to 'manual'. Dismiss = set dismissed_at.
  *
  * INHERIT table — no user_id; scope via parent goal row.
@@ -653,7 +653,7 @@ export const appSettings = pgTable("app_settings", {
 });
 
 /**
- * Audit log for merges (sport + metric_type). One row per merge call,
+ * Audit log for merges (activity + metric_type). One row per merge call,
  * inserted inside the same transaction that performs the merge so a
  * failure rolls everything back together. Drives /data/merges and the
  * inline undo toast.
@@ -673,7 +673,7 @@ export const mergeLog = pgTable(
       .notNull()
       .default(1)
       .references(() => users.id, { onDelete: "cascade" }),
-    kind: text("kind", { enum: ["metric_type", "sport"] }).notNull(),
+    kind: text("kind", { enum: ["metric_type", "activity"] }).notNull(),
     createdAt: isoTimestamptz("created_at").$defaultFn(isoNow).notNull(),
     canonicalId: integer("canonical_id").notNull(),
     canonicalName: text("canonical_name").notNull(),
@@ -769,7 +769,7 @@ export const dailySummaries = pgTable(
  * deploys check for the seeded marker, not the slug, so renaming "Today" to
  * "Home" doesn't trigger a re-insert. NULL for user-created rows.
  *
- * `sport_id` is optional and drives the sport-color dot in the sidebar.
+ * `activity_id` is optional and drives the activity-color dot in the sidebar.
  * `position` orders dashboards in the sidebar.
  */
 export const dashboards = pgTable(
@@ -783,7 +783,7 @@ export const dashboards = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     icon: text("icon"),
-    sportId: integer("sport_id").references(() => sports.id, {
+    activityId: integer("activity_id").references(() => activities.id, {
       onDelete: "set null",
     }),
     position: integer("position").notNull().default(0),

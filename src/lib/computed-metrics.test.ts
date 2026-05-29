@@ -8,20 +8,20 @@ describe("matchComputed", () => {
     expect(matchComputed("bodyweight")).toBeNull();
   });
 
-  it("matches sport_sessions_count_<sport>", () => {
-    expect(matchComputed("sport_sessions_count_powerlifting")).toEqual({
-      family: "sport_sessions_count",
+  it("matches activity_sessions_count_<activity>", () => {
+    expect(matchComputed("activity_sessions_count_powerlifting")).toEqual({
+      family: "activity_sessions_count",
       subject: "powerlifting",
     });
-    expect(matchComputed("sport_sessions_count_bjj")).toEqual({
-      family: "sport_sessions_count",
+    expect(matchComputed("activity_sessions_count_bjj")).toEqual({
+      family: "activity_sessions_count",
       subject: "bjj",
     });
   });
 
-  it("matches sport_minutes_<sport>", () => {
-    expect(matchComputed("sport_minutes_running")).toEqual({
-      family: "sport_minutes",
+  it("matches activity_minutes_<activity>", () => {
+    expect(matchComputed("activity_minutes_running")).toEqual({
+      family: "activity_minutes",
       subject: "running",
     });
   });

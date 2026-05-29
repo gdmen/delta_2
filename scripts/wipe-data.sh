@@ -40,7 +40,7 @@ echo
 echo "About to DELETE ALL USER DATA from the Postgres database at:"
 echo "  ${DATABASE_URL//:[^:@]*@/:***@}"
 echo
-echo "This wipes: import_sources, metrics, events, sports, exercises,"
+echo "This wipes: import_sources, metrics, events, activities, exercises,"
 echo "merge_log, focuses, goals, dashboards, daily_summaries, reconcile_log."
 echo
 echo "Preserved: ingest_configs (OAuth tokens), app_settings, schema."
@@ -66,7 +66,7 @@ TRUNCATE TABLE
   metrics,
   metric_type_aliases,
   metric_types,
-  sports,
+  activities,
   daily_summaries,
   reconcile_log,
   merge_log,

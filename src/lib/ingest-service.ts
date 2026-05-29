@@ -188,7 +188,7 @@ export interface MetricInput {
 export interface EventInput {
   /** Per-user scoping. Inserted on the row and used to scope dedupe. */
   userId: number;
-  sportId: number;
+  activityId: number;
   type: string;
   durationMinutes?: number | null;
   notes?: string | null;
@@ -258,7 +258,7 @@ export async function upsertMetric(
 
 /**
  * Look up an existing event by source_id first, then fall back to the
- * (started_at, sport_id, type) natural key. Used by CSV importers that
+ * (started_at, activity_id, type) natural key. Used by CSV importers that
  * attach child rows (event_metrics, workout_sets) to parent events —
  * source_id wins when present, natural key handles manual rows.
  */
@@ -266,7 +266,7 @@ export async function resolveEventId(input: {
   userId: number;
   sourceId: string;
   startedAt: string;
-  sportId: number;
+  activityId: number;
   type: string;
 }): Promise<number | null> {
   if (input.sourceId) {
@@ -284,7 +284,7 @@ export async function resolveEventId(input: {
       and(
         eq(events.userId, input.userId),
         eq(events.startedAt, input.startedAt),
-        eq(events.sportId, input.sportId),
+        eq(events.activityId, input.activityId),
         eq(events.type, input.type),
       ),
     )
@@ -306,7 +306,7 @@ export async function upsertEvent(input: EventInput): Promise<{ status: "accepte
 
   const result = await db.insert(events).values({
     userId: input.userId,
-    sportId: input.sportId,
+    activityId: input.activityId,
     type: input.type,
     durationMinutes: input.durationMinutes,
     notes: input.notes,

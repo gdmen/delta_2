@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { goals, metricTypes, sports, metrics, focuses, goalJournalEntries } from "@/db/schema";
+import { goals, metricTypes, activities, metrics, focuses, goalJournalEntries } from "@/db/schema";
 import { and, eq, asc, desc, sql } from "drizzle-orm";
 import { computeGoalProgress, formatRate } from "@/lib/goal-calc";
 import { MetricTrend } from "@/components/metric-trend";
@@ -37,12 +37,12 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
       status: goals.status,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityName: activities.name,
+      activityColor: activities.color,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(userScope(user.id).goals, eq(goals.id, id)))
     .limit(1);
 
@@ -160,7 +160,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
         <div className="flex items-start gap-3 min-w-0 flex-1">
           <span
             className="w-3 h-3 rounded-full flex-shrink-0 mt-2"
-            style={{ backgroundColor: goal.sportColor }}
+            style={{ backgroundColor: goal.activityColor }}
           />
           <div className="min-w-0 flex-1">
             <div className="mb-2">
@@ -173,7 +173,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
             <div className="mb-1 text-[0.75rem] text-muted uppercase tracking-wider font-mono">
               <EditableGoalMetric
                 goalId={goal.id}
-                sportName={goal.sportName}
+                activityName={goal.activityName}
                 initialMetricName={goal.metricName}
                 options={allMetricTypes}
               />
@@ -244,7 +244,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
           </span>
         </div>
         <JournalEntryForm goalId={goal.id} />
-        <JournalList entries={journalEntries} sportColor={goal.sportColor} />
+        <JournalList entries={journalEntries} activityColor={goal.activityColor} />
       </section>
 
       {/* TREND */}
@@ -256,7 +256,7 @@ export default async function GoalDetailPage({ params }: { params: Promise<{ id:
           samples={chartData}
           unit={goal.metricUnit}
           target={goal.targetValue}
-          color={goal.sportColor}
+          color={goal.activityColor}
           height="15rem"
         />
         <p className="mt-2 text-[0.6875rem] text-muted font-mono">

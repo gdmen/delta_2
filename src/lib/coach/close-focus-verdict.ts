@@ -4,7 +4,7 @@ import {
   focuses,
   goals,
   metricTypes,
-  sports,
+  activities,
   goalJournalEntries,
 } from "@/db/schema";
 import { and, eq, gte, inArray, lte, ne, desc, isNotNull } from "drizzle-orm";
@@ -26,7 +26,7 @@ Inputs you receive:
    notes, and any LLM-evidence from when it was originally proposed.
 2. Journal entries the athlete wrote during the focus's window.
 3. Pre-aggregate signals (plateau / rolling avg / recovery debt / volume
-   trend) computed against the goal's sport and the recent training data.
+   trend) computed against the goal's activity and the recent training data.
 4. PRIOR CLOSED FOCUSES on the same goal (when ≥1 exists) — name, dates,
    final status, and a short window of journal entries inside that focus's
    range. Use these to draw cross-focus comparisons.
@@ -86,7 +86,7 @@ interface GoalShape {
   id: number;
   metricName: string;
   metricUnit: string;
-  sportName: string;
+  activityName: string;
   targetValue: number;
   deadline: string;
 }
@@ -126,13 +126,13 @@ async function loadGoal(goalId: number, userId: number): Promise<GoalShape | nul
       id: goals.id,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
+      activityName: activities.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
   return rows[0] ?? null;
@@ -298,7 +298,7 @@ export async function generateCloseFocusVerdict(args: {
 
   const promptTail = [
     "## GOAL",
-    `- ${goal.metricName} ${goal.targetValue}${goal.metricUnit} by ${goal.deadline} (sport: ${goal.sportName})`,
+    `- ${goal.metricName} ${goal.targetValue}${goal.metricUnit} by ${goal.deadline} (activity: ${goal.activityName})`,
     "",
     renderFocusBlock("CLOSING FOCUS", focus, focusJournal),
     "",

@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { goals, metricTypes, sports } from "@/db/schema";
+import { goals, metricTypes, activities } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
 import { userScope } from "@/lib/auth/scope";
@@ -30,12 +30,12 @@ async function fetchGoal(goalId: number, userId: number): Promise<GoalBarData | 
       createdAt: goals.createdAt,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityName: activities.name,
+      activityColor: activities.color,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
 
@@ -48,8 +48,8 @@ async function fetchGoal(goalId: number, userId: number): Promise<GoalBarData | 
     metricUnit: g.metricUnit,
     targetValue: g.targetValue,
     deadline: g.deadline,
-    sportName: g.sportName,
-    sportColor: g.sportColor,
+    activityName: g.activityName,
+    activityColor: g.activityColor,
     progress: await computeGoalProgress(g, userId),
   };
 }

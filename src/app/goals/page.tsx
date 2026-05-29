@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { goals, metricTypes, sports } from "@/db/schema";
+import { goals, metricTypes, activities } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { computeGoalProgress, displayGoalName, formatRate } from "@/lib/goal-calc";
 import { requireUserOrSignin } from "@/lib/auth/require";
@@ -21,12 +21,12 @@ export default async function GoalsListPage() {
       status: goals.status,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityName: activities.name,
+      activityColor: activities.color,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(userScope(user.id).goals)
     .orderBy(desc(goals.deadline));
 
@@ -72,8 +72,8 @@ interface GoalRow {
   name: string | null;
   metricName: string;
   metricUnit: string;
-  sportName: string;
-  sportColor: string;
+  activityName: string;
+  activityColor: string;
   targetValue: number;
   deadline: string;
   progress: Awaited<ReturnType<typeof computeGoalProgress>>;
@@ -117,7 +117,7 @@ function GoalGroup({ title, items, dim = false }: { title: string; items: GoalRo
               <div className="flex items-center gap-3 min-w-0">
                 <span
                   className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-                  style={{ backgroundColor: g.sportColor }}
+                  style={{ backgroundColor: g.activityColor }}
                 />
                 <span className="text-[0.875rem] font-medium truncate">
                   {displayGoalName(g)}

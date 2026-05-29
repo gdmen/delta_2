@@ -7,7 +7,7 @@ vi.mock("@/db", () => buildDbMock());
 import { eq } from "drizzle-orm";
 import {
   users,
-  sports,
+  activities,
   metricTypes,
   metrics,
   events,
@@ -77,7 +77,7 @@ interface Fixture {
   alice: { id: number };
   bob: { id: number };
   // Alice's resources
-  aliceSportId: number;
+  aliceActivityId: number;
   aliceMetricTypeId: number;
   aliceMetricId: number;
   aliceEventId: number;
@@ -124,9 +124,9 @@ beforeEach(async () => {
 
   // Alice's resources.
   const [s] = await db
-    .insert(sports)
-    .values({ userId: 10, name: "alice-sport", color: "#aaa" })
-    .returning({ id: sports.id });
+    .insert(activities)
+    .values({ userId: 10, name: "alice-activity", color: "#aaa" })
+    .returning({ id: activities.id });
 
   const [mt] = await db
     .insert(metricTypes)
@@ -148,7 +148,7 @@ beforeEach(async () => {
     .insert(events)
     .values({
       userId: 10,
-      sportId: s.id,
+      activityId: s.id,
       type: "lift",
       startedAt: "2026-01-01T00:00:00Z",
     })
@@ -165,7 +165,7 @@ beforeEach(async () => {
     .values({
       userId: 10,
       metricTypeId: mt.id,
-      sportId: s.id,
+      activityId: s.id,
       targetValue: 100,
       deadline: "2026-12-31",
     })
@@ -224,7 +224,7 @@ beforeEach(async () => {
   fx = {
     alice: { id: 10 },
     bob: { id: 20 },
-    aliceSportId: s.id,
+    aliceActivityId: s.id,
     aliceMetricTypeId: mt.id,
     aliceMetricId: m.id,
     aliceEventId: ev.id,
@@ -415,10 +415,10 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
     expect(stillThere[0].status).toBe("active");
   });
 
-  it("/api/sports/[id] (DELETE) refuses Bob for Alice's sport", async () => {
+  it("/api/activities/[id] (DELETE) refuses Bob for Alice's activity", async () => {
     asBob();
-    const route = await import("@/app/api/sports/[id]/route");
-    const params = aliceParam("aliceSportId");
+    const route = await import("@/app/api/activities/[id]/route");
+    const params = aliceParam("aliceActivityId");
     expect(
       NON_LEAKY_STATUSES.has(
         (await route.DELETE(req("http://test/", { method: "DELETE" }), params)).status,
@@ -427,7 +427,7 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
 
     asAlice();
     const db = ctx.getDb();
-    const stillThere = await db.select().from(sports).where(eq(sports.id, fx.aliceSportId));
+    const stillThere = await db.select().from(activities).where(eq(activities.id, fx.aliceActivityId));
     expect(stillThere).toHaveLength(1);
   });
 
@@ -523,13 +523,13 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
     asAlice();
     await ctx.getDb().insert(events).values({
       userId: 10,
-      sportId: fx.aliceSportId,
+      activityId: fx.aliceActivityId,
       type: "lift",
       startedAt: "2026-01-01T00:30:00Z",
       source: "strava",
     });
 
-    // Bob POSTs a tuple describing Alice's source/sport group.
+    // Bob POSTs a tuple describing Alice's source/activity group.
     asBob();
     const route = await import("@/app/api/events/duplicates/bulk-dismiss/route");
     const res = await route.POST(
@@ -539,9 +539,9 @@ describe("cross-user isolation harness — owned [id] routes refuse cross-tenant
           groups: [
             {
               sourceA: "manual",
-              sportIdA: fx.aliceSportId,
+              activityIdA: fx.aliceActivityId,
               sourceB: "strava",
-              sportIdB: fx.aliceSportId,
+              activityIdB: fx.aliceActivityId,
             },
           ],
         }),
@@ -703,13 +703,13 @@ function rowsFrom<T>(body: unknown): T[] {
   return [];
 }
 
-  it("Bob's GET /api/sports returns 0 rows when only Alice has data", async () => {
+  it("Bob's GET /api/activities returns 0 rows when only Alice has data", async () => {
     asBob();
-    const route = await import("@/app/api/sports/route");
+    const route = await import("@/app/api/activities/route");
     const res = await route.GET();
     expect(res.status).toBe(200);
     const rows = rowsFrom<{ name: string }>(await res.json());
-    expect(rows.find((s) => s.name === "alice-sport")).toBeUndefined();
+    expect(rows.find((s) => s.name === "alice-activity")).toBeUndefined();
   });
 
   it("Bob's GET /api/metric-types returns 0 of Alice's types", async () => {
@@ -745,36 +745,36 @@ function rowsFrom<T>(body: unknown): T[] {
 // ============================================================================
 //
 // Adversarial review CRITICAL-3 finding: routes that accept foreign-key
-// ids (sportId, metricTypeId) from the request body but only filter the
-// PARENT table by user_id let Bob attach to Alice's sport / metric_type.
-// The reads then JOIN sports/metricTypes and render Alice's name/color
+// ids (activityId, metricTypeId) from the request body but only filter the
+// PARENT table by user_id let Bob attach to Alice's activity / metric_type.
+// The reads then JOIN activities/metricTypes and render Alice's name/color
 // in Bob's UI — cross-user data leak through a fanout that the existing
 // harness didn't cover.
 
 describe("cross-user isolation harness — FK-injection class", () => {
-  it("POST /api/goals refuses Alice's sportId from Bob's session", async () => {
+  it("POST /api/goals refuses Alice's activityId from Bob's session", async () => {
     asBob();
     const goalsRoute = await import("@/app/api/goals/route");
-    // Bob owns a sport/metric_type too so we can craft a body where
-    // ONLY the sportId is foreign — proves the check fires per-field.
+    // Bob owns a activity/metric_type too so we can craft a body where
+    // ONLY the activityId is foreign — proves the check fires per-field.
     const db = ctx.getDb();
-    const [bobSport] = await db
-      .insert(sports)
-      .values({ userId: 20, name: "bob-sport", color: "#bbb" })
-      .returning({ id: sports.id });
+    const [bobActivity] = await db
+      .insert(activities)
+      .values({ userId: 20, name: "bob-activity", color: "#bbb" })
+      .returning({ id: activities.id });
     const [bobMt] = await db
       .insert(metricTypes)
       .values({ userId: 20, name: "bob-metric", unit: "kg" })
       .returning({ id: metricTypes.id });
 
-    // Bob's metric, Alice's sport → reject.
+    // Bob's metric, Alice's activity → reject.
     const res = await goalsRoute.POST(
       req("http://test/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metricTypeId: bobMt.id,
-          sportId: fx.aliceSportId,
+          activityId: fx.aliceActivityId,
           targetValue: 1,
           deadline: "2027-01-01",
         }),
@@ -782,14 +782,14 @@ describe("cross-user isolation harness — FK-injection class", () => {
     );
     expect(res.status).toBe(400);
 
-    // Bob's sport, Alice's metric → reject.
+    // Bob's activity, Alice's metric → reject.
     const res2 = await goalsRoute.POST(
       req("http://test/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metricTypeId: fx.aliceMetricTypeId,
-          sportId: bobSport.id,
+          activityId: bobActivity.id,
           targetValue: 1,
           deadline: "2027-01-01",
         }),
@@ -804,7 +804,7 @@ describe("cross-user isolation harness — FK-injection class", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           metricTypeId: fx.aliceMetricTypeId,
-          sportId: fx.aliceSportId,
+          activityId: fx.aliceActivityId,
           targetValue: 1,
           deadline: "2027-01-01",
         }),
@@ -813,7 +813,7 @@ describe("cross-user isolation harness — FK-injection class", () => {
     expect(res3.status).toBe(400);
   });
 
-  it("POST /api/events refuses Alice's sportId from Bob's session", async () => {
+  it("POST /api/events refuses Alice's activityId from Bob's session", async () => {
     asBob();
     const eventsRoute = await import("@/app/api/events/route");
     const res = await eventsRoute.POST(
@@ -821,7 +821,7 @@ describe("cross-user isolation harness — FK-injection class", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sportId: fx.aliceSportId,
+          activityId: fx.aliceActivityId,
           type: "lift",
         }),
       }),
@@ -829,19 +829,19 @@ describe("cross-user isolation harness — FK-injection class", () => {
     expect(res.status).toBe(400);
   });
 
-  it("PATCH /api/events/[id] refuses retargeting Bob's event onto Alice's sport", async () => {
+  it("PATCH /api/events/[id] refuses retargeting Bob's event onto Alice's activity", async () => {
     asBob();
     const db = ctx.getDb();
     // Bob needs an event of his own to PATCH.
-    const [bobSport] = await db
-      .insert(sports)
-      .values({ userId: 20, name: "bob-sport-2", color: "#bb2" })
-      .returning({ id: sports.id });
+    const [bobActivity] = await db
+      .insert(activities)
+      .values({ userId: 20, name: "bob-activity-2", color: "#bb2" })
+      .returning({ id: activities.id });
     const [bobEvent] = await db
       .insert(events)
       .values({
         userId: 20,
-        sportId: bobSport.id,
+        activityId: bobActivity.id,
         type: "lift",
         startedAt: "2026-01-01T00:00:00Z",
       })
@@ -852,16 +852,16 @@ describe("cross-user isolation harness — FK-injection class", () => {
       req("http://test/", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sportId: fx.aliceSportId }),
+        body: JSON.stringify({ activityId: fx.aliceActivityId }),
       }),
       { params: Promise.resolve({ id: String(bobEvent.id) }) },
     );
     expect(res.status).toBe(400);
 
-    // Bob's event still points at his own sport — the rejected PATCH
+    // Bob's event still points at his own activity — the rejected PATCH
     // didn't sneak a partial update through.
     const after = await db.select().from(events).where(eq(events.id, bobEvent.id));
-    expect(after[0].sportId).toBe(bobSport.id);
+    expect(after[0].activityId).toBe(bobActivity.id);
   });
 });
 

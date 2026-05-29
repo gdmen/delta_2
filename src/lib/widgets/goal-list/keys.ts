@@ -2,7 +2,7 @@ import type { GoalProgress } from "@/lib/goal-format";
 import type { GoalListConfig } from "./schema";
 
 export function dataKey(config: GoalListConfig): string {
-  return `goal_list:${config.sportFilter ?? "all"}`;
+  return `goal_list:${config.activityFilter ?? "all"}`;
 }
 
 export interface GoalRow {
@@ -13,7 +13,7 @@ export interface GoalRow {
   metricUnit: string;
   targetValue: number;
   deadline: string;
-  sportName: string;
-  sportColor: string;
+  activityName: string;
+  activityColor: string;
   progress: GoalProgress;
 }

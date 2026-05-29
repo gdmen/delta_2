@@ -25,7 +25,7 @@ interface BulkFrequencyBody {
  * The motivating case: every `bodyspec_dexa:*` metric_type is
  * auto-created with `frequency_hint = "daily"` by the resolver
  * (`src/lib/ingest/metric-resolver.ts:138`), which is right for
- * Apple Health steps + Strava sport_minutes but wrong for
+ * Apple Health steps + Strava activity_minutes but wrong for
  * point-in-time DEXA scans. There are ~55 such rows, so a per-row
  * UI is tedious; this endpoint reclassifies them in one shot.
  *

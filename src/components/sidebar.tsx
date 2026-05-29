@@ -185,10 +185,10 @@ function DashboardsSection({
   dashboards: DashboardRow[];
   pathname: string;
 }) {
-  // PR2 doesn't render sport-color dots in this section yet — loadAllDashboards
-  // returns the dashboards table only, so we'd need a join with `sports` to
+  // PR2 doesn't render activity-color dots in this section yet — loadAllDashboards
+  // returns the dashboards table only, so we'd need a join with `activities` to
   // resolve the color. Defer until PR3 ships the editor that creates
-  // sport-associated dashboards (and surfaces the need).
+  // activity-associated dashboards (and surfaces the need).
   return (
     <Section label="Dashboards">
       {dashboards.map((d) => {

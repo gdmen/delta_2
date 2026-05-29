@@ -183,7 +183,7 @@ export async function DELETE() {
       .where(eq(coachCalls.userId, user.id));
   }
 
-  // The DELETE cascades clear every owned row (sports, metric_types,
+  // The DELETE cascades clear every owned row (activities, metric_types,
   // metrics, events, goals, dashboards, etc.). coach_calls.user_id
   // has ON DELETE SET NULL specifically to keep the rows alive.
   await db.delete(users).where(eq(users.id, user.id));

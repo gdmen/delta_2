@@ -15,7 +15,7 @@ export async function GET() {
   return NextResponse.json(rows.map((m) => ({
     id: m.id,
     name: m.name,
-    sportId: m.sportId,
+    activityId: m.activityId,
     unit: m.unit,
     frequencyHint: m.frequencyHint,
   })));
@@ -23,7 +23,7 @@ export async function GET() {
 
 /**
  * POST /api/metric-types — manually create a primitive numeric metric_type.
- * Body: { name, unit?, sportId?, frequencyHint? } where frequencyHint is
+ * Body: { name, unit?, activityId?, frequencyHint? } where frequencyHint is
  * "daily" | "weekly" | "occasional" (default "daily").
  *
  * Returns 201 with the new row, or 409 if the name already exists.
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const b = (body ?? {}) as {
     name?: unknown;
     unit?: unknown;
-    sportId?: unknown;
+    activityId?: unknown;
     frequencyHint?: unknown;
   };
 
@@ -71,16 +71,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unit too long (max 40 chars)" }, { status: 400 });
   }
 
-  let sportId: number | null = null;
-  if (b.sportId !== null && b.sportId !== undefined && b.sportId !== "") {
-    const n = Number(b.sportId);
+  let activityId: number | null = null;
+  if (b.activityId !== null && b.activityId !== undefined && b.activityId !== "") {
+    const n = Number(b.activityId);
     if (!Number.isFinite(n) || n <= 0) {
       return NextResponse.json(
-        { error: "sportId must be a positive integer or null" },
+        { error: "activityId must be a positive integer or null" },
         { status: 400 },
       );
     }
-    sportId = n;
+    activityId = n;
   }
 
   const frequencyHint: "daily" | "weekly" | "occasional" =
@@ -105,12 +105,12 @@ export async function POST(request: NextRequest) {
 
   const inserted = await db
     .insert(metricTypes)
-    .values({ userId: user.id, name, unit, sportId, frequencyHint })
+    .values({ userId: user.id, name, unit, activityId, frequencyHint })
     .returning({
       id: metricTypes.id,
       name: metricTypes.name,
       unit: metricTypes.unit,
-      sportId: metricTypes.sportId,
+      activityId: metricTypes.activityId,
       frequencyHint: metricTypes.frequencyHint,
     });
 

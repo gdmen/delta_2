@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateUserApiKey } from "@/lib/auth/api-key";
 import { batchUpsertMetrics, upsertEvent, MetricInput } from "@/lib/ingest-service";
 import { buildMetricTypeCache, resolveMetricTypeId } from "@/lib/ingest/metric-resolver";
-import { buildSportCache, resolveSportId } from "@/lib/ingest/sport-resolver";
+import { buildActivityCache, resolveActivityId } from "@/lib/ingest/activity-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 
 /**
@@ -50,10 +50,10 @@ import { ReconcileTracker } from "@/lib/reconcile";
 // auto-creating `apple_health:<rawName>` orphans.
 //
 // HAE workout names (matches HKWorkoutActivityType display name) used to
-// translate to canonical sports + event types via a hardcoded map.
-// As of 2026-05-05 they auto-create `apple_health:<workoutName>` sport
+// translate to canonical activities + event types via a hardcoded map.
+// As of 2026-05-05 they auto-create `apple_health:<workoutName>` activity
 // rows the same way metric_types do; the user merges them into clean
-// canonicals (e.g. "Running" → existing or new `running`) via /data/sports.
+// canonicals (e.g. "Running" → existing or new `running`) via /data/activities.
 // events.type stores the raw workout name verbatim.
 
 interface HAEMetricPoint {
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
   const workoutsIn = payload.data?.workouts ?? [];
 
   const typeCache = await buildMetricTypeCache(userId);
-  const sportCache = await buildSportCache(userId);
+  const activityCache = await buildActivityCache(userId);
 
   const inputs: MetricInput[] = [];
 
@@ -210,13 +210,13 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    // Auto-create the sport on first encounter. Raw HAE name (e.g.
+    // Auto-create the activity on first encounter. Raw HAE name (e.g.
     // "Running", "Martial Arts") becomes `apple_health:<name>` until
-    // the user merges it into a canonical sport via /data/sports.
-    const sportId = await resolveSportId({
+    // the user merges it into a canonical activity via /data/activities.
+    const activityId = await resolveActivityId({
       rawName: w.name,
       sourceSystem: "apple_health",
-      cache: sportCache,
+      cache: activityCache,
     });
 
     const startIso = normalizeDate(w.start);
@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
       const { status } = await upsertEvent({
         
         userId,
-        sportId,
+        activityId,
         // events.type holds the raw HAE workout name verbatim. No
         // canonical translation — user can rename via the event editor.
         type: w.name,

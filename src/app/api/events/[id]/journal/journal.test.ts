@@ -5,7 +5,7 @@ import { buildDbMock, setupRouteTest } from "@/test-utils/route-test";
 vi.mock("@/db", () => buildDbMock());
 
 import { eq } from "drizzle-orm";
-import { sports, events, eventJournalEntries } from "@/db/schema";
+import { activities, events, eventJournalEntries } from "@/db/schema";
 import { GET, POST } from "./route";
 import { PATCH, DELETE } from "./[entryId]/route";
 import { POST as UNMERGE } from "../unmerge/route";
@@ -43,14 +43,14 @@ async function seedEvent(opts?: {
 }): Promise<number> {
   const db = ctx.getDb();
   const [s] = await db
-    .insert(sports)
-    .values({ userId: 1, name: `sport-${Math.random()}`, color: "#000" })
-    .returning({ id: sports.id });
+    .insert(activities)
+    .values({ userId: 1, name: `activity-${Math.random()}`, color: "#000" })
+    .returning({ id: activities.id });
   const [ev] = await db
     .insert(events)
     .values({
       userId: 1,
-      sportId: s.id,
+      activityId: s.id,
       type: "lift",
       startedAt: "2026-01-01T00:00:00.000Z",
       status: opts?.status ?? "visible",

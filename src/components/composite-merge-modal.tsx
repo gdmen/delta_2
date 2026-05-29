@@ -7,8 +7,8 @@ import { formatShort, utcIsoToLocalInput } from "@/lib/format";
 export interface MergeMember {
   id: number;
   source: string;
-  sportId: number;
-  sportName: string;
+  activityId: number;
+  activityName: string;
   type: string;
   startedAt: string;
   durationMinutes: number | null;
@@ -18,7 +18,7 @@ export interface MergeMember {
  * GET /api/events/metrics. */
 type EventMetric = { name: string; unit: string | null; value: number };
 
-export interface SportOption {
+export interface ActivityOption {
   id: number;
   name: string;
 }
@@ -27,33 +27,33 @@ export interface SportOption {
  * Inline modal for "wrap N events into a composite".
  *
  *  - N=1: promote — retag a single event with a corrected canonical
- *    sport while keeping the source row's data accessible via the
+ *    activity while keeping the source row's data accessible via the
  *    composite. Title reads "Promote to composite event".
  *  - N≥2: merge — fold multiple rows for the same physical session into
  *    one composite. Title reads "Merge into composite event".
  *
- * Either way: user picks the sport (defaults to the least
- * source-prefixed sport name across members), tweaks type / started_at
+ * Either way: user picks the activity (defaults to the least
+ * source-prefixed activity name across members), tweaks type / started_at
  * / duration / notes, and confirms. Sends POST /api/events/merge with
  * `memberIds: number[]`. Members may share a source (two devices syncing
  * one session to the same integration is a valid composite).
  */
 export function CompositeMergeModal({
   members,
-  sportOptions,
-  typeSuggestionsBySportId,
+  activityOptions,
+  typeSuggestionsByActivityId,
   onClose,
   onSuccess,
 }: {
   /** One or more members. Order is preserved in the rendered list. */
   members: MergeMember[];
-  sportOptions: SportOption[];
+  activityOptions: ActivityOption[];
   /**
-   * Existing `events.type` values seen for each sport_id, used to
+   * Existing `events.type` values seen for each activity_id, used to
    * populate the type input's datalist. Free-text — the input doesn't
    * restrict to these. Omit for no suggestions.
    */
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  typeSuggestionsByActivityId?: Record<number, string[]>;
   onClose: () => void;
   /** Optional callback fired with the new composite's id after success. */
   onSuccess?: (compositeId: number) => void;
@@ -61,7 +61,7 @@ export function CompositeMergeModal({
   const router = useRouter();
   const isPromote = members.length === 1;
 
-  const [sportId, setSportId] = useState<number>(pickDefaultSport(members));
+  const [activityId, setActivityId] = useState<number>(pickDefaultActivity(members));
   const [type, setType] = useState<string>(members[0].type);
   const [notes, setNotes] = useState("");
   // Defaults: earliest member's startedAt; duration is the max member
@@ -103,7 +103,7 @@ export function CompositeMergeModal({
   }, [memberIdsKey]);
 
   const typeSuggestions =
-    typeSuggestionsBySportId?.[sportId]?.filter((t) => t.trim().length > 0) ?? [];
+    typeSuggestionsByActivityId?.[activityId]?.filter((t) => t.trim().length > 0) ?? [];
 
   async function submit() {
     setSubmitting(true);
@@ -128,7 +128,7 @@ export function CompositeMergeModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         memberIds: members.map((m) => m.id),
-        sportId,
+        activityId,
         type: type.trim() || undefined,
         notes: notes.trim() || null,
         startedAt: startedAtIso,
@@ -185,15 +185,15 @@ export function CompositeMergeModal({
 
         <div>
           <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
-            Composite sport
+            Composite activity
           </label>
           <select
-            value={sportId}
-            onChange={(e) => setSportId(Number(e.target.value))}
+            value={activityId}
+            onChange={(e) => setActivityId(Number(e.target.value))}
             disabled={submitting}
             className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
           >
-            {sportOptions.map((s) => (
+            {activityOptions.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
@@ -223,7 +223,7 @@ export function CompositeMergeModal({
           )}
           {typeSuggestions.length > 0 && (
             <p className="mt-1 text-[0.6875rem] font-mono text-muted">
-              existing types for this sport: {typeSuggestions.join(", ")}
+              existing types for this activity: {typeSuggestions.join(", ")}
             </p>
           )}
         </div>
@@ -315,7 +315,7 @@ function MemberRow({
           {m.source}
         </span>
         <span className="truncate">
-          {m.sportName} · {m.type}
+          {m.activityName} · {m.type}
         </span>
         <span className="text-muted whitespace-nowrap">
           {time}
@@ -367,10 +367,10 @@ function defaultDuration(members: MergeMember[]): number | null {
   return max > 0 ? max : null;
 }
 
-function pickDefaultSport(members: MergeMember[]): number {
-  // Prefer the first non-source-prefixed sport ("powerlifting" over
+function pickDefaultActivity(members: MergeMember[]): number {
+  // Prefer the first non-source-prefixed activity ("powerlifting" over
   // "strava:WeightTraining"). If all are prefixed (or none are),
-  // fall back to the first member's sport.
-  const unprefixed = members.find((m) => !m.sportName.includes(":"));
-  return unprefixed?.sportId ?? members[0].sportId;
+  // fall back to the first member's activity.
+  const unprefixed = members.find((m) => !m.activityName.includes(":"));
+  return unprefixed?.activityId ?? members[0].activityId;
 }

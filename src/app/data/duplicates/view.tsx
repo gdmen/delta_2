@@ -10,7 +10,7 @@ import type {
 import { formatShort } from "@/lib/format";
 import {
   CompositeMergeModal,
-  type SportOption,
+  type ActivityOption,
 } from "@/components/composite-merge-modal";
 import { useRowSelection } from "@/components/use-row-selection";
 import { SelectAllCheckbox } from "@/components/select-all-checkbox";
@@ -18,32 +18,32 @@ import { RowSelectCheckbox } from "@/components/row-select-checkbox";
 
 /**
  * Two-tier view:
- *   - Top: source/sport-pair groups with bulk-dismiss-all button.
+ *   - Top: source/activity-pair groups with bulk-dismiss-all button.
  *   - Bottom: flat list of individual pairs for per-pair merge.
  */
 export function DuplicatesView({
   pairs,
   groups,
-  sportOptions,
-  typeSuggestionsBySportId,
+  activityOptions,
+  typeSuggestionsByActivityId,
 }: {
   pairs: CandidatePair[];
   groups: CandidateGroup[];
-  sportOptions: SportOption[];
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  activityOptions: ActivityOption[];
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [mergeTarget, setMergeTarget] = useState<CandidatePair | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [individualRunning, setIndividualRunning] = useState<string | null>(null);
   // Bulk merge is single-group only (multiple selected groups would each
-  // need their own composite sport, so they stay dismiss-only). When one
-  // group is selected, this dialog picks the composite sport once.
+  // need their own composite activity, so they stay dismiss-only). When one
+  // group is selected, this dialog picks the composite activity once.
   // The group is snapshotted when the dialog opens (not read live) so
   // changing the selection while it's open can't merge a different group
   // than the one shown.
   const [mergeGroup, setMergeGroup] = useState<CandidateGroup | null>(null);
-  const [mergeSportId, setMergeSportId] = useState<number | null>(null);
+  const [mergeActivityId, setMergeActivityId] = useState<number | null>(null);
   const [bulkMergeRunning, setBulkMergeRunning] = useState(false);
   // The "All pairs" list is unbounded now (no detector LIMIT), so paginate
   // it client-side rather than rendering thousands of rows.
@@ -53,7 +53,7 @@ export function DuplicatesView({
   // (all fields come off the canonicalized group object). The selection
   // machine is shared with the catalogs and the events list.
   const groupKey = (g: CandidateGroup) =>
-    `${g.sportIdA}-${g.sportIdB}-${g.sourceA}-${g.sourceB}`;
+    `${g.activityIdA}-${g.activityIdB}-${g.sourceA}-${g.sourceB}`;
   const sel = useRowSelection(groups.map(groupKey));
   const selectedGroups = groups.filter((g) => sel.isSelected(groupKey(g)));
   const selectedPairCount = selectedGroups.reduce((n, g) => n + g.count, 0);
@@ -64,7 +64,7 @@ export function DuplicatesView({
     const nGroups = selectedGroups.length;
     if (
       !confirm(
-        `Dismiss ${nPairs} pair${nPairs === 1 ? "" : "s"} across ${nGroups} source/sport group${nGroups === 1 ? "" : "s"}?`,
+        `Dismiss ${nPairs} pair${nPairs === 1 ? "" : "s"} across ${nGroups} source/activity group${nGroups === 1 ? "" : "s"}?`,
       )
     ) {
       return;
@@ -76,9 +76,9 @@ export function DuplicatesView({
       body: JSON.stringify({
         groups: selectedGroups.map((g) => ({
           sourceA: g.sourceA,
-          sportIdA: g.sportIdA,
+          activityIdA: g.activityIdA,
           sourceB: g.sourceB,
-          sportIdB: g.sportIdB,
+          activityIdB: g.activityIdB,
         })),
       }),
     });
@@ -91,20 +91,20 @@ export function DuplicatesView({
   function openMergeDialog() {
     const g = selectedGroups[0];
     if (!g) return;
-    // Default to the clean, non-source-prefixed sport name if either side
-    // has one (mirrors the per-pair modal's pickDefaultSport).
-    const defaultSport = !g.sportNameA.includes(":")
-      ? g.sportIdA
-      : !g.sportNameB.includes(":")
-        ? g.sportIdB
-        : g.sportIdA;
-    setMergeSportId(defaultSport);
+    // Default to the clean, non-source-prefixed activity name if either side
+    // has one (mirrors the per-pair modal's pickDefaultActivity).
+    const defaultActivity = !g.activityNameA.includes(":")
+      ? g.activityIdA
+      : !g.activityNameB.includes(":")
+        ? g.activityIdB
+        : g.activityIdA;
+    setMergeActivityId(defaultActivity);
     setMergeGroup(g);
   }
 
   async function runBulkMerge() {
     const g = mergeGroup;
-    if (!g || mergeSportId === null || bulkMergeRunning) return;
+    if (!g || mergeActivityId === null || bulkMergeRunning) return;
     setBulkMergeRunning(true);
     await fetch("/api/events/duplicates/bulk-merge", {
       method: "POST",
@@ -112,11 +112,11 @@ export function DuplicatesView({
       body: JSON.stringify({
         group: {
           sourceA: g.sourceA,
-          sportIdA: g.sportIdA,
+          activityIdA: g.activityIdA,
           sourceB: g.sourceB,
-          sportIdB: g.sportIdB,
+          activityIdB: g.activityIdB,
         },
-        sportId: mergeSportId,
+        activityId: mergeActivityId,
       }),
     });
     setBulkMergeRunning(false);
@@ -153,7 +153,7 @@ export function DuplicatesView({
       <section>
         <div className="flex items-center justify-between mb-3 border-b border-border pb-2 gap-3">
           <h2 className="text-[0.8125rem] font-semibold uppercase tracking-wider text-muted">
-            Bulk dismiss by source/sport pair
+            Bulk dismiss by source/activity pair
           </h2>
           {selectedGroups.length > 0 && (
             <div className="flex items-center gap-2">
@@ -191,8 +191,8 @@ export function DuplicatesView({
               onSelectAll={sel.selectAll}
               onClear={sel.clearSelection}
               disabled={bulkRunning || groups.length === 0}
-              selectAllLabel="Select all source/sport groups"
-              clearLabel="Clear selection of all source/sport groups"
+              selectAllLabel="Select all source/activity groups"
+              clearLabel="Clear selection of all source/activity groups"
             />
             Select all ({groups.length})
           </label>
@@ -211,19 +211,19 @@ export function DuplicatesView({
                     checked={isChecked}
                     onToggle={(shiftKey) => sel.toggleRange(key, shiftKey)}
                     disabled={bulkRunning}
-                    ariaLabel={`Select ${g.sourceA} ${g.sportNameA} plus ${g.sourceB} ${g.sportNameB}`}
+                    ariaLabel={`Select ${g.sourceA} ${g.activityNameA} plus ${g.sourceB} ${g.activityNameB}`}
                     className="flex-shrink-0"
                   />
                   <div className="flex gap-3 items-baseline truncate min-w-0">
                     <span className="text-muted uppercase tracking-wider whitespace-nowrap">
                       {g.sourceA}
                     </span>
-                    <span className="truncate">{g.sportNameA}</span>
+                    <span className="truncate">{g.activityNameA}</span>
                     <span className="text-muted">+</span>
                     <span className="text-muted uppercase tracking-wider whitespace-nowrap">
                       {g.sourceB}
                     </span>
-                    <span className="truncate">{g.sportNameB}</span>
+                    <span className="truncate">{g.activityNameB}</span>
                   </div>
                 </div>
                 <span className="text-muted text-[0.6875rem] whitespace-nowrap">
@@ -303,8 +303,8 @@ export function DuplicatesView({
             {
               id: mergeTarget.aId,
               source: mergeTarget.aSource,
-              sportId: mergeTarget.aSportId,
-              sportName: mergeTarget.aSportName,
+              activityId: mergeTarget.aActivityId,
+              activityName: mergeTarget.aActivityName,
               type: mergeTarget.aType,
               startedAt: mergeTarget.aStartedAt,
               durationMinutes: mergeTarget.aDurationMinutes,
@@ -312,20 +312,20 @@ export function DuplicatesView({
             {
               id: mergeTarget.bId,
               source: mergeTarget.bSource,
-              sportId: mergeTarget.bSportId,
-              sportName: mergeTarget.bSportName,
+              activityId: mergeTarget.bActivityId,
+              activityName: mergeTarget.bActivityName,
               type: mergeTarget.bType,
               startedAt: mergeTarget.bStartedAt,
               durationMinutes: mergeTarget.bDurationMinutes,
             },
           ]}
-          sportOptions={sportOptions}
-          typeSuggestionsBySportId={typeSuggestionsBySportId}
+          activityOptions={activityOptions}
+          typeSuggestionsByActivityId={typeSuggestionsByActivityId}
           onClose={() => setMergeTarget(null)}
         />
       )}
 
-      {mergeGroup && mergeSportId !== null && (
+      {mergeGroup && mergeActivityId !== null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => !bulkMergeRunning && setMergeGroup(null)}
@@ -338,21 +338,21 @@ export function DuplicatesView({
               Merge {mergeGroup.count} pair{mergeGroup.count === 1 ? "" : "s"}
             </h2>
             <p className="text-[0.8125rem] text-muted">
-              {mergeGroup.sourceA} {mergeGroup.sportNameA} + {mergeGroup.sourceB}{" "}
-              {mergeGroup.sportNameB}. Overlapping recordings of one session are
+              {mergeGroup.sourceA} {mergeGroup.activityNameA} + {mergeGroup.sourceB}{" "}
+              {mergeGroup.activityNameB}. Overlapping recordings of one session are
               combined into a single composite.
             </p>
             <div>
               <label className="block text-[0.75rem] text-muted uppercase tracking-wider mb-1">
-                Composite sport
+                Composite activity
               </label>
               <select
-                value={mergeSportId}
-                onChange={(e) => setMergeSportId(Number(e.target.value))}
+                value={mergeActivityId}
+                onChange={(e) => setMergeActivityId(Number(e.target.value))}
                 disabled={bulkMergeRunning}
                 className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
               >
-                {sportOptions.map((s) => (
+                {activityOptions.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>
@@ -405,7 +405,7 @@ function PairRow({
         >
           {p.aSource}
         </Link>
-        <span className="truncate">{p.aSportName}</span>
+        <span className="truncate">{p.aActivityName}</span>
         <span className="text-muted">+</span>
         <Link
           href={`/data/events/${p.bId}`}
@@ -413,7 +413,7 @@ function PairRow({
         >
           {p.bSource}
         </Link>
-        <span className="truncate">{p.bSportName}</span>
+        <span className="truncate">{p.bActivityName}</span>
         <span className="text-muted whitespace-nowrap">· {aTime}</span>
       </div>
       <div className="flex gap-2 whitespace-nowrap">

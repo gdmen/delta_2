@@ -5,7 +5,7 @@ import { pickMaxBy } from "@/lib/collections";
 import { MergeModalShell } from "@/components/merge-modal-shell";
 import { useMergeSubmit } from "@/components/use-merge-submit";
 
-export interface SportMergeCandidate {
+export interface ActivityMergeCandidate {
   id: number;
   name: string;
   color: string;
@@ -14,17 +14,17 @@ export interface SportMergeCandidate {
   goalCount: number;
 }
 
-export function SportsMergeModal({
+export function ActivitiesMergeModal({
   candidates,
   onClose,
 }: {
-  candidates: SportMergeCandidate[];
+  candidates: ActivityMergeCandidate[];
   onClose: () => void;
 }) {
   const [canonicalId, setCanonicalId] = useState<number>(
     pickMaxBy(candidates, (c) => c.eventCount).id,
   );
-  const { busy, error, submit } = useMergeSubmit("/api/sports/merge", onClose, "sport");
+  const { busy, error, submit } = useMergeSubmit("/api/activities/merge", onClose, "activity");
 
   const canonical = candidates.find((c) => c.id === canonicalId)!;
   const merged = candidates.filter((c) => c.id !== canonicalId);
@@ -38,8 +38,8 @@ export function SportsMergeModal({
 
   return (
     <MergeModalShell
-      title={`Merge ${candidates.length} sports`}
-      description="Pick which name wins. Events, focuses, and goals attached to the other sports move to the canonical. Merged sports are deleted."
+      title={`Merge ${candidates.length} activities`}
+      description="Pick which name wins. Events, focuses, and goals attached to the other activities move to the canonical. Merged activities are deleted."
       busy={busy}
       canSubmit={true}
       error={error}
@@ -104,7 +104,7 @@ export function SportsMergeModal({
           </div>
         )}
         <div>
-          <span className="font-mono">{merged.length}</span> sport
+          <span className="font-mono">{merged.length}</span> activity
           {merged.length === 1 ? "" : "s"} deleted.
         </div>
         <div className="text-muted text-[0.75rem] mt-2">

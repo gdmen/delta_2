@@ -4,7 +4,7 @@ import { buildDbMock, setupRouteTest } from "@/test-utils/route-test";
 
 vi.mock("@/db", () => buildDbMock());
 
-import { sports, events, eventDuplicateDenylist } from "@/db/schema";
+import { activities, events, eventDuplicateDenylist } from "@/db/schema";
 import { groupCandidates, findDuplicateCandidates } from "@/lib/duplicates/detector";
 import { POST } from "./route";
 
@@ -29,30 +29,30 @@ function req(body?: unknown): NextRequest {
   return new NextRequest("http://test/", init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
-async function seedSport(name: string): Promise<number> {
+async function seedActivity(name: string): Promise<number> {
   const [s] = await ctx
     .getDb()
-    .insert(sports)
+    .insert(activities)
     .values({ userId: 1, name, color: "#000" })
-    .returning({ id: sports.id });
+    .returning({ id: activities.id });
   return s.id;
 }
 
-async function seedEvent(sportId: number, source: string, startedAt: string): Promise<number> {
+async function seedEvent(activityId: number, source: string, startedAt: string): Promise<number> {
   const [e] = await ctx
     .getDb()
     .insert(events)
-    .values({ userId: 1, sportId, type: "x", startedAt, source, status: "visible" })
+    .values({ userId: 1, activityId, type: "x", startedAt, source, status: "visible" })
     .returning({ id: events.id });
   return e.id;
 }
 
 describe("bulk-dismiss — batched multi-group (#35)", () => {
   it("B1: flipped orientation — group A/B is the reverse of pair A/B, still dismissed", async () => {
-    // Smaller id = alphabetically-LATER sport, so groupCandidates flips
+    // Smaller id = alphabetically-LATER activity, so groupCandidates flips
     // A/B relative to the raw pair's id ordering.
-    const ride = await seedSport("Ride"); // sorts after "Cycling"
-    const cycling = await seedSport("Cycling");
+    const ride = await seedActivity("Ride"); // sorts after "Cycling"
+    const cycling = await seedActivity("Cycling");
     // X inserted first → smaller id. X is strava/Ride.
     const x = await seedEvent(ride, "strava", "2026-05-14T12:00:00.000Z");
     // Y larger id. Y is apple_health/Cycling. 30 min later → within 60.
@@ -74,9 +74,9 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
         groups: [
           {
             sourceA: group.sourceA,
-            sportIdA: group.sportIdA,
+            activityIdA: group.activityIdA,
             sourceB: group.sourceB,
-            sportIdB: group.sportIdB,
+            activityIdB: group.activityIdB,
           },
         ],
       }),
@@ -92,10 +92,10 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
   });
 
   it("B2: multiple groups in one call dismiss all their pairs", async () => {
-    const ride = await seedSport("Ride");
-    const cycling = await seedSport("Cycling");
-    const lift = await seedSport("Lifting");
-    const run = await seedSport("Running");
+    const ride = await seedActivity("Ride");
+    const cycling = await seedActivity("Cycling");
+    const lift = await seedActivity("Lifting");
+    const run = await seedActivity("Running");
     // Group 1: strava/Ride + apple_health/Cycling
     const x1 = await seedEvent(ride, "strava", "2026-05-14T12:00:00.000Z");
     const y1 = await seedEvent(cycling, "apple_health", "2026-05-14T12:10:00.000Z");
@@ -112,9 +112,9 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
       req({
         groups: groups.map((g) => ({
           sourceA: g.sourceA,
-          sportIdA: g.sportIdA,
+          activityIdA: g.activityIdA,
           sourceB: g.sourceB,
-          sportIdB: g.sportIdB,
+          activityIdB: g.activityIdB,
         })),
       }),
     );
@@ -126,10 +126,10 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
   });
 
   it("B3: selecting one group leaves the other's pairs intact", async () => {
-    const ride = await seedSport("Ride");
-    const cycling = await seedSport("Cycling");
-    const lift = await seedSport("Lifting");
-    const run = await seedSport("Running");
+    const ride = await seedActivity("Ride");
+    const cycling = await seedActivity("Cycling");
+    const lift = await seedActivity("Lifting");
+    const run = await seedActivity("Running");
     await seedEvent(ride, "strava", "2026-05-14T12:00:00.000Z");
     await seedEvent(cycling, "apple_health", "2026-05-14T12:10:00.000Z");
     await seedEvent(lift, "teambuildr", "2026-05-15T09:00:00.000Z");
@@ -142,7 +142,7 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
     const res = await POST(
       req({
         groups: [
-          { sourceA: one.sourceA, sportIdA: one.sportIdA, sourceB: one.sourceB, sportIdB: one.sportIdB },
+          { sourceA: one.sourceA, activityIdA: one.activityIdA, sourceB: one.sourceB, activityIdB: one.activityIdB },
         ],
       }),
     );
@@ -153,16 +153,16 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
   });
 
   it("B4: idempotent — re-dismissing the same group inserts no dupes", async () => {
-    const ride = await seedSport("Ride");
-    const cycling = await seedSport("Cycling");
+    const ride = await seedActivity("Ride");
+    const cycling = await seedActivity("Cycling");
     await seedEvent(ride, "strava", "2026-05-14T12:00:00.000Z");
     await seedEvent(cycling, "apple_health", "2026-05-14T12:10:00.000Z");
     const groups = groupCandidates(
       await findDuplicateCandidates(1, { recent: false }, ctx.getDb()),
     );
     const tuple = {
-      sourceA: groups[0].sourceA, sportIdA: groups[0].sportIdA,
-      sourceB: groups[0].sourceB, sportIdB: groups[0].sportIdB,
+      sourceA: groups[0].sourceA, activityIdA: groups[0].activityIdA,
+      sourceB: groups[0].sourceB, activityIdB: groups[0].activityIdB,
     };
     await POST(req({ groups: [tuple] }));
     const res2 = await POST(req({ groups: [tuple] }));
@@ -181,12 +181,12 @@ describe("bulk-dismiss — batched multi-group (#35)", () => {
   });
 
   it("B7: tuple matching no pair → dismissed 0, no rows", async () => {
-    const ride = await seedSport("Ride");
-    const cycling = await seedSport("Cycling");
+    const ride = await seedActivity("Ride");
+    const cycling = await seedActivity("Cycling");
     await seedEvent(ride, "strava", "2026-05-14T12:00:00.000Z");
     await seedEvent(cycling, "apple_health", "2026-05-14T12:10:00.000Z");
     const res = await POST(
-      req({ groups: [{ sourceA: "nope", sportIdA: 9999, sourceB: "nada", sportIdB: 8888 }] }),
+      req({ groups: [{ sourceA: "nope", activityIdA: 9999, sourceB: "nada", activityIdB: 8888 }] }),
     );
     expect((await res.json()).dismissed).toBe(0);
     expect(await ctx.getDb().select().from(eventDuplicateDenylist)).toHaveLength(0);

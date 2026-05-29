@@ -3,20 +3,20 @@ import { Sparkline } from "./sparkline";
 
 interface FocusCardProps {
   name: string;
-  sportColor: string;
+  activityColor: string;
   weekNumber: number;
   sparklineData: number[];
   valueLabel: string;
   href?: string;
 }
 
-export function FocusCard({ name, sportColor, weekNumber, sparklineData, valueLabel, href }: FocusCardProps) {
+export function FocusCard({ name, activityColor, weekNumber, sparklineData, valueLabel, href }: FocusCardProps) {
   const inner = (
     <>
       <div className="flex items-center gap-3 min-w-0">
         <span
           className="w-[6px] h-[6px] rounded-full flex-shrink-0"
-          style={{ backgroundColor: sportColor }}
+          style={{ backgroundColor: activityColor }}
         />
         <div className="min-w-0">
           <span className="text-[0.875rem] font-medium">{name}</span>
@@ -25,7 +25,7 @@ export function FocusCard({ name, sportColor, weekNumber, sparklineData, valueLa
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">
         <div className="hidden sm:block">
-          <Sparkline data={sparklineData} color={sportColor} />
+          <Sparkline data={sparklineData} color={activityColor} />
         </div>
         <span className="font-mono text-[0.8125rem] text-text-secondary whitespace-nowrap">{valueLabel}</span>
       </div>

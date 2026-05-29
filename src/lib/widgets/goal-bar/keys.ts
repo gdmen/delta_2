@@ -13,7 +13,7 @@ export interface GoalBarData {
   metricUnit: string;
   targetValue: number;
   deadline: string;
-  sportName: string;
-  sportColor: string;
+  activityName: string;
+  activityColor: string;
   progress: GoalProgress;
 }

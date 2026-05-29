@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { mergeLog, metricTypes, sports } from "@/db/schema";
+import { mergeLog, metricTypes, activities } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { MergeLogPayloadV1 } from "@/lib/merge-log/types";
 import { applyMergeUndo } from "@/lib/merge-log/applier";
@@ -17,7 +17,7 @@ import { userScope } from "@/lib/auth/scope";
  *      undone or someone else just claimed it — 409. This is the
  *      TOCTOU-safe replacement for read-then-check. Scoped by
  *      mergeLog.userId so an attacker can't undo another user's merge.
- *   2. Pre-check that every metric_type / sport id the payload
+ *   2. Pre-check that every metric_type / activity id the payload
  *      references still exists. Catches:
  *        - Chain merges (canonical was itself merged into something
  *          else, so its id may be gone or repointed).
@@ -156,9 +156,9 @@ export async function POST(
     }
   } else {
     const canonicalRow = await db
-      .select({ id: sports.id })
-      .from(sports)
-      .where(and(userScope(user.id).sports, eq(sports.id, payload.canonicalId)))
+      .select({ id: activities.id })
+      .from(activities)
+      .where(and(userScope(user.id).activities, eq(activities.id, payload.canonicalId)))
       .limit(1);
     if (canonicalRow.length === 0) {
       await db
@@ -168,7 +168,7 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            "Canonical sport no longer exists. It may have been merged again or deleted. Restore manually before undoing this merge.",
+            "Canonical activity no longer exists. It may have been merged again or deleted. Restore manually before undoing this merge.",
         },
         { status: 409 },
       );
@@ -176,9 +176,9 @@ export async function POST(
     const mergedIds = payload.merged.map((m) => m.row.id);
     if (mergedIds.length > 0) {
       const colliding = await db
-        .select({ id: sports.id })
-        .from(sports)
-        .where(and(userScope(user.id).sports, inArray(sports.id, mergedIds)));
+        .select({ id: activities.id })
+        .from(activities)
+        .where(and(userScope(user.id).activities, inArray(activities.id, mergedIds)));
       if (colliding.length > 0) {
         await db
           .update(mergeLog)
@@ -187,7 +187,7 @@ export async function POST(
         return NextResponse.json(
           {
             error:
-              "A sport with the same id as one of the merged rows already exists. Database state has diverged from the merge log; manual fix required.",
+              "A activity with the same id as one of the merged rows already exists. Database state has diverged from the merge log; manual fix required.",
           },
           { status: 409 },
         );

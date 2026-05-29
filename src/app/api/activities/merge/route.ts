@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
-  sports,
+  activities,
   events,
   goals,
   metricTypes,
@@ -10,19 +10,19 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { parseMergeByIdBody } from "@/lib/merge-validation";
 import {
-  buildSportMergedEntry,
-  buildSportMergePayload,
+  buildActivityMergedEntry,
+  buildActivityMergePayload,
 } from "@/lib/merge-log/builder";
-import type { SportMergedEntry } from "@/lib/merge-log/types";
+import type { ActivityMergedEntry } from "@/lib/merge-log/types";
 import { requireUserOr401 } from "@/lib/auth/require";
 
 /**
- * POST /api/sports/merge
+ * POST /api/activities/merge
  * Body: { canonicalId: number, mergeIds: number[] }
  *
- * Re-points every sport_id FK from merged → canonical and deletes the merged
- * sports. Simpler than the metric-types merge: no unit mismatch, no aliases
- * table (cross-source sport canonicalization lives at the source-mapping
+ * Re-points every activity_id FK from merged → canonical and deletes the merged
+ * activities. Simpler than the metric-types merge: no unit mismatch, no aliases
+ * table (cross-source activity canonicalization lives at the source-mapping
  * layer, not the DB), no daily_summaries.
  */
 export async function POST(request: NextRequest) {
@@ -46,9 +46,9 @@ export async function POST(request: NextRequest) {
   // pass the existence check.
   const allIds = [canonicalId, ...mergeIds];
   const rows = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(and(eq(sports.userId, userId), inArray(sports.id, allIds)));
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(and(eq(activities.userId, userId), inArray(activities.id, allIds)));
   const byId = new Map(rows.map((r) => [r.id, r]));
   const canonical = byId.get(canonicalId);
   if (!canonical) {
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
 
   type Report = { mergeId: number; name: string; eventsMoved: number };
 
-  const mergedEntries: SportMergedEntry[] = [];
+  const mergedEntries: ActivityMergedEntry[] = [];
   let mergeLogId: number | null = null;
 
   const report: Report[] = await db.transaction(async (tx) => {
@@ -71,45 +71,45 @@ export async function POST(request: NextRequest) {
     for (const mergeId of mergeIds) {
       const merged = byId.get(mergeId)!;
 
-      // Snapshot BEFORE the sport delete — dashboards.sport_id has
+      // Snapshot BEFORE the activity delete — dashboards.activity_id has
       // ON DELETE SET NULL, so a post-delete read would always return
       // empty. Capture mid-loop for multi-row merge correctness.
-      mergedEntries.push(await buildSportMergedEntry(tx, mergeId));
+      mergedEntries.push(await buildActivityMergedEntry(tx, mergeId));
 
       // Defense-in-depth: scope every retarget by user_id.
       const eventsUpd = await tx
         .update(events)
-        .set({ sportId: canonicalId })
-        .where(and(eq(events.userId, userId), eq(events.sportId, mergeId)))
+        .set({ activityId: canonicalId })
+        .where(and(eq(events.userId, userId), eq(events.activityId, mergeId)))
         .returning({ id: events.id });
 
-      // focuses no longer carry sport_id directly — they reach sport via their
+      // focuses no longer carry activity_id directly — they reach activity via their
       // goal, so updating goals below carries focuses along.
       await tx
         .update(goals)
-        .set({ sportId: canonicalId })
-        .where(and(eq(goals.userId, userId), eq(goals.sportId, mergeId)));
+        .set({ activityId: canonicalId })
+        .where(and(eq(goals.userId, userId), eq(goals.activityId, mergeId)));
       await tx
         .update(metricTypes)
-        .set({ sportId: canonicalId })
+        .set({ activityId: canonicalId })
         .where(
-          and(eq(metricTypes.userId, userId), eq(metricTypes.sportId, mergeId)),
+          and(eq(metricTypes.userId, userId), eq(metricTypes.activityId, mergeId)),
         );
 
       await tx
-        .delete(sports)
-        .where(and(eq(sports.userId, userId), eq(sports.id, mergeId)));
+        .delete(activities)
+        .where(and(eq(activities.userId, userId), eq(activities.id, mergeId)));
 
       out.push({ mergeId, name: merged.name, eventsMoved: eventsUpd.length });
     }
 
-    const payload = buildSportMergePayload(canonicalId, mergedEntries);
+    const payload = buildActivityMergePayload(canonicalId, mergedEntries);
     const mergedNames = mergedEntries.map((m) => m.row.name).join(", ");
     const inserted = await tx
       .insert(mergeLog)
       .values({
         userId,
-        kind: "sport",
+        kind: "activity",
         canonicalId,
         canonicalName: canonical.name,
         mergedNames,

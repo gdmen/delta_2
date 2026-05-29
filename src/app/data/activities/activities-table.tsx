@@ -1,11 +1,11 @@
 "use client";
 
-import { SportsMergeModal } from "./merge-modal";
+import { ActivitiesMergeModal } from "./merge-modal";
 import { formatShort } from "@/lib/format";
 import { SelectableDataTable } from "@/components/selectable-data-table";
-import { deleteSportsBulk } from "@/lib/data-table/bulk-delete";
+import { deleteActivitiesBulk } from "@/lib/data-table/bulk-delete";
 
-interface SportRow {
+interface ActivityRow {
   id: number;
   name: string;
   color: string;
@@ -16,27 +16,27 @@ interface SportRow {
   /** True when the name carries a `<source>:` prefix from auto-import. */
   isOrphan: boolean;
   /**
-   * Existing canonical sport whose name matches this orphan's suffix
+   * Existing canonical activity whose name matches this orphan's suffix
    * (case-insensitive). Rendered inline as a "→ canonical" hint so the
    * user can spot likely merges without scanning the whole table.
    */
   suggestedTarget: { id: number; name: string } | null;
 }
 
-export function SportsTable({ rows }: { rows: SportRow[] }) {
+export function ActivitiesTable({ rows }: { rows: ActivityRow[] }) {
   return (
     <SelectableDataTable
       rows={rows}
       getKey={(r) => r.id}
       filterTextFn={(r) => r.name}
-      filterPlaceholder="Filter sports..."
-      itemLabel={{ one: "sport", many: "sports" }}
+      filterPlaceholder="Filter activities..."
+      itemLabel={{ one: "activity", many: "activities" }}
       emptyState={(q) =>
-        q ? `No sports match "${q}".` : "No sports yet."
+        q ? `No activities match "${q}".` : "No activities yet."
       }
       columns={[
         {
-          header: "Sport",
+          header: "Activity",
           className: "font-mono",
           render: (r) => (
             <div className="flex items-center gap-2 flex-wrap">
@@ -48,7 +48,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
               {r.isOrphan && (
                 <span
                   className="font-mono text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent-orange/40 text-accent-orange"
-                  title="Auto-created on import. Merge into a canonical sport."
+                  title="Auto-created on import. Merge into a canonical activity."
                 >
                   auto
                 </span>
@@ -99,7 +99,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
         },
       ]}
       renderMergeModal={({ selectedRows, onClose }) => (
-        <SportsMergeModal
+        <ActivitiesMergeModal
           candidates={selectedRows.map((r) => ({
             id: r.id,
             name: r.name,
@@ -112,7 +112,7 @@ export function SportsTable({ rows }: { rows: SportRow[] }) {
         />
       )}
       onBulkDelete={(selectedRows) =>
-        deleteSportsBulk(selectedRows, (r) => r.id, (r) => r.name)
+        deleteActivitiesBulk(selectedRows, (r) => r.id, (r) => r.name)
       }
     />
   );

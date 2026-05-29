@@ -104,7 +104,7 @@ export function BulkReclassifyFrequency({
             <p className="text-[0.75rem] text-muted mb-5">
               <span className="font-mono">daily</span> /{" "}
               <span className="font-mono">weekly</span>: rolling aggregate
-              (steps, sleep, sport minutes). Today&apos;s value is mid-flight,
+              (steps, sleep, activity minutes). Today&apos;s value is mid-flight,
               so charts hide it. <span className="font-mono">occasional</span>:
               point-in-time (DEXA scan, body weight). Today&apos;s reading is
               the complete reading, so charts show it as soon as it&apos;s

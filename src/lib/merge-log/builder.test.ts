@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildMetricTypeMergePayload,
-  buildSportMergePayload,
+  buildActivityMergePayload,
 } from "./builder";
 import { MERGE_LOG_PAYLOAD_VERSION } from "./types";
 
 /**
  * Pure-shape tests for the payload constructors. The DB-bound builder
- * helpers (`buildMetricTypeMergedEntry`, `buildSportMergedEntry`) read
+ * helpers (`buildMetricTypeMergedEntry`, `buildActivityMergedEntry`) read
  * live tx state and are exercised end-to-end via the merge endpoints'
  * runtime smoke tests; building a fixture DB to unit-test them would be
  * heavy and the surface we'd be covering is straight `tx.select(...).all()`
@@ -35,7 +35,7 @@ describe("buildMetricTypeMergePayload", () => {
           id: 1,
           name: "a",
           unit: "lb",
-          sportId: null,
+          activityId: null,
           frequencyHint: "daily" as const,
           target: null,
           higherIsBetter: true,
@@ -53,7 +53,7 @@ describe("buildMetricTypeMergePayload", () => {
           id: 2,
           name: "b",
           unit: "lb",
-          sportId: null,
+          activityId: null,
           frequencyHint: "occasional" as const,
           target: 100,
           higherIsBetter: false,
@@ -91,7 +91,7 @@ describe("buildMetricTypeMergePayload", () => {
           id: 1,
           name: "fitnotes_bodyweight:weight",
           unit: "lb",
-          sportId: null,
+          activityId: null,
           frequencyHint: "daily" as const,
           target: null,
           higherIsBetter: true,
@@ -113,17 +113,17 @@ describe("buildMetricTypeMergePayload", () => {
   });
 });
 
-describe("buildSportMergePayload", () => {
+describe("buildActivityMergePayload", () => {
   it("wraps entries in a v=1 envelope", () => {
-    const payload = buildSportMergePayload(99, []);
+    const payload = buildActivityMergePayload(99, []);
     expect(payload.v).toBe(MERGE_LOG_PAYLOAD_VERSION);
-    expect(payload.kind).toBe("sport");
+    expect(payload.kind).toBe("activity");
     expect(payload.canonicalId).toBe(99);
     expect(payload.merged).toEqual([]);
   });
 
   it("captures dashboards-nulled ids in the entry", () => {
-    const payload = buildSportMergePayload(1, [
+    const payload = buildActivityMergePayload(1, [
       {
         row: { id: 5, name: "old_sport", color: "#abcdef" },
         eventsMovedIds: [],

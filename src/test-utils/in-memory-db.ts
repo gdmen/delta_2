@@ -84,7 +84,7 @@ async function clearSeedData(db: PgliteDatabase<typeof schema>): Promise<void> {
     "goals",
     "focuses",
     "metric_types",
-    "sports",
+    "activities",
     "daily_summaries",
     "merge_log",
     "reconcile_log",

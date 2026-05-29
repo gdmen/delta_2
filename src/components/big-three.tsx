@@ -154,7 +154,7 @@ function LiftCard({
 
       {/* Trend chart - convert series to display unit on the fly. Line +
          points stay at the MetricTrend default (foreground / near-black);
-         the widget is sport-scoped (powerlifting) so a separate color
+         the widget is activity-scoped (powerlifting) so a separate color
          indicator would be redundant. */}
       {stats.history.length >= 2 && (
         <div className="mt-1">

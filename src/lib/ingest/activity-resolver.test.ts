@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { randomColor } from "./sport-resolver";
+import { randomColor } from "./activity-resolver";
 
 describe("randomColor", () => {
   it("returns a 6-digit hex color", () => {
@@ -18,9 +18,9 @@ describe("randomColor", () => {
   });
 });
 
-// Note: the resolver's DB-bound code (`buildSportCache`, `resolveSportId`,
+// Note: the resolver's DB-bound code (`buildActivityCache`, `resolveActivityId`,
 // auto-create with conflict fallback) is exercised at runtime through
-// the importer integration paths and the sports merge flow. A pure-DB
+// the importer integration paths and the activities merge flow. A pure-DB
 // unit test would require a fixture DB; the existing test infra runs
 // against pglite, so we keep this file focused on the pure helper.
 // Race-safety is verified by code review (the INSERT … ON CONFLICT

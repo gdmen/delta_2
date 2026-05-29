@@ -7,7 +7,7 @@ import { requireUserOr401 } from "@/lib/auth/require";
  *
  * Query params:
  *   recent=true  -> filter to the last 14 days (used by /home card)
- *   group=true   -> return source/sport pair groups (used by /data/duplicates bulk-dismiss UI)
+ *   group=true   -> return source/activity pair groups (used by /data/duplicates bulk-dismiss UI)
  *
  * Without `group`, returns `{ pairs: CandidatePair[] }`.
  * With `group=true`, returns `{ pairs: CandidatePair[], groups: CandidateGroup[] }`.

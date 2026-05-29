@@ -10,14 +10,14 @@ import { RowSelectCheckbox } from "@/components/row-select-checkbox";
 import {
   CompositeMergeModal,
   type MergeMember,
-  type SportOption,
+  type ActivityOption,
 } from "@/components/composite-merge-modal";
 
 export interface EventRow {
   id: number;
   startedAt: string;
-  sportId: number;
-  sportName: string;
+  activityId: number;
+  activityName: string;
   type: string;
   durationMinutes: number | null;
   source: string;
@@ -33,19 +33,19 @@ export interface EventRow {
  *   - Only `visible` rows can be checked. Composite rows already wrap
  *     other events; merging a composite into another composite isn't a
  *     thing we support (use Unmerge first).
- *   - 1 selected → "Promote to composite" (sport retag).
+ *   - 1 selected → "Promote to composite" (activity retag).
  *   - 2+ selected → "Merge N → composite". Members may share a source
  *     (e.g. a Garmin and a Whoop both syncing one ride to Strava); the
- *     user picks the composite's canonical sport at merge time.
+ *     user picks the composite's canonical activity at merge time.
  */
 export function EventsTable({
   rows,
-  sportOptions,
-  typeSuggestionsBySportId,
+  activityOptions,
+  typeSuggestionsByActivityId,
 }: {
   rows: EventRow[];
-  sportOptions: SportOption[];
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  activityOptions: ActivityOption[];
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
@@ -71,8 +71,8 @@ export function EventsTable({
     return {
       id: r.id,
       source: r.source,
-      sportId: r.sportId,
-      sportName: r.sportName,
+      activityId: r.activityId,
+      activityName: r.activityName,
       type: r.type,
       startedAt: r.startedAt,
       durationMinutes: r.durationMinutes,
@@ -97,7 +97,7 @@ export function EventsTable({
                 />
               </th>
               <th className="text-left font-mono font-semibold px-3 py-2">Started at</th>
-              <th className="text-left font-mono font-semibold px-3 py-2">Sport</th>
+              <th className="text-left font-mono font-semibold px-3 py-2">Activity</th>
               <th className="text-left font-mono font-semibold px-3 py-2">Type</th>
               <th className="text-right font-mono font-semibold px-3 py-2 w-20">Dur.</th>
               <th className="text-left font-mono font-semibold px-3 py-2">Source</th>
@@ -146,7 +146,7 @@ export function EventsTable({
                       />
                       {formatShort(e.startedAt)}
                     </td>
-                    <td className="px-3 py-2 font-mono">{e.sportName}</td>
+                    <td className="px-3 py-2 font-mono">{e.activityName}</td>
                     <td className="px-3 py-2 font-mono text-muted">{e.type}</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums text-muted">
                       {e.durationMinutes ?? "-"}
@@ -190,8 +190,8 @@ export function EventsTable({
       {modalOpen && canMerge && (
         <CompositeMergeModal
           members={selectedRows.map(toMember)}
-          sportOptions={sportOptions}
-          typeSuggestionsBySportId={typeSuggestionsBySportId}
+          activityOptions={activityOptions}
+          typeSuggestionsByActivityId={typeSuggestionsByActivityId}
           onClose={() => setModalOpen(false)}
           onSuccess={(compositeId) => {
             sel.clearSelection();

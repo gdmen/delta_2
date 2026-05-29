@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { metrics, metricTypes, events, sports, workoutSets } from "@/db/schema";
+import { metrics, metricTypes, events, activities, workoutSets } from "@/db/schema";
 import { and, eq, gte, lte, desc } from "drizzle-orm";
 import { classifyLift, oconnorE1RM, type Lift } from "@/lib/strength-metrics";
 import { userScope } from "@/lib/auth/scope";
@@ -7,7 +7,7 @@ import { userScope } from "@/lib/auth/scope";
 export interface DailySummary {
   date: string;
   metrics: Record<string, { avg: number; min: number; max: number; count: number; unit: string }>;
-  events: Array<{ sport: string; type: string; durationMinutes: number | null }>;
+  events: Array<{ activity: string; type: string; durationMinutes: number | null }>;
 }
 
 /**
@@ -42,13 +42,13 @@ export async function getDailySummaries(startDate: string, endDate: string, user
   // Pull events for the range.
   const rawEvents = await db
     .select({
-      sportName: sports.name,
+      activityName: activities.name,
       type: events.type,
       durationMinutes: events.durationMinutes,
       startedAt: events.startedAt,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(
       and(
         userScope(userId).events,
@@ -90,7 +90,7 @@ export async function getDailySummaries(startDate: string, endDate: string, user
     const date = e.startedAt.slice(0, 10);
     const day = ensureDay(date);
     day.events.push({
-      sport: e.sportName,
+      activity: e.activityName,
       type: e.type,
       durationMinutes: e.durationMinutes,
     });
@@ -136,7 +136,7 @@ export interface PlateauSignal {
   /**
    * Best e1RM in the last `RECENT_PR_WINDOW_DAYS`. May be lower than the
    * all-time PR (athlete weaker than peak — common after a layoff, weight
-   * cut, injury, or sport-balance reshuffle). Goals are typically benchmarked
+   * cut, injury, or activity-balance reshuffle). Goals are typically benchmarked
    * against this, NOT the lifetime peak.
    */
   recentBestValue: number | null;
@@ -163,7 +163,7 @@ export interface RecoveryDebtSignal {
 }
 
 export interface VolumeTrendSignal {
-  sport: string;
+  activity: string;
   deltaPct: number; // (current - baseline) / baseline * 100
   baselineTonnage: number; // 90-day average
   currentTonnage: number; // 28-day total
@@ -191,14 +191,14 @@ export async function getPlateauSignals(userId: number): Promise<PlateauSignal[]
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .where(
       and(
         userScope(userId).events,
         userScope(userId).metricTypes,
-        userScope(userId).sports,
-        eq(sports.name, "powerlifting"),
+        userScope(userId).activities,
+        eq(activities.name, "powerlifting"),
       ),
     )
     .orderBy(desc(events.startedAt));
@@ -445,47 +445,47 @@ export async function getRecoveryDebt(userId: number): Promise<RecoveryDebtSigna
 }
 
 /**
- * Volume trend per sport: 28-day total tonnage compared to a 90-day baseline
+ * Volume trend per activity: 28-day total tonnage compared to a 90-day baseline
  * total scaled to the same window. Positive deltaPct = ramping up, negative =
  * deloading or backing off.
  *
- * Tonnage definition is sport-aware:
+ * Tonnage definition is activity-aware:
  *   - powerlifting: Σ(reps × weight) across all workout_sets
  *   - everything else (BJJ, running, hiking, biking): Σ(duration_minutes)
  *
- * Returns one signal per sport that has data in the long window.
+ * Returns one signal per activity that has data in the long window.
  */
 export async function getVolumeTrends(
   userId: number,
-  sportNames?: string[],
+  activityNames?: string[],
 ): Promise<VolumeTrendSignal[]> {
   const baselineStart = daysAgo(90);
   const recentStart = daysAgo(ROLLING_LONG_DAYS);
 
   // Powerlifting tonnage from workout_sets.
   // INHERIT scoping: workout_sets has no user_id; restrict via
-  // events.user_id (also restricts the sports join naturally).
+  // events.user_id (also restricts the activities join naturally).
   const setsRows = await db
     .select({
-      sport: sports.name,
+      activity: activities.name,
       reps: workoutSets.reps,
       weight: workoutSets.weight,
       startedAt: events.startedAt,
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(and(userScope(userId).events, gte(events.startedAt, baselineStart)));
 
-  // Other sports: duration_minutes on events.
+  // Other activities: duration_minutes on events.
   const eventRows = await db
     .select({
-      sport: sports.name,
+      activity: activities.name,
       durationMinutes: events.durationMinutes,
       startedAt: events.startedAt,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(and(userScope(userId).events, gte(events.startedAt, baselineStart)));
 
   type Bucket = { baseline: number; recent: number };
@@ -502,31 +502,31 @@ export async function getVolumeTrends(
   const recentCutoff = new Date(recentStart).getTime();
 
   for (const r of setsRows) {
-    if (r.sport !== "powerlifting") continue;
+    if (r.activity !== "powerlifting") continue;
     const t = r.reps * r.weight;
     const ts = new Date(r.startedAt).getTime();
-    const b = ensure(r.sport);
+    const b = ensure(r.activity);
     b.baseline += t;
     if (ts >= recentCutoff) b.recent += t;
   }
 
   for (const r of eventRows) {
-    if (r.sport === "powerlifting") continue; // covered by setsRows above
+    if (r.activity === "powerlifting") continue; // covered by setsRows above
     const dur = r.durationMinutes ?? 0;
     if (dur <= 0) continue;
     const ts = new Date(r.startedAt).getTime();
-    const b = ensure(r.sport);
+    const b = ensure(r.activity);
     b.baseline += dur;
     if (ts >= recentCutoff) b.recent += dur;
   }
 
   const out: VolumeTrendSignal[] = [];
-  const sportFilter = sportNames ? new Set(sportNames) : null;
-  for (const [sport, b] of tonnage.entries()) {
-    if (sportFilter && !sportFilter.has(sport)) continue;
+  const activityFilter = activityNames ? new Set(activityNames) : null;
+  for (const [activity, b] of tonnage.entries()) {
+    if (activityFilter && !activityFilter.has(activity)) continue;
     if (b.baseline <= 0) {
       out.push({
-        sport,
+        activity,
         deltaPct: 0,
         baselineTonnage: 0,
         currentTonnage: 0,
@@ -540,7 +540,7 @@ export async function getVolumeTrends(
     const deltaPct =
       baselineScaled > 0 ? ((b.recent - baselineScaled) / baselineScaled) * 100 : 0;
     out.push({
-      sport,
+      activity,
       deltaPct: Math.round(deltaPct * 10) / 10,
       baselineTonnage: Math.round(baselineScaled),
       currentTonnage: Math.round(b.recent),

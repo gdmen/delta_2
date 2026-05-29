@@ -60,7 +60,7 @@ export async function POST(req: Request) {
         slug,
         name: input.name,
         icon: input.icon,
-        sportId: input.sportId ?? null,
+        activityId: input.activityId ?? null,
         position: positionExpr as unknown as number,
         isSystem: false,
       })

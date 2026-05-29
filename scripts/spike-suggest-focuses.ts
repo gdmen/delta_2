@@ -26,7 +26,7 @@
  */
 
 import { db } from "../src/db";
-import { goals, metricTypes, sports, focuses } from "../src/db/schema";
+import { goals, metricTypes, activities, focuses } from "../src/db/schema";
 import { eq } from "drizzle-orm";
 import {
   getPlateauSignals,
@@ -52,12 +52,12 @@ new focuses for a SPECIFIC goal, based on the athlete's recent training data.
 You receive a CONTEXT BLOCK with pre-computed signals:
 - plateau detection per Big-3 lift (with BOTH all-time PR and recent-best
   e1RM). The all-time PR may be years stale if the athlete has had layoffs,
-  weight cuts, or sport rebalances. RECENT BEST is what reflects current
+  weight cuts, or activity rebalances. RECENT BEST is what reflects current
   capacity. Goals are typically benchmarked against current capacity, not
   the all-time peak.
 - rolling 7d/28d averages on key metrics with deltas
 - recovery debt (weighted z-score across sleep/HRV/protein, 90d baseline)
-- volume trend per sport (28d vs 90d-equivalent baseline)
+- volume trend per activity (28d vs 90d-equivalent baseline)
 
 Rules for proposing focuses:
 1. Each proposal must cite a SPECIFIC signal value from the context block as
@@ -71,12 +71,12 @@ Rules for proposing focuses:
    data" on a signal, do NOT make claims based on it. Do not invent values.
 6. Use RECENT BEST (not all-time PR) to reason about current capacity vs the
    goal. A goal that is below an all-time PR is valid — the athlete may be
-   rebuilding from a layoff, weight cut, or shifted sport balance. Don't
+   rebuilding from a layoff, weight cut, or shifted activity balance. Don't
    assume the athlete is "almost there" just because the lifetime PR is high.
-7. CROSS-SPORT TRADEOFFS are valid focuses. If a non-goal sport has a
-   dramatic volume change (e.g. BJJ +200%) and the goal sport is plateauing,
+7. CROSS-SPORT TRADEOFFS are valid focuses. If a non-goal activity has a
+   dramatic volume change (e.g. BJJ +200%) and the goal activity is plateauing,
    propose a focus that names that recovery competition explicitly. The
-   athlete has a fixed recovery budget; sports compete for it.
+   athlete has a fixed recovery budget; activities compete for it.
 8. If no useful synthesis is possible from the data, return an empty focuses
    array. A silent miss beats noise. Do not pad to hit a target count.
 
@@ -99,7 +99,7 @@ Hard cap: 5 focuses max. Empty array is acceptable.`;
 interface GoalContext {
   goalId: number;
   goalLabel: string;
-  goalSport: string;
+  goalActivity: string;
   goalMetric: string;
   goalUnit: string;
   goalTarget: number;
@@ -129,11 +129,11 @@ async function loadGoal(goalId: number): Promise<GoalContext | null> {
       deadline: goals.deadline,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
+      activityName: activities.name,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(eq(goals.id, goalId))
     .limit(1);
   if (rows.length === 0) return null;
@@ -147,7 +147,7 @@ async function loadGoal(goalId: number): Promise<GoalContext | null> {
   return {
     goalId: g.id,
     goalLabel: `${g.metricName} ${g.targetValue}${g.metricUnit} by ${g.deadline}`,
-    goalSport: g.sportName,
+    goalActivity: g.activityName,
     goalMetric: g.metricName,
     goalUnit: g.metricUnit,
     goalTarget: g.targetValue,
@@ -218,18 +218,18 @@ function buildPromptTail(goal: GoalContext, signals: SignalsBlock): string {
     "",
     "### Volume trend (28d vs 90d-equivalent)",
     signals.volumeTrends.length === 0
-      ? "- (no sports with workout data)"
+      ? "- (no activities with workout data)"
       : signals.volumeTrends
           .map(
             (v) =>
               v.insufficientData
-                ? `- ${v.sport}: insufficient data`
-                : `- ${v.sport}: ${v.deltaPct >= 0 ? "+" : ""}${v.deltaPct}% (current ${v.currentTonnage}, baseline ${v.baselineTonnage})`,
+                ? `- ${v.activity}: insufficient data`
+                : `- ${v.activity}: ${v.deltaPct >= 0 ? "+" : ""}${v.deltaPct}% (current ${v.currentTonnage}, baseline ${v.baselineTonnage})`,
           )
           .join("\n"),
     "",
     "## GOAL",
-    `- ${goal.goalLabel} (sport: ${goal.goalSport})`,
+    `- ${goal.goalLabel} (activity: ${goal.goalActivity})`,
     "",
     "## EXISTING MANUAL FOCUSES (do not duplicate)",
     goal.existingManualFocuses.length === 0
@@ -319,7 +319,7 @@ async function main() {
     process.exit(1);
   }
   console.log(`GOAL: ${goal.goalLabel}`);
-  console.log(`SPORT: ${goal.goalSport}`);
+  console.log(`SPORT: ${goal.goalActivity}`);
   console.log(`MANUAL FOCUSES: ${goal.existingManualFocuses.length}`);
   if (goal.existingManualFocuses.length > 0) {
     goal.existingManualFocuses.forEach((f) => console.log(`  - ${f}`));
@@ -425,7 +425,7 @@ async function main() {
     `PASS = ≥60% of suggestions are synthesis-class (specific signal + specific evidence + non-obvious).`,
   );
   console.log(
-    `FAIL → kill the LLM scope, ship the journal + manual focuses + sport digest only.`,
+    `FAIL → kill the LLM scope, ship the journal + manual focuses + activity digest only.`,
   );
   console.log(`${"━".repeat(72)}\n`);
 

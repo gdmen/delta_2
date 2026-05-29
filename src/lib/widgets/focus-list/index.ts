@@ -12,12 +12,12 @@ export const focusListWidget = defineWidget<FocusListConfig>({
   defaultSize: { w: 6, h: 3 },
   minSize: { w: 4, h: 2 },
   schema: focusListSchema,
-  defaultConfig: { sportFilter: null, sourceFilter: "manual" },
+  defaultConfig: { activityFilter: null, sourceFilter: "manual" },
   uiMeta: {
-    sportFilter: {
-      label: "Filter by sport",
-      component: "sport-picker",
-      helpText: "Show only focuses on goals for one sport.",
+    activityFilter: {
+      label: "Filter by activity",
+      component: "activity-picker",
+      helpText: "Show only focuses on goals for one activity.",
     },
     sourceFilter: {
       label: "Show",

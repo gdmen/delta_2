@@ -33,7 +33,7 @@ export interface DataDep {
 export interface FieldMeta {
   label?: string;
   helpText?: string;
-  component?: "text" | "number" | "select" | "metric-picker" | "sport-picker" | "boolean";
+  component?: "text" | "number" | "select" | "metric-picker" | "activity-picker" | "boolean";
   options?: Array<{ value: string | number; label: string }>;
 }
 

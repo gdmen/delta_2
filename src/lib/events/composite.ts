@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { events, sports } from "@/db/schema";
+import { events, activities } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { userScope } from "@/lib/auth/scope";
 
@@ -8,7 +8,7 @@ export type CreateCompositeResult =
   | { ok: false; status: number; error: string };
 
 export interface CreateCompositeInput {
-  sportId: number;
+  activityId: number;
   /** Defaults to the first member's type. */
   type?: string;
   /** ISO timestamp; defaults to the earliest member's start. */
@@ -30,7 +30,7 @@ export interface CreateCompositeInput {
  * modal) and the duplicates bulk-merge route (many composites,
  * auto-defaulted). The CALLER owns HTTP-shape validation (memberIds
  * non-empty / integer / distinct, startedAt + durationMinutes well-formed);
- * this does the ownership + status + sport-ownership checks and the DB
+ * this does the ownership + status + activity-ownership checks and the DB
  * mutation, returning a typed result the caller maps to a response.
  */
 export async function createComposite(
@@ -66,13 +66,13 @@ export async function createComposite(
     }
   }
 
-  const ownsSport = await db
-    .select({ id: sports.id })
-    .from(sports)
-    .where(and(userScope(userId).sports, eq(sports.id, input.sportId)))
+  const ownsActivity = await db
+    .select({ id: activities.id })
+    .from(activities)
+    .where(and(userScope(userId).activities, eq(activities.id, input.activityId)))
     .limit(1);
-  if (ownsSport.length === 0) {
-    return { ok: false, status: 400, error: "sportId not found" };
+  if (ownsActivity.length === 0) {
+    return { ok: false, status: 400, error: "activityId not found" };
   }
 
   const earliestStart = members.reduce(
@@ -113,7 +113,7 @@ export async function createComposite(
     .insert(events)
     .values({
       userId,
-      sportId: input.sportId,
+      activityId: input.activityId,
       type,
       durationMinutes,
       notes: input.notes ?? null,

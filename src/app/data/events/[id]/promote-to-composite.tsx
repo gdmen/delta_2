@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import {
   CompositeMergeModal,
   type MergeMember,
-  type SportOption,
+  type ActivityOption,
 } from "@/components/composite-merge-modal";
 
 /**
  * Single-event action: wrap this event in a composite that has a
- * corrected canonical sport. Useful when a source emits a generic
+ * corrected canonical activity. Useful when a source emits a generic
  * activity type (Strava `Workout`, Apple Health `Other`, WHOOP
  * `Activity`) but the user knows what it actually was.
  *
@@ -19,12 +19,12 @@ import {
  */
 export function PromoteToCompositeButton({
   member,
-  sportOptions,
-  typeSuggestionsBySportId,
+  activityOptions,
+  typeSuggestionsByActivityId,
 }: {
   member: MergeMember;
-  sportOptions: SportOption[];
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  activityOptions: ActivityOption[];
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -35,15 +35,15 @@ export function PromoteToCompositeButton({
         type="button"
         onClick={() => setOpen(true)}
         className="px-3 py-1.5 text-[0.8125rem] text-muted hover:text-foreground border border-border rounded"
-        title="Wrap this event in a composite that has a corrected canonical sport"
+        title="Wrap this event in a composite that has a corrected canonical activity"
       >
-        Make composite (override sport) →
+        Make composite (override activity) →
       </button>
       {open && (
         <CompositeMergeModal
           members={[member]}
-          sportOptions={sportOptions}
-          typeSuggestionsBySportId={typeSuggestionsBySportId}
+          activityOptions={activityOptions}
+          typeSuggestionsByActivityId={typeSuggestionsByActivityId}
           onClose={() => setOpen(false)}
           onSuccess={(compositeId) => {
             router.push(`/data/events/${compositeId}`);

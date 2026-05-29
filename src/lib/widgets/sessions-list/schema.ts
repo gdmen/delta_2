@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const sessionsListSchema = z.object({
-  sportFilter: z.string().nullable().default(null),
+  activityFilter: z.string().nullable().default(null),
   /** How many recent sessions to display. */
   limit: z.number().int().min(1).max(50).default(10),
 });

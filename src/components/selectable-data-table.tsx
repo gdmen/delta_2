@@ -30,7 +30,7 @@ export interface Column<T> {
 }
 
 /**
- * Generic checkbox-selectable table used by the Metrics / Sports / Exercises
+ * Generic checkbox-selectable table used by the Metrics / Activities / Exercises
  * data tabs. Handles the shared chrome (search toolbar, merge/clear buttons,
  * header row, body rows with checkbox column, empty state, "filtered N of M"
  * suffix). The caller owns the per-kind column render logic and the merge

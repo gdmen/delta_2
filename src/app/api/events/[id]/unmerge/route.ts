@@ -83,7 +83,7 @@ export async function POST(
 
   // Build the denylist insert payload: every unordered pair from the
   // member list. 2 members → 1 row; N members → C(N, 2) rows.
-  // A 1-member composite (sport-promote flavor) has no pairs to
+  // A 1-member composite (activity-promote flavor) has no pairs to
   // denylist — flipping the lone member back to visible is the
   // entire unmerge.
   const denylistRows: { userId: number; eventAId: number; eventBId: number }[] = [];

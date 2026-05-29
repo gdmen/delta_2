@@ -5,14 +5,14 @@ import {
   metricTypes,
   metrics,
   metricTypeAliases,
-  sports,
+  activities,
 } from "@/db/schema";
-import { applyMetricTypeUndo, applySportUndo } from "./applier";
+import { applyMetricTypeUndo, applyActivityUndo } from "./applier";
 import {
   MERGE_LOG_PAYLOAD_VERSION,
   type MetricTypeMergePayloadV1,
   type MetricTypeMergedEntry,
-  type SportMergePayloadV1,
+  type ActivityMergePayloadV1,
 } from "./types";
 
 let testDb: Awaited<ReturnType<typeof createTestDb>>;
@@ -108,7 +108,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -142,7 +142,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -176,7 +176,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -211,7 +211,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -241,7 +241,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -270,7 +270,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -304,7 +304,7 @@ describe("applyMetricTypeUndo", () => {
             id: 50,
             name: "old_name",
             unit: "lb",
-            sportId: null,
+            activityId: null,
             frequencyHint: "daily",
             target: null,
             higherIsBetter: true,
@@ -342,7 +342,7 @@ describe("applyMetricTypeUndo", () => {
               id: 50,
               name: "old_name",
               unit: "lb",
-              sportId: null,
+              activityId: null,
               frequencyHint: "daily",
               target: null,
               higherIsBetter: true,
@@ -362,13 +362,13 @@ describe("applyMetricTypeUndo", () => {
     expect(oldName!.canonicalMetricTypeId).toBe(50);
   });
 
-  it("A9: applySportUndo unaffected by metric alias logic", async () => {
-    await db.insert(sports)
+  it("A9: applyActivityUndo unaffected by metric alias logic", async () => {
+    await db.insert(activities)
       .values({ id: 200, name: "canonical_sport", color: "#abcdef" });
 
-    const sportPayload: SportMergePayloadV1 = {
+    const activityPayload: ActivityMergePayloadV1 = {
       v: MERGE_LOG_PAYLOAD_VERSION,
-      kind: "sport",
+      kind: "activity",
       canonicalId: 200,
       merged: [
         {
@@ -381,9 +381,9 @@ describe("applyMetricTypeUndo", () => {
       ],
     };
 
-    await db.transaction(async (tx) => applySportUndo(tx, sportPayload));
+    await db.transaction(async (tx) => applyActivityUndo(tx, activityPayload));
 
-    const restored = await db.select().from(sports).where(eq(sports.id, 100));
+    const restored = await db.select().from(activities).where(eq(activities.id, 100));
     expect(restored).toHaveLength(1);
     expect(restored[0].name).toBe("old_sport");
   });
