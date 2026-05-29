@@ -22,7 +22,7 @@ export interface StravaActivity {
   id: number;
   name: string;
   type: string;
-  sport_type?: string;
+  activity_type?: string;
   start_date: string; // ISO 8601
   elapsed_time: number; // seconds
   moving_time: number; // seconds

@@ -156,7 +156,7 @@ export function ImportExportBar() {
 
   async function handleWipe() {
     const confirmed = window.confirm(
-      "Wipe ALL local data?\n\nDeletes every row from sports, metric_types, " +
+      "Wipe ALL local data?\n\nDeletes every row from activities, metric_types, " +
         "metrics, events, workout_sets, goals, focuses, journal entries, " +
         "and the LLM call log. Ingest API keys (Strava / Apple Health) are " +
         "preserved.\n\nThis cannot be undone. Proceed?",
@@ -235,7 +235,7 @@ export function ImportExportBar() {
 
       <p className="text-[0.75rem] text-muted">
         Export bundles everything needed to recreate the app from scratch:
-        foundational catalog (<code className="font-mono">sports</code>,{" "}
+        foundational catalog (<code className="font-mono">activities</code>,{" "}
         <code className="font-mono">metric_types</code>,{" "}
         <code className="font-mono">metric_type_aliases</code>,{" "}
         <code className="font-mono">import_sources</code>,{" "}
@@ -258,7 +258,7 @@ export function ImportExportBar() {
 /**
  * Progress bar + status line. The bar is denominated in cumulative
  * rows-of-work across the whole upload (not 1/N per phase), so it
- * fills at a roughly constant rate — a 3-row sports phase doesn't
+ * fills at a roughly constant rate — a 3-row activities phase doesn't
  * claim the same width as a 38K-row metrics phase. Status line
  * carries per-phase context.
  */

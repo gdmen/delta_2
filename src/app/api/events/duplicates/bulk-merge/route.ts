@@ -9,19 +9,19 @@ import { createComposite } from "@/lib/events/composite";
 import { requireUserOr401 } from "@/lib/auth/require";
 
 interface BulkMergeBody {
-  /** The ONE source/sport group to merge. The UI only enables bulk merge
+  /** The ONE source/activity group to merge. The UI only enables bulk merge
    * when exactly one group is selected — multiple groups would each need
-   * their own composite sport, so they stay dismiss-only. */
+   * their own composite activity, so they stay dismiss-only. */
   group: GroupTuple;
-  /** The composite sport to apply to every composite created here. */
-  sportId: number;
+  /** The composite activity to apply to every composite created here. */
+  activityId: number;
 }
 
 /**
  * POST /api/events/duplicates/bulk-merge
  *
- * Merge every candidate pair in ONE source/sport group into composites.
- * Body: `{ group: {sourceA, sportIdA, sourceB, sportIdB}, sportId }`.
+ * Merge every candidate pair in ONE source/activity group into composites.
+ * Body: `{ group: {sourceA, activityIdA, sourceB, activityIdB}, activityId }`.
  *
  * Re-runs the live detector, keeps the pairs matching the group (either
  * orientation), then CLUSTERS them: events transitively linked by pairs
@@ -29,7 +29,7 @@ interface BulkMergeBody {
  * what makes a session recorded 3 times (e.g. two Whoop recordings near
  * one Strava ride) collapse into one composite instead of failing on the
  * second pair-merge (an event can only be folded once). Every composite
- * uses `sportId`, the earliest member's start, and the max member
+ * uses `activityId`, the earliest member's start, and the max member
  * duration (matching the per-pair modal's default).
  *
  * Per-user scoped: the detector only returns this user's pairs, and
@@ -48,12 +48,12 @@ export async function POST(request: NextRequest) {
 
   if (!isValidTuple(body.group)) {
     return NextResponse.json(
-      { error: "group must be {sourceA, sportIdA, sourceB, sportIdB}" },
+      { error: "group must be {sourceA, activityIdA, sourceB, activityIdB}" },
       { status: 400 },
     );
   }
-  if (!Number.isInteger(body.sportId)) {
-    return NextResponse.json({ error: "sportId is required" }, { status: 400 });
+  if (!Number.isInteger(body.activityId)) {
+    return NextResponse.json({ error: "activityId is required" }, { status: 400 });
   }
   const group = body.group;
 
@@ -119,12 +119,12 @@ export async function POST(request: NextRequest) {
     const durationMinutes = durs.length > 0 ? Math.max(...durs) : null;
 
     const result = await createComposite(user.id, memberIds, {
-      sportId: body.sportId,
+      activityId: body.activityId,
       durationMinutes,
     });
     if (!result.ok) {
-      // sportId not owned (or a member not visible) — surface it. With a
-      // constant sportId and detector-sourced (visible, owned) members,
+      // activityId not owned (or a member not visible) — surface it. With a
+      // constant activityId and detector-sourced (visible, owned) members,
       // this fails on the first component before any mutation, so there's
       // no partial-merge to unwind.
       return NextResponse.json({ error: result.error }, { status: result.status });

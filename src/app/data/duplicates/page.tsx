@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { sports } from "@/db/schema";
+import { activities } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import {
   findDuplicateCandidates,
   groupCandidates,
 } from "@/lib/duplicates/detector";
-import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
+import { buildTypeSuggestionsByActivityId } from "@/lib/duplicates/type-catalog";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 import { DuplicatesView } from "./view";
@@ -27,12 +27,12 @@ export default async function DuplicatesPage() {
     limit: null,
   });
   const groups = groupCandidates(pairs);
-  const sportOptions = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(user.id).sports)
-    .orderBy(asc(sports.name));
-  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
+  const activityOptions = await db
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(user.id).activities)
+    .orderBy(asc(activities.name));
+  const typeSuggestionsByActivityId = await buildTypeSuggestionsByActivityId(user.id);
 
   return (
     <div className="max-w-[820px]">
@@ -52,8 +52,8 @@ export default async function DuplicatesPage() {
       <DuplicatesView
         pairs={pairs}
         groups={groups}
-        sportOptions={sportOptions}
-        typeSuggestionsBySportId={typeSuggestionsBySportId}
+        activityOptions={activityOptions}
+        typeSuggestionsByActivityId={typeSuggestionsByActivityId}
       />
     </div>
   );

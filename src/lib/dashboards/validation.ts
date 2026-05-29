@@ -20,7 +20,7 @@ export const createDashboardInput = z.object({
   name: z.string().trim().min(1).max(255),
   slug: slugSchema.optional(),
   icon: z.string().max(32).optional(),
-  sportId: z.number().int().positive().nullable().optional(),
+  activityId: z.number().int().positive().nullable().optional(),
   position: positiveInt.optional(),
 });
 
@@ -29,7 +29,7 @@ export const updateDashboardInput = z
     name: z.string().trim().min(1).max(255).optional(),
     slug: slugSchema.optional(),
     icon: z.string().max(32).nullable().optional(),
-    sportId: z.number().int().positive().nullable().optional(),
+    activityId: z.number().int().positive().nullable().optional(),
     position: positiveInt.optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {

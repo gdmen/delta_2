@@ -10,10 +10,10 @@ interface MetricOption {
 }
 
 /**
- * Click the goal's "sport · metric" label to swap which metric_type the
+ * Click the goal's "activity · metric" label to swap which metric_type the
  * goal targets. Opens a filterable dropdown of every metric_type in the
  * catalog (incl. computed metrics like bench_press_max). Saving doesn't
- * touch sportId, targetValue, or deadline — just metricTypeId. The unit
+ * touch activityId, targetValue, or deadline — just metricTypeId. The unit
  * displayed elsewhere on the page picks up the new metric_type's unit on
  * the next render via router.refresh().
  *
@@ -23,12 +23,12 @@ interface MetricOption {
  */
 export function EditableGoalMetric({
   goalId,
-  sportName,
+  activityName,
   initialMetricName,
   options,
 }: {
   goalId: number;
-  sportName: string;
+  activityName: string;
   initialMetricName: string;
   options: MetricOption[];
 }) {
@@ -153,7 +153,7 @@ export function EditableGoalMetric({
       className="text-[0.75rem] font-mono uppercase tracking-wider text-muted hover:text-foreground transition-colors"
       title="Click to change metric"
     >
-      {sportName} · {initialMetricName}
+      {activityName} · {initialMetricName}
     </button>
   );
 }

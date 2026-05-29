@@ -48,7 +48,7 @@ export function GoalBarComponent({
       requiredRate={formatRate(p.requiredRatePerWeek, g.metricUnit)}
       status={uiStatus}
       href={shareMode ? undefined : `/goals/${g.id}`}
-      sportColor={g.sportColor}
+      activityColor={g.activityColor}
     />
   );
 }

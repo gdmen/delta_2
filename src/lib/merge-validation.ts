@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 /**
  * Shared payload validation for the three merge endpoints
- * (metric-types, sports, exercises). Returns either a typed struct to
+ * (metric-types, activities, exercises). Returns either a typed struct to
  * destructure, or a ready-to-return NextResponse carrying the 400.
  */
 

@@ -7,7 +7,7 @@ interface MergeBody {
    * One or more member event ids. The composite wraps all of them.
    *
    * - N=1 is a "promote" — wrap one event with a corrected canonical
-   *   sport (e.g. retag a Strava `Workout` row as BJJ).
+   *   activity (e.g. retag a Strava `Workout` row as BJJ).
    * - N=2 is the typical "same session logged twice" merge.
    * - N≥3 covers multi-source single sessions (Strava + Apple Health
    *   + Whoop all reporting the same morning lift).
@@ -19,8 +19,8 @@ interface MergeBody {
    * which is a legitimate composite.
    */
   memberIds: number[];
-  /** Sport for the composite. Must belong to the calling user. */
-  sportId: number;
+  /** Activity for the composite. Must belong to the calling user. */
+  activityId: number;
   /** Optional override of the composite's display type (defaults to first member's). */
   type?: string;
   /** Optional free-form notes on the merge. */
@@ -64,9 +64,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!Number.isInteger(body.sportId)) {
+  if (!Number.isInteger(body.activityId)) {
     return NextResponse.json(
-      { error: "sportId is required" },
+      { error: "activityId is required" },
       { status: 400 },
     );
   }
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
 
   // Validate the optional started_at / duration overrides here (HTTP
   // shape); createComposite applies the earliest-start + computed-span
-  // defaults when they're omitted, and does the ownership/status/sport
+  // defaults when they're omitted, and does the ownership/status/activity
   // checks + the DB mutation.
   let startedAtOverride: string | undefined;
   if (body.startedAt !== undefined) {
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
   }
 
   const result = await createComposite(user.id, memberIdsRequested, {
-    sportId: body.sportId,
+    activityId: body.activityId,
     type: body.type,
     startedAt: startedAtOverride,
     durationMinutes: durationOverride,

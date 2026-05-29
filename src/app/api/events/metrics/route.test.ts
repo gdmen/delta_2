@@ -4,7 +4,7 @@ import { buildDbMock, setupRouteTest } from "@/test-utils/route-test";
 
 vi.mock("@/db", () => buildDbMock());
 
-import { users, sports, events, metricTypes, eventMetrics } from "@/db/schema";
+import { users, activities, events, metricTypes, eventMetrics } from "@/db/schema";
 import { GET } from "./route";
 
 /**
@@ -19,12 +19,12 @@ function get(ids: string): NextRequest {
   return new NextRequest(`http://test/api/events/metrics?ids=${ids}`);
 }
 
-async function seedSport(name: string): Promise<number> {
+async function seedActivity(name: string): Promise<number> {
   const [s] = await ctx
     .getDb()
-    .insert(sports)
+    .insert(activities)
     .values({ userId: 1, name, color: "#000" })
-    .returning({ id: sports.id });
+    .returning({ id: activities.id });
   return s.id;
 }
 
@@ -37,13 +37,13 @@ async function seedMetricType(name: string, unit: string): Promise<number> {
   return mt.id;
 }
 
-async function seedEvent(sportId: number, userId = 1): Promise<number> {
+async function seedEvent(activityId: number, userId = 1): Promise<number> {
   const [e] = await ctx
     .getDb()
     .insert(events)
     .values({
       userId,
-      sportId,
+      activityId,
       type: "Ride",
       startedAt: "2026-05-17T18:41:00.000Z",
       source: "strava",
@@ -59,11 +59,11 @@ async function seedEventMetric(eventId: number, metricTypeId: number, value: num
 
 describe("GET /api/events/metrics", () => {
   it("groups metrics by event id, ordered by metric-type name", async () => {
-    const sportId = await seedSport("Ride");
+    const activityId = await seedActivity("Ride");
     const distance = await seedMetricType("distance", "km");
     const avgHr = await seedMetricType("avg_hr", "bpm");
-    const e1 = await seedEvent(sportId);
-    const e2 = await seedEvent(sportId);
+    const e1 = await seedEvent(activityId);
+    const e2 = await seedEvent(activityId);
     await seedEventMetric(e1, distance, 42.1);
     await seedEventMetric(e1, avgHr, 148);
     await seedEventMetric(e2, distance, 42.0);
@@ -89,10 +89,10 @@ describe("GET /api/events/metrics", () => {
       .insert(users)
       .values({ id: 2, displayName: "other" })
       .onConflictDoNothing();
-    const sportId = await seedSport("Ride");
+    const activityId = await seedActivity("Ride");
     const distance = await seedMetricType("distance", "km");
-    const mine = await seedEvent(sportId, 1);
-    const theirs = await seedEvent(sportId, 2);
+    const mine = await seedEvent(activityId, 1);
+    const theirs = await seedEvent(activityId, 2);
     await seedEventMetric(mine, distance, 10);
     await seedEventMetric(theirs, distance, 99);
 

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/db";
-import { goals, metricTypes, sports, focuses } from "@/db/schema";
+import { goals, metricTypes, activities, focuses } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   getPlateauSignals,
@@ -24,12 +24,12 @@ new focuses for a SPECIFIC goal, based on the athlete's recent training data.
 You receive a CONTEXT BLOCK with pre-computed signals:
 - plateau detection per Big-3 lift (with BOTH all-time PR and recent-best
   e1RM). The all-time PR may be years stale if the athlete has had layoffs,
-  weight cuts, or sport rebalances. RECENT BEST is what reflects current
+  weight cuts, or activity rebalances. RECENT BEST is what reflects current
   capacity. Goals are typically benchmarked against current capacity, not
   the all-time peak.
 - rolling 7d/28d averages on key metrics with deltas
 - recovery debt (weighted z-score across sleep/HRV/protein, 90d baseline)
-- volume trend per sport (28d vs 90d-equivalent baseline)
+- volume trend per activity (28d vs 90d-equivalent baseline)
 
 Rules for proposing focuses:
 1. Each proposal must cite a SPECIFIC signal value from the context block as
@@ -43,12 +43,12 @@ Rules for proposing focuses:
    data" on a signal, do NOT make claims based on it. Do not invent values.
 6. Use RECENT BEST (not all-time PR) to reason about current capacity vs the
    goal. A goal that is below an all-time PR is valid — the athlete may be
-   rebuilding from a layoff, weight cut, or shifted sport balance. Don't
+   rebuilding from a layoff, weight cut, or shifted activity balance. Don't
    assume the athlete is "almost there" just because the lifetime PR is high.
-7. CROSS-SPORT TRADEOFFS are valid focuses. If a non-goal sport has a
-   dramatic volume change (e.g. BJJ +200%) and the goal sport is plateauing,
+7. CROSS-ACTIVITY TRADEOFFS are valid focuses. If a non-goal activity has a
+   dramatic volume change (e.g. BJJ +200%) and the goal activity is plateauing,
    propose a focus that names that recovery competition explicitly. The
-   athlete has a fixed recovery budget; sports compete for it.
+   athlete has a fixed recovery budget; activities compete for it.
 8. If no useful synthesis is possible from the data, return an empty focuses
    array. A silent miss beats noise. Do not pad to hit a target count.
 
@@ -76,7 +76,7 @@ interface GoalShape {
   id: number;
   metricName: string;
   metricUnit: string;
-  sportName: string;
+  activityName: string;
   targetValue: number;
   deadline: string;
   existingManualFocuses: string[];
@@ -91,11 +91,11 @@ async function loadGoalShape(goalId: number, userId: number): Promise<GoalShape 
       deadline: goals.deadline,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
+      activityName: activities.name,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(userScope(userId).goals, eq(goals.id, goalId)))
     .limit(1);
   if (rows.length === 0) return null;
@@ -192,12 +192,12 @@ export function renderSignalsBlock(signals: SignalsBlock): string {
     "",
     "### Volume trend (28d vs 90d-equivalent)",
     signals.volumeTrends.length === 0
-      ? "- (no sports with workout data)"
+      ? "- (no activities with workout data)"
       : signals.volumeTrends
           .map((v) =>
             v.insufficientData
-              ? `- ${v.sport}: insufficient data`
-              : `- ${v.sport}: ${v.deltaPct >= 0 ? "+" : ""}${v.deltaPct}% (current ${v.currentTonnage}, baseline ${v.baselineTonnage})`,
+              ? `- ${v.activity}: insufficient data`
+              : `- ${v.activity}: ${v.deltaPct >= 0 ? "+" : ""}${v.deltaPct}% (current ${v.currentTonnage}, baseline ${v.baselineTonnage})`,
           )
           .join("\n"),
   ].join("\n");
@@ -207,7 +207,7 @@ function renderGoalTail(goal: GoalShape): string {
   return [
     "",
     "## GOAL",
-    `- ${goal.metricName} ${goal.targetValue}${goal.metricUnit} by ${goal.deadline} (sport: ${goal.sportName})`,
+    `- ${goal.metricName} ${goal.targetValue}${goal.metricUnit} by ${goal.deadline} (activity: ${goal.activityName})`,
     "",
     "## EXISTING MANUAL FOCUSES (do not duplicate)",
     goal.existingManualFocuses.length === 0

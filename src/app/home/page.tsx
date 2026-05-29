@@ -1,8 +1,8 @@
 import { db } from "@/db";
-import { sports } from "@/db/schema";
+import { activities } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { findDuplicateCandidates } from "@/lib/duplicates/detector";
-import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
+import { buildTypeSuggestionsByActivityId } from "@/lib/duplicates/type-catalog";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 import { SuggestedComposites } from "./suggested-composites";
@@ -19,12 +19,12 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const user = await requireUserOrSignin();
   const pairs = await findDuplicateCandidates(user.id, { recent: true });
-  const sportOptions = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(user.id).sports)
-    .orderBy(asc(sports.name));
-  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
+  const activityOptions = await db
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(user.id).activities)
+    .orderBy(asc(activities.name));
+  const typeSuggestionsByActivityId = await buildTypeSuggestionsByActivityId(user.id);
 
   // No page-level "Home" header — the sidebar's 🏠 Home pinned link is
   // sufficient identification. A soft date stamp orients the user
@@ -44,8 +44,8 @@ export default async function HomePage() {
 
       <SuggestedComposites
         pairs={pairs}
-        sportOptions={sportOptions}
-        typeSuggestionsBySportId={typeSuggestionsBySportId}
+        activityOptions={activityOptions}
+        typeSuggestionsByActivityId={typeSuggestionsByActivityId}
       />
     </div>
   );

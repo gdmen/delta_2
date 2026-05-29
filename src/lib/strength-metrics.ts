@@ -92,8 +92,8 @@ export interface BigThreeStats {
 
 /**
  * Returns stats for all three lifts. Reads workout_sets via the
- * configured metric_type names — sport-agnostic, so a bench press done
- * in a BJJ session (or any other sport) still counts. Safe when no
+ * configured metric_type names — activity-agnostic, so a bench press done
+ * in a BJJ session (or any other activity) still counts. Safe when no
  * matching workout_sets exist.
  *
  * `names` lets callers override the canonical exercise name per slot

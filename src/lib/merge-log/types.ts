@@ -12,7 +12,7 @@ export interface MetricTypeRowSnapshot {
   id: number;
   name: string;
   unit: string;
-  sportId: number | null;
+  activityId: number | null;
   frequencyHint: "daily" | "weekly" | "occasional";
   target: number | null;
   higherIsBetter: boolean;
@@ -64,32 +64,32 @@ export interface MetricTypeMergePayloadV1 {
   merged: MetricTypeMergedEntry[];
 }
 
-export interface SportRowSnapshot {
+export interface ActivityRowSnapshot {
   id: number;
   name: string;
   color: string;
 }
 
-export interface SportMergedEntry {
-  /** Original sports row, restored verbatim on undo. */
-  row: SportRowSnapshot;
-  /** events.sport_id rewires. */
+export interface ActivityMergedEntry {
+  /** Original activities row, restored verbatim on undo. */
+  row: ActivityRowSnapshot;
+  /** events.activity_id rewires. */
   eventsMovedIds: number[];
-  /** goals.sport_id rewires. */
+  /** goals.activity_id rewires. */
   goalsMovedIds: number[];
-  /** metric_types.sport_id rewires. */
+  /** metric_types.activity_id rewires. */
   metricTypesMovedIds: number[];
-  /** dashboards whose sport_id matched the merged sport — they got
-   * NULL'd via ON DELETE SET NULL when the sport was deleted. Undo sets
-   * them back to the merged sport's id (the row is restored first). */
+  /** dashboards whose activity_id matched the merged activity — they got
+   * NULL'd via ON DELETE SET NULL when the activity was deleted. Undo sets
+   * them back to the merged activity's id (the row is restored first). */
   dashboardsNulledIds: number[];
 }
 
-export interface SportMergePayloadV1 {
+export interface ActivityMergePayloadV1 {
   v: typeof MERGE_LOG_PAYLOAD_VERSION;
-  kind: "sport";
+  kind: "activity";
   canonicalId: number;
-  merged: SportMergedEntry[];
+  merged: ActivityMergedEntry[];
 }
 
-export type MergeLogPayloadV1 = MetricTypeMergePayloadV1 | SportMergePayloadV1;
+export type MergeLogPayloadV1 = MetricTypeMergePayloadV1 | ActivityMergePayloadV1;

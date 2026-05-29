@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { goals, metricTypes, sports } from "@/db/schema";
+import { goals, metricTypes, activities } from "@/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
 import { userScope } from "@/lib/auth/scope";
@@ -19,8 +19,8 @@ export function goalListDataDeps(config: GoalListConfig, userId: number): DataDe
 
 async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalRow[]> {
   const baseScope = and(userScope(userId).goals, ne(goals.status, "abandoned"));
-  const where = config.sportFilter
-    ? and(baseScope, eq(sports.name, config.sportFilter))
+  const where = config.activityFilter
+    ? and(baseScope, eq(activities.name, config.activityFilter))
     : baseScope;
 
   const rows = await db
@@ -33,12 +33,12 @@ async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalR
       createdAt: goals.createdAt,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityName: activities.name,
+      activityColor: activities.color,
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(where);
 
   return Promise.all(
@@ -49,8 +49,8 @@ async function fetchGoals(config: GoalListConfig, userId: number): Promise<GoalR
       metricUnit: g.metricUnit,
       targetValue: g.targetValue,
       deadline: g.deadline,
-      sportName: g.sportName,
-      sportColor: g.sportColor,
+      activityName: g.activityName,
+      activityColor: g.activityColor,
       progress: await computeGoalProgress(g, userId),
     })),
   );

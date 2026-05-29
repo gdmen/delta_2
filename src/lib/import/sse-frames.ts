@@ -20,7 +20,7 @@
  * ignored — the file doesn't match any pipeline phase.
  */
 export const IMPORT_TABLES = [
-  "sports",
+  "activities",
   "metric_types",
   "metric_type_aliases",
   "import_sources",

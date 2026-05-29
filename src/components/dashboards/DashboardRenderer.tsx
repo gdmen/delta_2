@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { metricTypes, sports } from "@/db/schema";
+import { metricTypes, activities } from "@/db/schema";
 import { asc } from "drizzle-orm";
 import { loadDashboard, loadWidgets, type WidgetRow } from "@/lib/dashboards/load";
 import { lookupWidget } from "@/lib/widgets/registry";
@@ -94,24 +94,24 @@ export async function DashboardRenderer({
     // Picker context for widget settings forms. Loaded once per edit-page
     // render; keeps the SettingsDrawer drawer open instantly without a
     // separate fetch.
-    const [metricRows, sportRows] = await Promise.all([
+    const [metricRows, activityRows] = await Promise.all([
       db
         .select({ id: metricTypes.id, name: metricTypes.name, unit: metricTypes.unit })
         .from(metricTypes)
         .where(userScope(userId).metricTypes)
         .orderBy(asc(metricTypes.name)),
       db
-        .select({ id: sports.id, name: sports.name, color: sports.color })
-        .from(sports)
-        .where(userScope(userId).sports)
-        .orderBy(asc(sports.name)),
+        .select({ id: activities.id, name: activities.name, color: activities.color })
+        .from(activities)
+        .where(userScope(userId).activities)
+        .orderBy(asc(activities.name)),
     ]);
     return (
       <EditorMount
         dashboardId={dashboard.id}
         initialWidgets={widgets}
         renderedWidgets={renderedById}
-        pickerContext={{ metricTypes: metricRows, sports: sportRows }}
+        pickerContext={{ metricTypes: metricRows, activities: activityRows }}
         doneHref={viewHref}
       />
     );

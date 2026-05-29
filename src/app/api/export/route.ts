@@ -8,7 +8,7 @@ import {
   workoutSets,
   metricTypes,
   metricTypeAliases,
-  sports,
+  activities,
   importSources,
   sourceSettings,
   goals,
@@ -40,9 +40,9 @@ import { userScope } from "@/lib/auth/scope";
  * `?manual=true` narrows the bundle to data the user typed in by hand
  * (metrics + events with source="manual", manual-source focuses, plus
  * goals + journal entries + dashboards which are always manual). The
- * supporting catalog (sports, metric_types, aliases) is also narrowed
+ * supporting catalog (activities, metric_types, aliases) is also narrowed
  * to ONLY the rows actually referenced by the exported slice — so a
- * manual export doesn't bloat the bundle with every sport and metric
+ * manual export doesn't bloat the bundle with every activity and metric
  * in the DB. import_sources + source_settings still ship in full
  * because they're tiny and configuration-shaped (no rows reference
  * them by id, so no narrowing is meaningful). Operational rows
@@ -68,31 +68,31 @@ export async function GET(request: NextRequest) {
       ).map((r) => r.id)
     : [];
 
-  // In manual mode, narrow the supporting catalog (sports, metric_types,
+  // In manual mode, narrow the supporting catalog (activities, metric_types,
   // metric_type_aliases) to only what's actually referenced by the
   // exported slice plus the always-included tables (goals, dashboards,
-  // journal entries). Without this, a manual export ships every sport
+  // journal entries). Without this, a manual export ships every activity
   // and metric_type in the DB even though most aren't reachable from
   // the exported rows — bloats the bundle and clutters the re-import.
-  const { neededMetricTypeNames, neededSportNames } = manualOnly
+  const { neededMetricTypeNames, neededActivityNames } = manualOnly
     ? await collectManualNeededRefs(manualEventIds, userId)
-    : { neededMetricTypeNames: null, neededSportNames: null };
+    : { neededMetricTypeNames: null, neededActivityNames: null };
 
-  // --- sports.csv ----------------------------------------------------------
-  const sportRows = (
+  // --- activities.csv ----------------------------------------------------------
+  const activityRows = (
     await db
       .select()
-      .from(sports)
-      .where(userScope(userId).sports)
-      .orderBy(asc(sports.name))
-  ).filter((r) => !neededSportNames || neededSportNames.has(r.name));
-  const sportsCsv = serializeCsv(
+      .from(activities)
+      .where(userScope(userId).activities)
+      .orderBy(asc(activities.name))
+  ).filter((r) => !neededActivityNames || neededActivityNames.has(r.name));
+  const activitiesCsv = serializeCsv(
     ["name", "color"],
-    sportRows.map((r) => [r.name, r.color]),
+    activityRows.map((r) => [r.name, r.color]),
   );
 
   // --- metric_types.csv ----------------------------------------------------
-  // Left-join sports so the optional sport link round-trips by name.
+  // Left-join activities so the optional activity link round-trips by name.
   // target + higher_is_better drive widget headline color coding (see
   // src/lib/metric-history.ts); re-importing a CSV without them would
   // silently reset every metric's target to NULL.
@@ -104,22 +104,22 @@ export async function GET(request: NextRequest) {
         frequencyHint: metricTypes.frequencyHint,
         target: metricTypes.target,
         higherIsBetter: metricTypes.higherIsBetter,
-        sport: sports.name,
+        activity: activities.name,
       })
       .from(metricTypes)
-      .leftJoin(sports, eq(metricTypes.sportId, sports.id))
+      .leftJoin(activities, eq(metricTypes.activityId, activities.id))
       .where(userScope(userId).metricTypes)
       .orderBy(asc(metricTypes.name))
   ).filter((r) => !neededMetricTypeNames || neededMetricTypeNames.has(r.name));
   const metricTypesCsv = serializeCsv(
-    ["name", "unit", "frequency_hint", "target", "higher_is_better", "sport"],
+    ["name", "unit", "frequency_hint", "target", "higher_is_better", "activity"],
     mtRows.map((r) => [
       r.name,
       r.unit,
       r.frequencyHint,
       r.target == null ? "" : String(r.target),
       r.higherIsBetter ? "1" : "0",
-      r.sport ?? "",
+      r.activity ?? "",
     ]),
   );
 
@@ -168,20 +168,20 @@ export async function GET(request: NextRequest) {
   // --- goals.csv -----------------------------------------------------------
   const goalRows = await db
     .select({
-      sport: sports.name,
+      activity: activities.name,
       metric: metricTypes.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
       status: goals.status,
     })
     .from(goals)
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .where(userScope(userId).goals)
     .orderBy(asc(goals.deadline));
   const goalsCsv = serializeCsv(
-    ["sport", "metric", "target_value", "deadline", "status"],
-    goalRows.map((r) => [r.sport, r.metric, r.targetValue, r.deadline, r.status]),
+    ["activity", "metric", "target_value", "deadline", "status"],
+    goalRows.map((r) => [r.activity, r.metric, r.targetValue, r.deadline, r.status]),
   );
 
   // --- focuses.csv ---------------------------------------------------------
@@ -195,13 +195,13 @@ export async function GET(request: NextRequest) {
       technicalNotes: focuses.technicalNotes,
       evidence: focuses.evidence,
       dismissedAt: focuses.dismissedAt,
-      goalSport: sports.name,
+      goalActivity: activities.name,
       goalMetric: metricTypes.name,
       goalDeadline: goals.deadline,
     })
     .from(focuses)
     .innerJoin(goals, eq(focuses.goalId, goals.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .$dynamic();
   const focusRows = await (manualOnly
@@ -232,7 +232,7 @@ export async function GET(request: NextRequest) {
       r.technicalNotes ?? "",
       r.evidence ?? "",
       r.dismissedAt ?? "",
-      r.goalSport,
+      r.goalActivity,
       r.goalMetric,
       r.goalDeadline,
     ]),
@@ -243,7 +243,7 @@ export async function GET(request: NextRequest) {
     .select({
       content: goalJournalEntries.content,
       createdAt: goalJournalEntries.createdAt,
-      goalSport: sports.name,
+      goalActivity: activities.name,
       goalMetric: metricTypes.name,
       goalDeadline: goals.deadline,
       verdictFocusName: focuses.name,
@@ -252,7 +252,7 @@ export async function GET(request: NextRequest) {
     })
     .from(goalJournalEntries)
     .innerJoin(goals, eq(goalJournalEntries.goalId, goals.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .leftJoin(focuses, eq(goalJournalEntries.verdictFocusId, focuses.id))
     .leftJoin(
@@ -273,7 +273,7 @@ export async function GET(request: NextRequest) {
       "linked_metric",
     ],
     journalRows.map((r) => [
-      r.goalSport,
+      r.goalActivity,
       r.goalMetric,
       r.goalDeadline,
       r.content,
@@ -324,7 +324,7 @@ export async function GET(request: NextRequest) {
     .select({
       id: events.id,
       startedAt: events.startedAt,
-      sport: sports.name,
+      activity: activities.name,
       type: events.type,
       durationMinutes: events.durationMinutes,
       notes: events.notes,
@@ -334,7 +334,7 @@ export async function GET(request: NextRequest) {
       compositeMemberIds: events.compositeMemberIds,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .$dynamic();
   const eventRows = await (manualOnly
     ? eventsBase.where(and(userScope(userId).events, eq(events.source, "manual")))
@@ -348,14 +348,14 @@ export async function GET(request: NextRequest) {
   const sourceIdById = new Map<number, string>();
   for (const r of eventRows) {
     const sid =
-      r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`;
+      r.sourceId ?? `custom-${r.activity}-${r.type}-${r.startedAt}`;
     sourceIdById.set(r.id, sid);
   }
 
   const eventsCsv = serializeCsv(
     [
       "started_at",
-      "sport",
+      "activity",
       "type",
       "duration_minutes",
       "notes",
@@ -370,7 +370,7 @@ export async function GET(request: NextRequest) {
         .filter((s): s is string => !!s);
       return [
         r.startedAt,
-        r.sport,
+        r.activity,
         r.type,
         r.durationMinutes ?? "",
         r.notes ?? "",
@@ -407,12 +407,12 @@ export async function GET(request: NextRequest) {
       .select({
         id: events.id,
         sourceId: events.sourceId,
-        sport: sports.name,
+        activity: activities.name,
         type: events.type,
         startedAt: events.startedAt,
       })
       .from(events)
-      .innerJoin(sports, eq(events.sportId, sports.id))
+      .innerJoin(activities, eq(events.activityId, activities.id))
       .where(
         and(
           userScope(userId).events,
@@ -422,7 +422,7 @@ export async function GET(request: NextRequest) {
     for (const r of extra) {
       sourceIdById.set(
         r.id,
-        r.sourceId ?? `custom-${r.sport}-${r.type}-${r.startedAt}`,
+        r.sourceId ?? `custom-${r.activity}-${r.type}-${r.startedAt}`,
       );
     }
   }
@@ -443,7 +443,7 @@ export async function GET(request: NextRequest) {
   const emBase = db
     .select({
       eventStartedAt: events.startedAt,
-      sport: sports.name,
+      activity: activities.name,
       eventType: events.type,
       eventSourceId: events.sourceId,
       metric: metricTypes.name,
@@ -452,7 +452,7 @@ export async function GET(request: NextRequest) {
     })
     .from(eventMetrics)
     .innerJoin(events, eq(eventMetrics.eventId, events.id))
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .innerJoin(metricTypes, eq(eventMetrics.metricTypeId, metricTypes.id))
     .$dynamic();
   const emRows = await (manualOnly
@@ -469,7 +469,7 @@ export async function GET(request: NextRequest) {
   const eventMetricsCsv = serializeCsv(
     [
       "event_started_at",
-      "sport",
+      "activity",
       "event_type",
       "event_source_id",
       "metric",
@@ -478,7 +478,7 @@ export async function GET(request: NextRequest) {
     ],
     emRows.map((r) => [
       r.eventStartedAt,
-      r.sport,
+      r.activity,
       r.eventType,
       r.eventSourceId ?? "",
       r.metric,
@@ -491,7 +491,7 @@ export async function GET(request: NextRequest) {
   const setsBase = db
     .select({
       eventStartedAt: events.startedAt,
-      sport: sports.name,
+      activity: activities.name,
       eventType: events.type,
       eventSourceId: events.sourceId,
       exerciseName: metricTypes.name,
@@ -503,7 +503,7 @@ export async function GET(request: NextRequest) {
     })
     .from(workoutSets)
     .innerJoin(events, eq(workoutSets.eventId, events.id))
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .innerJoin(metricTypes, eq(workoutSets.exerciseMetricTypeId, metricTypes.id))
     .$dynamic();
   const setRows = await (manualOnly
@@ -520,7 +520,7 @@ export async function GET(request: NextRequest) {
   const workoutSetsCsv = serializeCsv(
     [
       "event_started_at",
-      "sport",
+      "activity",
       "event_type",
       "event_source_id",
       "exercise_name",
@@ -532,7 +532,7 @@ export async function GET(request: NextRequest) {
     ],
     setRows.map((r) => [
       r.eventStartedAt,
-      r.sport,
+      r.activity,
       r.eventType,
       r.eventSourceId ?? "",
       r.exerciseName,
@@ -545,28 +545,28 @@ export async function GET(request: NextRequest) {
   );
 
   // --- dashboards.csv ------------------------------------------------------
-  const dashboardSports = alias(sports, "dashboard_sports");
+  const dashboardActivities = alias(activities, "dashboard_sports");
   const dashboardRows = await db
     .select({
       slug: dashboards.slug,
       name: dashboards.name,
       icon: dashboards.icon,
-      sportName: dashboardSports.name,
+      activityName: dashboardActivities.name,
       position: dashboards.position,
       isSystem: dashboards.isSystem,
       seededId: dashboards.seededId,
     })
     .from(dashboards)
-    .leftJoin(dashboardSports, eq(dashboards.sportId, dashboardSports.id))
+    .leftJoin(dashboardActivities, eq(dashboards.activityId, dashboardActivities.id))
     .where(userScope(userId).dashboards)
     .orderBy(asc(dashboards.position));
   const dashboardsCsv = serializeCsv(
-    ["slug", "name", "icon", "sport_name", "position", "is_system", "seeded_id"],
+    ["slug", "name", "icon", "activity_name", "position", "is_system", "seeded_id"],
     dashboardRows.map((r) => [
       r.slug,
       r.name,
       r.icon ?? "",
-      r.sportName ?? "",
+      r.activityName ?? "",
       r.position,
       r.isSystem ? 1 : 0,
       r.seededId ?? "",
@@ -615,13 +615,13 @@ export async function GET(request: NextRequest) {
       durationMs: coachCalls.durationMs,
       model: coachCalls.model,
       status: coachCalls.status,
-      goalSport: sports.name,
+      goalActivity: activities.name,
       goalMetric: metricTypes.name,
       goalDeadline: goals.deadline,
     })
     .from(coachCalls)
     .leftJoin(goals, eq(coachCalls.goalId, goals.id))
-    .leftJoin(sports, eq(goals.sportId, sports.id))
+    .leftJoin(activities, eq(goals.activityId, activities.id))
     .leftJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
     .where(userScope(userId).coachCalls)
     .orderBy(asc(coachCalls.ts));
@@ -646,7 +646,7 @@ export async function GET(request: NextRequest) {
       r.durationMs,
       r.model,
       r.status,
-      r.goalSport ?? "",
+      r.goalActivity ?? "",
       r.goalMetric ?? "",
       r.goalDeadline ?? "",
     ]),
@@ -728,7 +728,7 @@ export async function GET(request: NextRequest) {
 
   // --- bundle ---------------------------------------------------------------
   const bundle: Record<string, Uint8Array> = {
-    "sports.csv": strToU8(sportsCsv),
+    "activities.csv": strToU8(activitiesCsv),
     "metric_types.csv": strToU8(metricTypesCsv),
     "metric_type_aliases.csv": strToU8(metricTypeAliasesCsv),
     "import_sources.csv": strToU8(importSourcesCsv),
@@ -791,12 +791,12 @@ function collectMetricNamesFromConfig(value: unknown, out: Set<string>): void {
 }
 
 /**
- * Compute the metric_type + sport names actually referenced by the
+ * Compute the metric_type + activity names actually referenced by the
  * manual-export slice. All queries scoped to the requesting user.
  */
 async function collectManualNeededRefs(manualEventIds: number[], userId: number): Promise<{
   neededMetricTypeNames: Set<string>;
-  neededSportNames: Set<string>;
+  neededActivityNames: Set<string>;
 }> {
   const neededTypeIds = new Set<number>();
 
@@ -873,59 +873,59 @@ async function collectManualNeededRefs(manualEventIds: number[], userId: number)
         .select({
           id: metricTypes.id,
           name: metricTypes.name,
-          sportId: metricTypes.sportId,
+          activityId: metricTypes.activityId,
         })
         .from(metricTypes)
         .where(and(userScope(userId).metricTypes, inArray(metricTypes.id, idsArray)))
     : [];
   const neededTypeNames = new Set<string>();
-  const sportIdsFromTypes = new Set<number>();
+  const activityIdsFromTypes = new Set<number>();
   for (const r of byIdRows) {
     neededTypeNames.add(r.name);
-    if (r.sportId != null) sportIdsFromTypes.add(r.sportId);
+    if (r.activityId != null) activityIdsFromTypes.add(r.activityId);
   }
   for (const name of namesFromWidgets) neededTypeNames.add(name);
 
   if (namesFromWidgets.size > 0) {
     const widgetTypeRows = await db
-      .select({ name: metricTypes.name, sportId: metricTypes.sportId })
+      .select({ name: metricTypes.name, activityId: metricTypes.activityId })
       .from(metricTypes)
       .where(and(userScope(userId).metricTypes, inArray(metricTypes.name, [...namesFromWidgets])));
     for (const r of widgetTypeRows) {
-      if (r.sportId != null) sportIdsFromTypes.add(r.sportId);
+      if (r.activityId != null) activityIdsFromTypes.add(r.activityId);
     }
   }
 
-  const neededSportIds = new Set<number>(sportIdsFromTypes);
+  const neededActivityIds = new Set<number>(activityIdsFromTypes);
   if (manualEventIds.length > 0) {
     for (const r of await db
-      .selectDistinct({ id: events.sportId })
+      .selectDistinct({ id: events.activityId })
       .from(events)
       .where(inArray(events.id, manualEventIds))) {
-      neededSportIds.add(r.id);
+      neededActivityIds.add(r.id);
     }
   }
   for (const r of await db
-    .selectDistinct({ id: goals.sportId })
+    .selectDistinct({ id: goals.activityId })
     .from(goals)
     .where(userScope(userId).goals)) {
-    neededSportIds.add(r.id);
+    neededActivityIds.add(r.id);
   }
   for (const r of await db
-    .select({ id: dashboards.sportId })
+    .select({ id: dashboards.activityId })
     .from(dashboards)
     .where(userScope(userId).dashboards)) {
-    if (r.id != null) neededSportIds.add(r.id);
+    if (r.id != null) neededActivityIds.add(r.id);
   }
 
-  const neededSportNames = new Set<string>();
-  if (neededSportIds.size > 0) {
-    const sportRows2 = await db
-      .select({ name: sports.name })
-      .from(sports)
-      .where(and(userScope(userId).sports, inArray(sports.id, [...neededSportIds])));
-    for (const r of sportRows2) neededSportNames.add(r.name);
+  const neededActivityNames = new Set<string>();
+  if (neededActivityIds.size > 0) {
+    const activityRows2 = await db
+      .select({ name: activities.name })
+      .from(activities)
+      .where(and(userScope(userId).activities, inArray(activities.id, [...neededActivityIds])));
+    for (const r of activityRows2) neededActivityNames.add(r.name);
   }
 
-  return { neededMetricTypeNames: neededTypeNames, neededSportNames };
+  return { neededMetricTypeNames: neededTypeNames, neededActivityNames };
 }

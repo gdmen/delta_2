@@ -1,15 +1,15 @@
 import { db } from "@/db";
-import { sports } from "@/db/schema";
+import { activities } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { userScope } from "@/lib/auth/scope";
 
 /**
- * Resolve a source-specific sport name to a sports.id, auto-creating a
+ * Resolve a source-specific activity name to a activities.id, auto-creating a
  * row for unmapped names so nothing gets silently dropped or hard-fails.
  *
  * Mirrors the shape of `metric-resolver.ts` so importers see a uniform
  * pattern: the user merges source-prefixed orphans (`strava:Ride`,
- * `apple_health:Hiking`, etc.) into canonical names via /data/sports.
+ * `apple_health:Hiking`, etc.) into canonical names via /data/activities.
  *
  * Three resolution paths:
  *   1. Cache hit by raw name — covers user-renamed canonicals (e.g. the
@@ -19,41 +19,41 @@ import { userScope } from "@/lib/auth/scope";
  *      Race-safe: INSERT OR IGNORE + SELECT-by-name fallback so two
  *      concurrent imports converge on the same id without throwing.
  *
- * No alias table for sports today (unlike metric_types). The merge UI at
- * /data/sports updates `events.sport_id`, `goals.sport_id`,
- * `dashboards.sport_id`, and `metric_types.sport_id` directly. If sport
+ * No alias table for activities today (unlike metric_types). The merge UI at
+ * /data/activities updates `events.activity_id`, `goals.activity_id`,
+ * `dashboards.activity_id`, and `metric_types.activity_id` directly. If activity
  * aliases ever become useful, mirror metric_type_aliases.
  *
- * Per-user: sports is OWNED. Each cache is built for one user_id and the
- * resolver only sees that user's sports.
+ * Per-user: activities is OWNED. Each cache is built for one user_id and the
+ * resolver only sees that user's activities.
  */
 
-export interface SportCache {
+export interface ActivityCache {
   /** Owner of this cache. Asserted on every autoCreate to prevent the
    *  silent-corruption bug if a caller passes the wrong cache. */
   userId: number;
   byName: Map<string, number>;
 }
 
-export async function buildSportCache(userId: number): Promise<SportCache> {
+export async function buildActivityCache(userId: number): Promise<ActivityCache> {
   const rows = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(userId).sports);
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(userId).activities);
   return { userId, byName: new Map(rows.map((r) => [r.name, r.id])) };
 }
 
-export interface ResolveSportArgs {
+export interface ResolveActivityArgs {
   rawName: string;
   sourceSystem: string;
-  cache: SportCache;
+  cache: ActivityCache;
 }
 
-export async function resolveSportId({
+export async function resolveActivityId({
   rawName,
   sourceSystem,
   cache,
-}: ResolveSportArgs): Promise<number> {
+}: ResolveActivityArgs): Promise<number> {
   // 1. Direct hit — covers user-renamed canonicals.
   const direct = cache.byName.get(rawName);
   if (direct !== undefined) return direct;
@@ -67,7 +67,7 @@ export async function resolveSportId({
   return autoCreate(prefixed, cache);
 }
 
-async function autoCreate(name: string, cache: SportCache): Promise<number> {
+async function autoCreate(name: string, cache: ActivityCache): Promise<number> {
   // Cheap re-check before going to the DB — covers tight loops within a
   // single request that resolve the same new name multiple times.
   const cached = cache.byName.get(name);
@@ -75,39 +75,39 @@ async function autoCreate(name: string, cache: SportCache): Promise<number> {
 
   const color = randomColor();
   const inserted = await db
-    .insert(sports)
+    .insert(activities)
     .values({ userId: cache.userId, name, color })
     .onConflictDoNothing()
-    .returning({ id: sports.id });
+    .returning({ id: activities.id });
 
   let id: number | undefined = inserted[0]?.id;
   if (id === undefined) {
     // Conflict path: another concurrent path won the race. Re-query the
     // canonical row so both callers converge on the same id.
     const existing = await db
-      .select({ id: sports.id })
-      .from(sports)
-      .where(and(userScope(cache.userId).sports, eq(sports.name, name)))
+      .select({ id: activities.id })
+      .from(activities)
+      .where(and(userScope(cache.userId).activities, eq(activities.name, name)))
       .limit(1);
     id = existing[0]?.id;
   }
 
   if (id === undefined) {
-    throw new Error(`Failed to resolve or create sport "${name}"`);
+    throw new Error(`Failed to resolve or create activity "${name}"`);
   }
   cache.byName.set(name, id);
   // Visibility for the dev log — auto-creation is a soft event but worth
   // surfacing so a user inspecting an import run can see what landed.
-  console.log(`[sport-resolver] auto-created sport: ${name} (color ${color})`);
+  console.log(`[activity-resolver] auto-created activity: ${name} (color ${color})`);
   return id;
 }
 
 /**
- * Random hex color for a freshly minted sport. Stored once on the row,
+ * Random hex color for a freshly minted activity. Stored once on the row,
  * so non-determinism across runs is fine — the user can override via
- * /data/sports if a generated color is hard to read or clashes with a
+ * /data/activities if a generated color is hard to read or clashes with a
  * neighbour. Hue is bounded in HSL space (mid-saturation, mid-light)
- * so no auto-created sport ends up near-white or near-black on the
+ * so no auto-created activity ends up near-white or near-black on the
  * default theme.
  */
 export function randomColor(): string {

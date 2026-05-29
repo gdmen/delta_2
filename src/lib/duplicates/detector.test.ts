@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@/test-utils/in-memory-db";
-import { users, sports, events } from "@/db/schema";
+import { users, activities, events } from "@/db/schema";
 import { findDuplicateCandidates } from "./detector";
 
 /**
@@ -35,7 +35,7 @@ beforeEach(async () => {
   await testDb.clearSeedData();
   await db.insert(users).values({ id: 1, displayName: "u" }).onConflictDoNothing();
   await db
-    .insert(sports)
+    .insert(activities)
     .values([
       { id: 1, name: "running", color: "#000" },
       { id: 2, name: "lifting", color: "#111" },
@@ -50,12 +50,12 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
     // different sources). This is the post-#25 mixed-offset case.
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
         source: "strava", sourceId: "z-1",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T05:00:00.000-07:00", // == 12:00Z
         source: "apple_health", sourceId: "ah-1",
       },
@@ -72,12 +72,12 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
   it("D2: events 60 minutes apart exactly are flagged (inclusive boundary)", async () => {
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
         source: "strava", sourceId: "boundary-a",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T13:00:00.000Z", // exactly +60min
         source: "manual", sourceId: "boundary-b",
       },
@@ -91,12 +91,12 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
   it("D3: events 61 minutes apart are NOT flagged (just outside window)", async () => {
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
         source: "strava", sourceId: "out-a",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T13:01:00.000Z", // +61min
         source: "manual", sourceId: "out-b",
       },
@@ -113,12 +113,12 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
     // detection was reverted. Same-source merges remain possible by hand.
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
         source: "fitnotes", sourceId: "same-a",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:30.000Z",
         source: "fitnotes", sourceId: "same-b",
       },
@@ -131,10 +131,10 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
   it("D8: limit caps results; limit=null returns everything", async () => {
     // Three cross-source pairs, all within window of a shared anchor.
     await db.insert(events).values([
-      { userId: 1, sportId: 1, type: "Run", startedAt: "2026-05-14T12:00:00.000Z", source: "strava", sourceId: "lim-s" },
-      { userId: 1, sportId: 1, type: "Run", startedAt: "2026-05-14T12:01:00.000Z", source: "apple_health", sourceId: "lim-a" },
-      { userId: 1, sportId: 1, type: "Run", startedAt: "2026-05-14T12:02:00.000Z", source: "manual", sourceId: "lim-m" },
-      { userId: 1, sportId: 1, type: "Run", startedAt: "2026-05-14T12:03:00.000Z", source: "whoop", sourceId: "lim-w" },
+      { userId: 1, activityId: 1, type: "Run", startedAt: "2026-05-14T12:00:00.000Z", source: "strava", sourceId: "lim-s" },
+      { userId: 1, activityId: 1, type: "Run", startedAt: "2026-05-14T12:01:00.000Z", source: "apple_health", sourceId: "lim-a" },
+      { userId: 1, activityId: 1, type: "Run", startedAt: "2026-05-14T12:02:00.000Z", source: "manual", sourceId: "lim-m" },
+      { userId: 1, activityId: 1, type: "Run", startedAt: "2026-05-14T12:03:00.000Z", source: "whoop", sourceId: "lim-w" },
     ]);
     // 4 distinct-source events within 60min → C(4,2) = 6 cross-source pairs.
     const capped = await findDuplicateCandidates(1, { recent: false, limit: 2 }, db);
@@ -153,23 +153,23 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
     await db.insert(events).values([
       // Pair A: both ~5 days ago. Should be flagged by recent=true.
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: fiveDaysAgo.toISOString(),
         source: "strava", sourceId: "recent-a",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: new Date(fiveDaysAgo.getTime() + 30 * 60 * 1000).toISOString(),
         source: "apple_health", sourceId: "recent-b",
       },
       // Pair B: both ~100 days ago. Should be filtered OUT by recent=true.
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: oneHundredDaysAgo.toISOString(),
         source: "strava", sourceId: "old-a",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: new Date(oneHundredDaysAgo.getTime() + 30 * 60 * 1000).toISOString(),
         source: "apple_health", sourceId: "old-b",
       },
@@ -200,12 +200,12 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
     const newerTs = new Date(cutoff + 15 * 60 * 1000);
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: olderTs.toISOString(),
         source: "strava", sourceId: "straddle-old",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: newerTs.toISOString(),
         source: "apple_health", sourceId: "straddle-new",
       },
@@ -218,13 +218,13 @@ describe("findDuplicateCandidates — BETWEEN + recent prefilter (#24)", () => {
   it("D7: status='hidden_by_composite' member hidden from candidates", async () => {
     await db.insert(events).values([
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:00:00.000Z",
         source: "strava", sourceId: "v-1",
         status: "visible",
       },
       {
-        userId: 1, sportId: 1, type: "Run",
+        userId: 1, activityId: 1, type: "Run",
         startedAt: "2026-05-14T12:05:00.000Z",
         source: "apple_health", sourceId: "h-1",
         status: "hidden_by_composite",

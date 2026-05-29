@@ -282,7 +282,7 @@ fi
 step "Running database migrations"
 npx drizzle-kit migrate
 
-step "Seeding sports + metric types"
+step "Seeding activities + metric types"
 npx tsx src/db/seed.ts
 
 step "Building Next.js (this takes 30-90 sec; may swap on t3.micro)"

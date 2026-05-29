@@ -274,7 +274,7 @@ export default async function MetricHistoryPage({
       {computedDescription && (
         <p className="mb-6 text-[0.8125rem] text-muted border-l-2 border-border pl-3">
           Source: {computedDescription}. Not editable from this page — change
-          the underlying data ({computed?.family.startsWith("sport_") ? "events" : "workout sets"})
+          the underlying data ({computed?.family.startsWith("activity_") ? "events" : "workout sets"})
           and the value will update on the next read.
         </p>
       )}

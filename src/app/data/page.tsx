@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { events, metrics, metricTypes, sports, workoutSets } from "@/db/schema";
+import { events, metrics, metricTypes, activities, workoutSets } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { MetricsTable } from "./metrics-table";
 import { DataTabShell } from "@/components/data-tab-shell";
@@ -53,23 +53,23 @@ export default async function DataPage() {
   // Aggregates feeding the computed-metric counts. One round-trip each;
   // the resolver in computed-metrics.ts does the same arithmetic at read
   // time. We avoid calling the resolver for every row (~600 metric_types
-  // would be ~600 queries) by precomputing per-sport and per-exercise
+  // would be ~600 queries) by precomputing per-activity and per-exercise
   // day counts here and looking them up by name match.
-  const sportDayCounts = await db
+  const activityDayCounts = await db
     .select({
-      sportId: events.sportId,
-      sportName: sports.name,
+      activityId: events.activityId,
+      activityName: activities.name,
       days: sql<number>`count(distinct to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD'))`,
       daysWithMinutes: sql<number>`count(distinct case when ${events.durationMinutes} > 0 then to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') end)`,
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(userScope(user.id).events)
-    .groupBy(events.sportId, sports.name);
-  const bySport = new Map<string, { days: number; daysWithMinutes: number; lastAt: string | null }>();
-  for (const r of sportDayCounts) {
-    bySport.set(r.sportName, {
+    .groupBy(events.activityId, activities.name);
+  const byActivity = new Map<string, { days: number; daysWithMinutes: number; lastAt: string | null }>();
+  for (const r of activityDayCounts) {
+    byActivity.set(r.activityName, {
       days: Number(r.days),
       daysWithMinutes: Number(r.daysWithMinutes),
       lastAt: r.lastAt ?? null,
@@ -101,21 +101,21 @@ export default async function DataPage() {
   const rows = realRows
     .map((t) => {
       // Computed metric? Skip the real+synth path — the underlying tables
-      // hold no rows for these names. Pull the count from the per-sport /
+      // hold no rows for these names. Pull the count from the per-activity /
       // per-exercise aggregates above.
       const computed = matchComputed(t.name);
       if (computed) {
         let count = 0;
         let lastAt: string | null = null;
         switch (computed.family) {
-          case "sport_sessions_count": {
-            const s = bySport.get(computed.subject);
+          case "activity_sessions_count": {
+            const s = byActivity.get(computed.subject);
             count = s?.days ?? 0;
             lastAt = s?.lastAt ?? null;
             break;
           }
-          case "sport_minutes": {
-            const s = bySport.get(computed.subject);
+          case "activity_minutes": {
+            const s = byActivity.get(computed.subject);
             count = s?.daysWithMinutes ?? 0;
             lastAt = s?.lastAt ?? null;
             break;

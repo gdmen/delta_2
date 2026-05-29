@@ -27,10 +27,10 @@ export const RESERVED_SLUGS = new Set([
   "input",
   "recovery",
   "body-comp",
-  // `sports` was a top-level route; PR4 deleted the per-sport pages but
-  // we keep it reserved so future re-introduction (or sport-scoped
+  // `activities` was a top-level route; PR4 deleted the per-activity pages but
+  // we keep it reserved so future re-introduction (or activity-scoped
   // dashboards) doesn't collide with an existing user-created slug.
-  "sports",
+  "activities",
   "favicon.ico",
   // /dashboards/new is the create-dashboard page (a static segment that
   // takes precedence over [slug]) — reserve so a user can't shadow it.

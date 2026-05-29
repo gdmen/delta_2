@@ -3,22 +3,22 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-interface Sport {
+interface Activity {
   id: number;
   name: string;
 }
 
 export function NewEventForm({
-  sports,
-  typesBySport,
+  activities,
+  typesByActivity,
 }: {
-  sports: Sport[];
-  typesBySport: Record<number, string[]>;
+  activities: Activity[];
+  typesByActivity: Record<number, string[]>;
 }) {
   const router = useRouter();
-  const [sportId, setSportId] = useState<number>(sports[0]?.id ?? 0);
-  const typeSuggestions = typesBySport[sportId] ?? [];
-  // Default to the most common existing type for the chosen sport so the
+  const [activityId, setActivityId] = useState<number>(activities[0]?.id ?? 0);
+  const typeSuggestions = typesByActivity[activityId] ?? [];
+  // Default to the most common existing type for the chosen activity so the
   // form lands in a useful state. Free-text fallback for anything new.
   const [type, setType] = useState(typeSuggestions[0] ?? "");
   const [startedAt, setStartedAt] = useState(() => localDatetimeValue(new Date()));
@@ -30,8 +30,8 @@ export function NewEventForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
-    if (!sportId) {
-      setErr("Pick a sport");
+    if (!activityId) {
+      setErr("Pick a activity");
       return;
     }
     if (!type.trim()) {
@@ -44,7 +44,7 @@ export function NewEventForm({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sportId,
+          activityId,
           type: type.trim(),
           durationMinutes: durationMinutes.trim() === "" ? undefined : Number(durationMinutes),
           notes: notes.trim() || undefined,
@@ -68,20 +68,20 @@ export function NewEventForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <Field label="Sport">
+      <Field label="Activity">
         <select
-          value={sportId}
+          value={activityId}
           onChange={(e) => {
             const next = Number(e.target.value);
-            setSportId(next);
+            setActivityId(next);
             // Re-seed the type with the most common existing type for the
-            // newly-picked sport so the field stays consistent with the
-            // selection. Empty string when the sport has no events yet.
-            setType((typesBySport[next] ?? [])[0] ?? "");
+            // newly-picked activity so the field stays consistent with the
+            // selection. Empty string when the activity has no events yet.
+            setType((typesByActivity[next] ?? [])[0] ?? "");
           }}
           className="w-full px-2 py-1.5 border border-border rounded text-[0.875rem] bg-background"
         >
-          {sports.map((s) => (
+          {activities.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
@@ -108,7 +108,7 @@ export function NewEventForm({
         </datalist>
         {typeSuggestions.length > 0 && (
           <p className="mt-1 text-[0.6875rem] font-mono text-muted">
-            existing types for this sport: {typeSuggestions.join(", ")}
+            existing types for this activity: {typeSuggestions.join(", ")}
           </p>
         )}
       </Field>

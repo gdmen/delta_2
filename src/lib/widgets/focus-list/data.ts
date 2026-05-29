@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { focuses, goals, sports } from "@/db/schema";
+import { focuses, goals, activities } from "@/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { userScope } from "@/lib/auth/scope";
@@ -29,8 +29,8 @@ async function fetchFocuses(config: FocusListConfig, userId: number): Promise<Fo
   if (config.sourceFilter !== "all") {
     conditions.push(eq(focuses.source, config.sourceFilter));
   }
-  if (config.sportFilter) {
-    conditions.push(eq(sports.name, config.sportFilter));
+  if (config.activityFilter) {
+    conditions.push(eq(activities.name, config.activityFilter));
   }
 
   const rows = await db
@@ -38,13 +38,13 @@ async function fetchFocuses(config: FocusListConfig, userId: number): Promise<Fo
       id: focuses.id,
       name: focuses.name,
       goalId: focuses.goalId,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityName: activities.name,
+      activityColor: activities.color,
       startDate: focuses.startDate,
     })
     .from(focuses)
     .innerJoin(goals, eq(focuses.goalId, goals.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(...conditions));
 
   const now = Date.now();

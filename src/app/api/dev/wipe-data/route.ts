@@ -10,7 +10,7 @@ import {
   metricTypeAliases,
   metrics,
   metricTypes,
-  sports,
+  activities,
   coachCalls,
   dailySummaries,
   reconcileLog,
@@ -65,7 +65,7 @@ export async function POST() {
     { name: "metrics", obj: metrics },
     { name: "metric_type_aliases", obj: metricTypeAliases },
     { name: "metric_types", obj: metricTypes },
-    { name: "sports", obj: sports },
+    { name: "activities", obj: activities },
     { name: "daily_summaries", obj: dailySummaries },
     { name: "reconcile_log", obj: reconcileLog },
     // merge_log: no FK to other tables (canonical_id is by-value, not

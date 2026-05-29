@@ -2,7 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   events,
-  sports,
+  activities,
   workoutSets,
   eventMetrics,
   metricTypes,
@@ -17,8 +17,8 @@ import { loadEventJournal } from "./journal-data";
 
 interface CompositeEventRow {
   id: number;
-  sportId: number;
-  sportName: string;
+  activityId: number;
+  activityName: string;
   type: string;
   durationMinutes: number | null;
   notes: string | null;
@@ -42,11 +42,11 @@ interface CompositeEventRow {
 export async function CompositeView({
   event,
   userId,
-  typeSuggestionsBySportId,
+  typeSuggestionsByActivityId,
 }: {
   event: CompositeEventRow;
   userId: number;
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const memberIds = event.compositeMemberIds;
 
@@ -55,7 +55,7 @@ export async function CompositeView({
     ? await db
         .select({
           id: events.id,
-          sportName: sports.name,
+          activityName: activities.name,
           type: events.type,
           startedAt: events.startedAt,
           durationMinutes: events.durationMinutes,
@@ -63,7 +63,7 @@ export async function CompositeView({
           notes: events.notes,
         })
         .from(events)
-        .innerJoin(sports, eq(events.sportId, sports.id))
+        .innerJoin(activities, eq(events.activityId, activities.id))
         .where(
           and(
             userScope(userId).events,
@@ -133,14 +133,14 @@ export async function CompositeView({
         .orderBy(asc(events.source), asc(metricTypes.name))
     : [];
 
-  // Sports list for the editor's sport dropdown. The composite owns
-  // its own sport/type/duration/started_at/notes; the EventEditor
+  // Activities list for the editor's activity dropdown. The composite owns
+  // its own activity/type/duration/started_at/notes; the EventEditor
   // (in headerOnly mode) PATCHes /api/events/<composite.id> directly.
-  const sportsList = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(userId).sports)
-    .orderBy(asc(sports.name));
+  const activitiesList = await db
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(userId).activities)
+    .orderBy(asc(activities.name));
 
   // Journal entries written on the composite itself. On unmerge these
   // get copied to the member events the user selects (see UnmergeButton).
@@ -157,18 +157,18 @@ export async function CompositeView({
         </div>
       </header>
 
-      {/* Editable header — sport, type, started_at, duration, notes.
+      {/* Editable header — activity, type, started_at, duration, notes.
           Children sections and Delete button are suppressed via
           headerOnly; children belong to the member rows and the
           composite's tear-down lives in the Unmerge button below. */}
       <EventEditor
         event={event}
-        sports={sportsList}
+        activities={activitiesList}
         initialSets={[]}
         initialEventMetrics={[]}
         metricTypes={[]}
         headerOnly
-        typeSuggestionsBySportId={typeSuggestionsBySportId}
+        typeSuggestionsByActivityId={typeSuggestionsByActivityId}
       />
 
       <section>
@@ -190,7 +190,7 @@ export async function CompositeView({
                   {m.source}
                 </Link>
                 <span className="truncate">
-                  {m.sportName} · {m.type}
+                  {m.activityName} · {m.type}
                 </span>
               </div>
               <span className="text-muted whitespace-nowrap">
@@ -283,7 +283,7 @@ export async function CompositeView({
           journalCount={journalEntries.length}
           members={members.map((m) => ({
             id: m.id,
-            label: `${m.source} · ${m.sportName} · ${m.type}`,
+            label: `${m.source} · ${m.activityName} · ${m.type}`,
           }))}
         />
       </section>

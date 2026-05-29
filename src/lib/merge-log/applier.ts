@@ -7,7 +7,7 @@ import {
   goals,
   goalJournalEntries,
   workoutSets,
-  sports,
+  activities,
   events,
   dashboards,
 } from "@/db/schema";
@@ -16,7 +16,7 @@ import { PgTransaction } from "drizzle-orm/pg-core";
 import type {
   MergeLogPayloadV1,
   MetricTypeMergePayloadV1,
-  SportMergePayloadV1,
+  ActivityMergePayloadV1,
 } from "./types";
 import type * as schema from "@/db/schema";
 import type { ExtractTablesWithRelations } from "drizzle-orm";
@@ -69,7 +69,7 @@ export async function applyMetricTypeUndo(
         id: m.row.id,
         name: m.row.name,
         unit: m.row.unit,
-        sportId: m.row.sportId,
+        activityId: m.row.activityId,
         frequencyHint: m.row.frequencyHint,
         target: m.row.target,
         higherIsBetter: m.row.higherIsBetter,
@@ -230,53 +230,53 @@ export async function applyMetricTypeUndo(
 }
 
 /**
- * Reverse a sport merge.
+ * Reverse a activity merge.
  *
  * Order:
- *   1. Re-INSERT the deleted sports row(s) with original ids.
- *   2. UPDATE events.sport_id, goals.sport_id, metric_types.sport_id by id list.
- *   3. UPDATE dashboards.sport_id (dashboards were NULL'd via ON DELETE
- *      SET NULL when the sport was deleted).
+ *   1. Re-INSERT the deleted activities row(s) with original ids.
+ *   2. UPDATE events.activity_id, goals.activity_id, metric_types.activity_id by id list.
+ *   3. UPDATE dashboards.activity_id (dashboards were NULL'd via ON DELETE
+ *      SET NULL when the activity was deleted).
  */
-export async function applySportUndo(
+export async function applyActivityUndo(
   tx: Tx,
-  payload: SportMergePayloadV1,
+  payload: ActivityMergePayloadV1,
 ): Promise<void> {
   for (const m of payload.merged) {
     await tx
-      .insert(sports)
+      .insert(activities)
       .values({ id: m.row.id, name: m.row.name, color: m.row.color })
       ;
 
     if (m.eventsMovedIds.length > 0) {
       await tx
         .update(events)
-        .set({ sportId: m.row.id })
+        .set({ activityId: m.row.id })
         .where(inArray(events.id, m.eventsMovedIds));
     }
     if (m.goalsMovedIds.length > 0) {
       await tx
         .update(goals)
-        .set({ sportId: m.row.id })
+        .set({ activityId: m.row.id })
         .where(inArray(goals.id, m.goalsMovedIds));
     }
     if (m.metricTypesMovedIds.length > 0) {
       await tx
         .update(metricTypes)
-        .set({ sportId: m.row.id })
+        .set({ activityId: m.row.id })
         .where(inArray(metricTypes.id, m.metricTypesMovedIds));
     }
     if (m.dashboardsNulledIds.length > 0) {
       await tx
         .update(dashboards)
-        .set({ sportId: m.row.id })
+        .set({ activityId: m.row.id })
         .where(inArray(dashboards.id, m.dashboardsNulledIds));
     }
   }
 
   // Bump identity sequence past any explicit ids we re-inserted.
   await tx.execute(
-    sql`SELECT setval(pg_get_serial_sequence('sports', 'id'), GREATEST((SELECT MAX(id) FROM sports), 1))`,
+    sql`SELECT setval(pg_get_serial_sequence('activities', 'id'), GREATEST((SELECT MAX(id) FROM activities), 1))`,
   );
 }
 
@@ -288,6 +288,6 @@ export async function applyMergeUndo(
   if (payload.kind === "metric_type") {
     await applyMetricTypeUndo(tx, payload);
   } else {
-    await applySportUndo(tx, payload);
+    await applyActivityUndo(tx, payload);
   }
 }

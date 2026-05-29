@@ -10,7 +10,7 @@ import {
 import { requireUserOr401 } from "@/lib/auth/require";
 
 interface BulkDismissBody {
-  /** Source/sport group tuples to dismiss, from the multi-select UI. */
+  /** Source/activity group tuples to dismiss, from the multi-select UI. */
   groups: GroupTuple[];
 }
 
@@ -18,7 +18,7 @@ interface BulkDismissBody {
  * POST /api/events/duplicates/bulk-dismiss
  *
  * Multi-group dismiss for the /data/duplicates page. Body:
- * `{ groups: [{ sourceA, sportIdA, sourceB, sportIdB }, ...] }`.
+ * `{ groups: [{ sourceA, activityIdA, sourceB, activityIdB }, ...] }`.
  *
  * Implementation: re-run the live detector ONCE for all (non-recent)
  * pairs, then keep any pair that matches ANY selected tuple in either
@@ -42,13 +42,13 @@ export async function POST(request: NextRequest) {
 
   if (!Array.isArray(body.groups) || body.groups.length === 0) {
     return NextResponse.json(
-      { error: "groups must be a non-empty array of {sourceA, sportIdA, sourceB, sportIdB}" },
+      { error: "groups must be a non-empty array of {sourceA, activityIdA, sourceB, activityIdB}" },
       { status: 400 },
     );
   }
   if (!body.groups.every(isValidTuple)) {
     return NextResponse.json(
-      { error: "each group needs sourceA, sportIdA, sourceB, sportIdB" },
+      { error: "each group needs sourceA, activityIdA, sourceB, activityIdB" },
       { status: 400 },
     );
   }

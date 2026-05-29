@@ -4,7 +4,7 @@ import { buildDbMock, setupRouteTest } from "@/test-utils/route-test";
 
 vi.mock("@/db", () => buildDbMock());
 
-import { sports, events } from "@/db/schema";
+import { activities, events } from "@/db/schema";
 import { POST } from "./route";
 
 /**
@@ -29,17 +29,17 @@ function req(body?: unknown): NextRequest {
   return new NextRequest("http://test/", init as ConstructorParameters<typeof NextRequest>[1]);
 }
 
-async function seedSport(name: string): Promise<number> {
+async function seedActivity(name: string): Promise<number> {
   const [s] = await ctx
     .getDb()
-    .insert(sports)
+    .insert(activities)
     .values({ userId: 1, name, color: "#000" })
-    .returning({ id: sports.id });
+    .returning({ id: activities.id });
   return s.id;
 }
 
 async function seedEvent(
-  sportId: number,
+  activityId: number,
   source: string,
   startedAt: string,
   status: "visible" | "hidden_by_composite" | "composite" = "visible",
@@ -47,19 +47,19 @@ async function seedEvent(
   const [e] = await ctx
     .getDb()
     .insert(events)
-    .values({ userId: 1, sportId, type: "Ride", startedAt, source, status })
+    .values({ userId: 1, activityId, type: "Ride", startedAt, source, status })
     .returning({ id: events.id });
   return e.id;
 }
 
 describe("POST /api/events/merge — composite merge", () => {
   it("M1: two SAME-source events merge into a composite (same-source allowed)", async () => {
-    const sportId = await seedSport("Ride");
+    const activityId = await seedActivity("Ride");
     // Two strava events 30s apart: a Garmin + a Whoop recording of one ride.
-    const a = await seedEvent(sportId, "strava", "2026-05-14T12:00:00.000Z");
-    const b = await seedEvent(sportId, "strava", "2026-05-14T12:00:30.000Z");
+    const a = await seedEvent(activityId, "strava", "2026-05-14T12:00:00.000Z");
+    const b = await seedEvent(activityId, "strava", "2026-05-14T12:00:30.000Z");
 
-    const res = await POST(req({ memberIds: [a, b], sportId }));
+    const res = await POST(req({ memberIds: [a, b], activityId }));
     expect(res.status).toBe(200);
     const { id } = (await res.json()) as { id: number };
     expect(typeof id).toBe("number");
@@ -76,25 +76,25 @@ describe("POST /api/events/merge — composite merge", () => {
   });
 
   it("M2: cross-source merge still works", async () => {
-    const sportId = await seedSport("Ride");
-    const a = await seedEvent(sportId, "strava", "2026-05-14T12:00:00.000Z");
-    const b = await seedEvent(sportId, "apple_health", "2026-05-14T12:05:00.000Z");
+    const activityId = await seedActivity("Ride");
+    const a = await seedEvent(activityId, "strava", "2026-05-14T12:00:00.000Z");
+    const b = await seedEvent(activityId, "apple_health", "2026-05-14T12:05:00.000Z");
 
-    const res = await POST(req({ memberIds: [a, b], sportId }));
+    const res = await POST(req({ memberIds: [a, b], activityId }));
     expect(res.status).toBe(200);
   });
 
   it("M3: a non-visible member is still rejected (guard intact)", async () => {
-    const sportId = await seedSport("Ride");
-    const a = await seedEvent(sportId, "strava", "2026-05-14T12:00:00.000Z");
+    const activityId = await seedActivity("Ride");
+    const a = await seedEvent(activityId, "strava", "2026-05-14T12:00:00.000Z");
     const hidden = await seedEvent(
-      sportId,
+      activityId,
       "strava",
       "2026-05-14T12:00:30.000Z",
       "hidden_by_composite",
     );
 
-    const res = await POST(req({ memberIds: [a, hidden], sportId }));
+    const res = await POST(req({ memberIds: [a, hidden], activityId }));
     expect(res.status).toBe(409);
   });
 });

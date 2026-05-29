@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { DashboardRow } from "@/lib/dashboards/load";
 
-interface SportRow {
+interface ActivityRow {
   id: number;
   name: string;
   color: string;
@@ -12,15 +12,15 @@ interface SportRow {
 
 interface Props {
   dashboard: DashboardRow;
-  sports: SportRow[];
+  activities: ActivityRow[];
   activeShareToken: string | null;
 }
 
-export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: Props) {
+export function DashboardSettingsForm({ dashboard, activities, activeShareToken }: Props) {
   const router = useRouter();
   const [name, setName] = useState(dashboard.name);
   const [slug, setSlug] = useState(dashboard.slug);
-  const [sportId, setSportId] = useState<number | "">(dashboard.sportId ?? "");
+  const [activityId, setActivityId] = useState<number | "">(dashboard.activityId ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +33,7 @@ export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: P
   const dirty =
     name.trim() !== dashboard.name ||
     slug.trim() !== dashboard.slug ||
-    (sportId === "" ? null : sportId) !== dashboard.sportId;
+    (activityId === "" ? null : activityId) !== dashboard.activityId;
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -44,8 +44,8 @@ export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: P
       const patch: Record<string, unknown> = {};
       if (name !== dashboard.name) patch.name = name.trim();
       if (slug !== dashboard.slug) patch.slug = slug;
-      if ((sportId === "" ? null : sportId) !== dashboard.sportId) {
-        patch.sportId = sportId === "" ? null : sportId;
+      if ((activityId === "" ? null : activityId) !== dashboard.activityId) {
+        patch.activityId = activityId === "" ? null : activityId;
       }
       const res = await fetch(`/api/dashboards/${dashboard.id}`, {
         method: "PATCH",
@@ -64,7 +64,7 @@ export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: P
       // true on the same content, re-enabling Save against a no-op.
       setName(json.dashboard.name);
       setSlug(json.dashboard.slug);
-      setSportId(json.dashboard.sportId ?? "");
+      setActivityId(json.dashboard.activityId ?? "");
       // If the slug changed, the URL we're on is now stale; navigate
       // there. Otherwise router.refresh re-runs the server component
       // so the next dirty-check sees the updated dashboard prop.
@@ -150,15 +150,15 @@ export function DashboardSettingsForm({ dashboard, sports, activeShareToken }: P
         />
       </Field>
 
-      <Field label="Sport (optional)" htmlFor="sport">
+      <Field label="Activity (optional)" htmlFor="activity">
         <select
-          id="sport"
-          value={sportId}
-          onChange={(e) => setSportId(e.target.value === "" ? "" : Number(e.target.value))}
+          id="activity"
+          value={activityId}
+          onChange={(e) => setActivityId(e.target.value === "" ? "" : Number(e.target.value))}
           className="w-full px-3 py-2 border border-border rounded text-[0.875rem] focus:outline-none focus:border-foreground bg-background"
         >
           <option value="">— None —</option>
-          {sports.map((s) => (
+          {activities.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>

@@ -50,7 +50,7 @@ export function Field({
  *   number:        numeric input, coerces to number on change
  *   select:        <select> with meta.options
  *   metric-picker: dropdown of metric_types by name (value = name string)
- *   sport-picker:  dropdown of sports by name (value = name string), with — None — option
+ *   activity-picker:  dropdown of activities by name (value = name string), with — None — option
  *   boolean:       checkbox
  */
 function renderControl(
@@ -136,7 +136,7 @@ function renderControl(
     );
   }
 
-  if (component === "sport-picker") {
+  if (component === "activity-picker") {
     return (
       <select
         id={name}
@@ -147,7 +147,7 @@ function renderControl(
         ref={field.ref}
       >
         <option value="">— Any —</option>
-        {context.sports.map((s) => (
+        {context.activities.map((s) => (
           <option key={s.id} value={s.name}>
             {s.name}
           </option>

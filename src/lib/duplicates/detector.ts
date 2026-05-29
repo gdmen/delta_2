@@ -18,23 +18,23 @@ import type { AnyPgDb } from "@/db/types";
  * (e.g. a Garmin and a Whoop both syncing one ride to Strava) are rare and
  * can be merged by hand — the merge route still permits same-source members.
  *
- * Sport-id equality is intentionally NOT a filter (see issue #4): the
- * source-prefixed sports table means even "same lifting session" pairs have
- * different sport_ids until manually merged. The user picks the composite's
- * sport at merge time.
+ * Activity-id equality is intentionally NOT a filter (see issue #4): the
+ * source-prefixed activities table means even "same lifting session" pairs have
+ * different activity_ids until manually merged. The user picks the composite's
+ * activity at merge time.
  */
 export interface CandidatePair {
   aId: number;
   aSource: string;
-  aSportId: number;
-  aSportName: string;
+  aActivityId: number;
+  aActivityName: string;
   aType: string;
   aStartedAt: string;
   aDurationMinutes: number | null;
   bId: number;
   bSource: string;
-  bSportId: number;
-  bSportName: string;
+  bActivityId: number;
+  bActivityName: string;
   bType: string;
   bStartedAt: string;
   bDurationMinutes: number | null;
@@ -106,10 +106,10 @@ export async function findDuplicateCandidates(
     minutes_apart: number;
   }>(sql`
     SELECT
-      a.id AS a_id, a.source AS a_source, a.sport_id AS a_sport_id,
+      a.id AS a_id, a.source AS a_source, a.activity_id AS a_sport_id,
       sa.name AS a_sport_name, a.type AS a_type, a.started_at AS a_started_at,
       a.duration_minutes AS a_duration_minutes,
-      b.id AS b_id, b.source AS b_source, b.sport_id AS b_sport_id,
+      b.id AS b_id, b.source AS b_source, b.activity_id AS b_sport_id,
       sb.name AS b_sport_name, b.type AS b_type, b.started_at AS b_started_at,
       b.duration_minutes AS b_duration_minutes,
       ROUND(
@@ -123,8 +123,8 @@ export async function findDuplicateCandidates(
                   AND b.started_at BETWEEN
                         a.started_at - INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
                     AND a.started_at + INTERVAL '${sql.raw(String(MATCH_WINDOW_MINUTES))} minutes'
-    JOIN sports sa ON sa.id = a.sport_id
-    JOIN sports sb ON sb.id = b.sport_id
+    JOIN activities sa ON sa.id = a.activity_id
+    JOIN activities sb ON sb.id = b.activity_id
     WHERE a.user_id = ${userId}
       AND a.status = 'visible'
       AND b.status = 'visible'
@@ -175,15 +175,15 @@ export async function findDuplicateCandidates(
   return rows.map((r) => ({
     aId: r.a_id,
     aSource: r.a_source,
-    aSportId: r.a_sport_id,
-    aSportName: r.a_sport_name,
+    aActivityId: r.a_sport_id,
+    aActivityName: r.a_sport_name,
     aType: r.a_type,
     aStartedAt: r.a_started_at,
     aDurationMinutes: r.a_duration_minutes,
     bId: r.b_id,
     bSource: r.b_source,
-    bSportId: r.b_sport_id,
-    bSportName: r.b_sport_name,
+    bActivityId: r.b_sport_id,
+    bActivityName: r.b_sport_name,
     bType: r.b_type,
     bStartedAt: r.b_started_at,
     bDurationMinutes: r.b_duration_minutes,
@@ -192,18 +192,18 @@ export async function findDuplicateCandidates(
 }
 
 /**
- * Group a flat candidate list by (source, sport) pair, for the bulk-
+ * Group a flat candidate list by (source, activity) pair, for the bulk-
  * dismiss UI on /data/duplicates. Order pairs alphabetically within
  * the tuple so `a=fitnotes:biking, b=powerlifting` and the reverse
  * collapse into one group.
  */
 export interface CandidateGroup {
   sourceA: string;
-  sportNameA: string;
-  sportIdA: number;
+  activityNameA: string;
+  activityIdA: number;
   sourceB: string;
-  sportNameB: string;
-  sportIdB: number;
+  activityNameB: string;
+  activityIdB: number;
   count: number;
   /** Sample pair ids for display ("e.g. #142 + #143"). Up to 3. */
   sampleIds: { aId: number; bId: number }[];
@@ -214,26 +214,26 @@ export function groupCandidates(pairs: CandidatePair[]): CandidateGroup[] {
   for (const p of pairs) {
     // Sort the two endpoints so direction doesn't fragment groups.
     const [first, second] =
-      p.aSportName < p.bSportName ||
-      (p.aSportName === p.bSportName && p.aSource < p.bSource)
+      p.aActivityName < p.bActivityName ||
+      (p.aActivityName === p.bActivityName && p.aSource < p.bSource)
         ? [
-            { source: p.aSource, sportName: p.aSportName, sportId: p.aSportId },
-            { source: p.bSource, sportName: p.bSportName, sportId: p.bSportId },
+            { source: p.aSource, activityName: p.aActivityName, activityId: p.aActivityId },
+            { source: p.bSource, activityName: p.bActivityName, activityId: p.bActivityId },
           ]
         : [
-            { source: p.bSource, sportName: p.bSportName, sportId: p.bSportId },
-            { source: p.aSource, sportName: p.aSportName, sportId: p.aSportId },
+            { source: p.bSource, activityName: p.bActivityName, activityId: p.bActivityId },
+            { source: p.aSource, activityName: p.aActivityName, activityId: p.aActivityId },
           ];
-    const key = `${first.source}|${first.sportId}|${second.source}|${second.sportId}`;
+    const key = `${first.source}|${first.activityId}|${second.source}|${second.activityId}`;
     let g = groups.get(key);
     if (!g) {
       g = {
         sourceA: first.source,
-        sportNameA: first.sportName,
-        sportIdA: first.sportId,
+        activityNameA: first.activityName,
+        activityIdA: first.activityId,
         sourceB: second.source,
-        sportNameB: second.sportName,
-        sportIdB: second.sportId,
+        activityNameB: second.activityName,
+        activityIdB: second.activityId,
         count: 0,
         sampleIds: [],
       };

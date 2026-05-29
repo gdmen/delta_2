@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { events, sports } from "@/db/schema";
+import { events, activities } from "@/db/schema";
 import { and, asc, desc, eq, gte, ilike, lte, or, sql } from "drizzle-orm";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { PaginationControls } from "@/components/pagination-controls";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
-import { buildTypeSuggestionsBySportId } from "@/lib/duplicates/type-catalog";
+import { buildTypeSuggestionsByActivityId } from "@/lib/duplicates/type-catalog";
 import { EventsTable } from "./events-table";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ const PAGE_SIZE = 50;
 interface SearchParams {
   from?: string; // YYYY-MM-DD
   to?: string;   // YYYY-MM-DD
-  q?: string;    // free-text filter: sport name / type / source / notes
+  q?: string;    // free-text filter: activity name / type / source / notes
   page?: string;
 }
 
@@ -34,7 +34,7 @@ export default async function AllEventsPage({
 
   // Build WHERE from date range + optional text match. `started_at` is stored
   // as ISO with time; day-boundary ISO strings work with text-string
-  // comparison. Text match is OR across sport name, event type, source, notes.
+  // comparison. Text match is OR across activity name, event type, source, notes.
   //
   // Hide events that have been folded into a composite — they still
   // exist in the DB (status='hidden_by_composite') for exports and
@@ -52,7 +52,7 @@ export default async function AllEventsPage({
     const needle = `%${q}%`;
     conditions.push(
       or(
-        ilike(sports.name, needle),
+        ilike(activities.name, needle),
         ilike(events.type, needle),
         ilike(events.source, needle),
         ilike(events.notes, needle)
@@ -61,11 +61,11 @@ export default async function AllEventsPage({
   }
   const where = and(...conditions);
 
-  // Count query needs the join too (text match may reference sports.name).
+  // Count query needs the join too (text match may reference activities.name).
   const totalRow = await db
     .select({ c: sql<number>`count(*)` })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(where);
   const total = Number(totalRow[0]?.c ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -75,27 +75,27 @@ export default async function AllEventsPage({
     .select({
       id: events.id,
       startedAt: events.startedAt,
-      sportId: events.sportId,
-      sportName: sports.name,
+      activityId: events.activityId,
+      activityName: activities.name,
       type: events.type,
       durationMinutes: events.durationMinutes,
       source: events.source,
       status: events.status,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(where)
     .orderBy(desc(events.startedAt))
     .limit(PAGE_SIZE)
     .offset((currentPage - 1) * PAGE_SIZE);
 
   // Drives the composite-merge action bar at the bottom of the table.
-  const sportOptions = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(user.id).sports)
-    .orderBy(asc(sports.name));
-  const typeSuggestionsBySportId = await buildTypeSuggestionsBySportId(user.id);
+  const activityOptions = await db
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(user.id).activities)
+    .orderBy(asc(activities.name));
+  const typeSuggestionsByActivityId = await buildTypeSuggestionsByActivityId(user.id);
 
   const baseQs = new URLSearchParams();
   if (from) baseQs.set("from", from);
@@ -135,7 +135,7 @@ export default async function AllEventsPage({
             type="search"
             name="q"
             defaultValue={q}
-            placeholder="sport, type, source, notes..."
+            placeholder="activity, type, source, notes..."
             className="w-full px-2 py-1.5 border border-border rounded text-[0.8125rem]"
           />
         </div>
@@ -186,8 +186,8 @@ export default async function AllEventsPage({
 
       <EventsTable
         rows={rows}
-        sportOptions={sportOptions}
-        typeSuggestionsBySportId={typeSuggestionsBySportId}
+        activityOptions={activityOptions}
+        typeSuggestionsByActivityId={typeSuggestionsByActivityId}
       />
 
       <PaginationControls

@@ -8,7 +8,7 @@ import type { CandidateGroup, CandidatePair } from "@/lib/duplicates/detector";
  * Renderer-level smoke for the duplicates group multi-select (#37, PR3).
  *
  * Same shiftKey-via-onClick contract as the other two surfaces, applied
- * to the source/sport-pair groups (keyed by group key, not row id).
+ * to the source/activity-pair groups (keyed by group key, not row id).
  * Re-checks the indeterminate-header bug fix.
  */
 
@@ -18,11 +18,11 @@ vi.mock("next/navigation", () => ({
 
 const g = (i: number): CandidateGroup => ({
   sourceA: `srcA${i}`,
-  sportNameA: `SportA${i}`,
-  sportIdA: i,
+  activityNameA: `ActivityA${i}`,
+  activityIdA: i,
   sourceB: `srcB${i}`,
-  sportNameB: `SportB${i}`,
-  sportIdB: i + 100,
+  activityNameB: `ActivityB${i}`,
+  activityIdB: i + 100,
   count: 2,
   sampleIds: [],
 });
@@ -34,15 +34,15 @@ const pairs: CandidatePair[] = [
   {
     aId: 1,
     aSource: "srcA1",
-    aSportId: 1,
-    aSportName: "SportA1",
+    aActivityId: 1,
+    aActivityName: "ActivityA1",
     aType: "x",
     aStartedAt: "2026-01-01T10:00:00Z",
     aDurationMinutes: 30,
     bId: 2,
     bSource: "srcB1",
-    bSportId: 101,
-    bSportName: "SportB1",
+    bActivityId: 101,
+    bActivityName: "ActivityB1",
     bType: "y",
     bStartedAt: "2026-01-01T10:10:00Z",
     bDurationMinutes: 30,
@@ -51,16 +51,16 @@ const pairs: CandidatePair[] = [
 ];
 
 function renderView() {
-  render(<DuplicatesView pairs={pairs} groups={groups} sportOptions={[]} />);
+  render(<DuplicatesView pairs={pairs} groups={groups} activityOptions={[]} />);
 }
 
 const groupCb = (i: number) =>
   screen.getByLabelText(
-    `Select srcA${i} SportA${i} plus srcB${i} SportB${i}`,
+    `Select srcA${i} ActivityA${i} plus srcB${i} ActivityB${i}`,
   ) as HTMLInputElement;
 const header = () =>
   screen.getByLabelText(
-    /^(Select all source\/sport groups|Clear selection of all source\/sport groups)$/,
+    /^(Select all source\/activity groups|Clear selection of all source\/activity groups)$/,
   ) as HTMLInputElement;
 
 afterEach(cleanup);

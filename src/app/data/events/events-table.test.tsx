@@ -18,8 +18,8 @@ vi.mock("next/navigation", () => ({
 
 const base = {
   startedAt: "2026-01-01T10:00:00Z",
-  sportId: 1,
-  sportName: "Run",
+  activityId: 1,
+  activityName: "Run",
   type: "easy",
   durationMinutes: 30,
   source: "strava",
@@ -34,7 +34,7 @@ const rows: EventRow[] = [
 ];
 
 function renderTable() {
-  render(<EventsTable rows={rows} sportOptions={[]} />);
+  render(<EventsTable rows={rows} activityOptions={[]} />);
 }
 
 const cb = (id: number) =>

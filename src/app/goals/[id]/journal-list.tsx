@@ -10,7 +10,7 @@ interface JournalEntry {
 
 /**
  * Reverse-chronological per-goal journal feed. Verdict entries (auto-generated
- * when a focus closes) get a thin sport-color left-accent + 'verdict:' label so
+ * when a focus closes) get a thin activity-color left-accent + 'verdict:' label so
  * they're scannable when reviewing the goal months later.
  *
  * react-markdown defaults are sandboxed against HTML injection — we deliberately
@@ -18,10 +18,10 @@ interface JournalEntry {
  */
 export function JournalList({
   entries,
-  sportColor,
+  activityColor,
 }: {
   entries: JournalEntry[];
-  sportColor: string;
+  activityColor: string;
 }) {
   if (entries.length === 0) {
     return (
@@ -43,7 +43,7 @@ export function JournalList({
                 ? "pl-3 border-l-2"
                 : "pl-3 border-l border-surface"
             }
-            style={isVerdict ? { borderLeftColor: sportColor } : undefined}
+            style={isVerdict ? { borderLeftColor: activityColor } : undefined}
           >
             <div className="flex items-baseline gap-2 text-[0.6875rem] font-mono text-muted mb-1">
               <span className="tabular-nums">{formatTimestamp(e.createdAt)}</span>

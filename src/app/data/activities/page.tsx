@@ -1,7 +1,7 @@
 import { db } from "@/db";
-import { sports, events, focuses, goals } from "@/db/schema";
+import { activities, events, focuses, goals } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { SportsTable } from "./sports-table";
+import { ActivitiesTable } from "./activities-table";
 import { DataTabShell } from "@/components/data-tab-shell";
 import { requireUserOrSignin } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 /**
  * Orphan = name carries a `<source>:<rawName>` prefix from auto-import.
  * Detected purely by the colon — any prefix counts (strava, apple_health,
- * bodyspec, future sources). Canonical sport names don't include colons.
+ * bodyspec, future sources). Canonical activity names don't include colons.
  */
 function isOrphanName(name: string): boolean {
   return name.includes(":");
@@ -23,37 +23,37 @@ function suffixOf(name: string): string {
   return idx === -1 ? name : name.slice(idx + 1);
 }
 
-export default async function SportsPage() {
+export default async function ActivitiesPage() {
   const user = await requireUserOrSignin();
   // One round-trip: left-join each dependent table, aggregate in SQL.
   // focus/goal counts need COUNT(DISTINCT) because the joins multiply.
   const rows = await db
     .select({
-      id: sports.id,
-      name: sports.name,
-      color: sports.color,
+      id: activities.id,
+      name: activities.name,
+      color: activities.color,
       eventCount: sql<number>`COUNT(DISTINCT ${events.id})`,
       focusCount: sql<number>`COUNT(DISTINCT ${focuses.id})`,
       goalCount: sql<number>`COUNT(DISTINCT ${goals.id})`,
       lastEventAt: sql<string>`MAX(${events.startedAt})`,
     })
-    .from(sports)
-    .leftJoin(events, and(userScope(user.id).events, eq(events.sportId, sports.id)))
-    .leftJoin(goals, and(userScope(user.id).goals, eq(goals.sportId, sports.id)))
-    // Focuses now reach their sport via the goal, not a direct sport_id.
+    .from(activities)
+    .leftJoin(events, and(userScope(user.id).events, eq(events.activityId, activities.id)))
+    .leftJoin(goals, and(userScope(user.id).goals, eq(goals.activityId, activities.id)))
+    // Focuses now reach their activity via the goal, not a direct activity_id.
     // Count only manual focuses — un-promoted LLM proposals shouldn't
     // inflate the "you have N focuses" thumb-rule.
     .leftJoin(
       focuses,
       and(eq(focuses.goalId, goals.id), eq(focuses.source, "manual")),
     )
-    .where(userScope(user.id).sports)
-    .groupBy(sports.id)
+    .where(userScope(user.id).activities)
+    .groupBy(activities.id)
     .orderBy(sql`COUNT(DISTINCT ${events.id}) DESC`);
 
   // Build a case-insensitive lookup of canonical (non-orphan) names so we
   // can suggest a merge target for orphans whose suffix matches one. Cheap:
-  // sports table is small and we already have it in memory.
+  // activities table is small and we already have it in memory.
   const canonicalByLower = new Map<string, { id: number; name: string }>();
   for (const r of rows) {
     if (!isOrphanName(r.name)) {
@@ -88,10 +88,10 @@ export default async function SportsPage() {
 
   return (
     <DataTabShell
-      active="sports"
-      description="Every row Delta has stored. Click through to manage sport-attached events, goals, and focuses — or merge duplicates with the selection tools here."
-      label="Sports"
-      count={{ value: data.length, unit: data.length === 1 ? "sport" : "sports" }}
+      active="activities"
+      description="Every row Delta has stored. Click through to manage activity-attached events, goals, and focuses — or merge duplicates with the selection tools here."
+      label="Activities"
+      count={{ value: data.length, unit: data.length === 1 ? "activity" : "activities" }}
     >
       {orphanCount > 0 && (
         <div className="mb-3 text-[0.6875rem] font-mono text-accent-orange">
@@ -104,7 +104,7 @@ export default async function SportsPage() {
           </span>
         </div>
       )}
-      <SportsTable rows={data} />
+      <ActivitiesTable rows={data} />
     </DataTabShell>
   );
 }

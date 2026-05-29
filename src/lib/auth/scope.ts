@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import {
-  sports,
+  activities,
   metricTypes,
   metricTypeAliases,
   metrics,
@@ -23,9 +23,9 @@ import {
  * clause when you've got a userId from `requireUser()` and you're
  * reading or writing an OWNED table.
  *
- * The shape — `userScope(uid).sports` returns `eq(sports.userId, uid)`
- * — makes call sites read like `where(userScope(uid).sports)` or
- * `where(and(userScope(uid).sports, eq(sports.id, sportId)))`.
+ * The shape — `userScope(uid).activities` returns `eq(activities.userId, uid)`
+ * — makes call sites read like `where(userScope(uid).activities)` or
+ * `where(and(userScope(uid).activities, eq(activities.id, activityId)))`.
  *
  * Why a single function instead of `eq(table.userId, uid)` inline?
  *   1. Greppable: `userScope(` matches every per-user query. Easy to
@@ -42,7 +42,7 @@ import {
  */
 export function userScope(userId: number) {
   return {
-    sports: eq(sports.userId, userId),
+    activities: eq(activities.userId, userId),
     metricTypes: eq(metricTypes.userId, userId),
     metricTypeAliases: eq(metricTypeAliases.userId, userId),
     metrics: eq(metrics.userId, userId),

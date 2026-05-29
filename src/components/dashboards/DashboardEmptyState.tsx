@@ -5,7 +5,7 @@ import Link from "next/link";
  * decisions in docs/designs/configurable-dashboards.md): center-positioned,
  * primary-button CTA. PR3 wires the CTA to edit mode (which opens the
  * editor where the widget palette lives); the secondary "Dashboard
- * settings" link gives the user a way to rename/sport/delete.
+ * settings" link gives the user a way to rename/activity/delete.
  *
  * In share-mode (anonymous /share/<token> viewer), the CTAs are dropped
  * — they point at owner-private routes that just bounce to /signin.

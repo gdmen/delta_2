@@ -37,7 +37,7 @@ async function loadType(metricName: string, userId: number) {
 
 /**
  * Daily-aggregated metrics — one observation per calendar day where the
- * value rolls up the day's worth of activity (steps, sleep hours, sport
+ * value rolls up the day's worth of activity (steps, sleep hours, activity
  * minutes, *_max). Today's value is mid-flight and would mislead trends,
  * so we drop it from the series. Detection:
  *   - Computed metric (every family in computed-metrics.ts is per-day).

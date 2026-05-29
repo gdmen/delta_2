@@ -23,8 +23,8 @@ export type ColumnRef = { column: string } | { index: number };
  * Column slots may carry an `aliases` map that rewrites raw cell values to
  * canonical ones before the slot is consumed. Lets one mapping handle
  * heterogeneous CSVs - e.g. FitNotes where Exercise="Stationary Bike"
- * should become sport="biking" and Exercise="BJJ" should become
- * sport="bjj", from a single mapping, one column.
+ * should become activity="biking" and Exercise="BJJ" should become
+ * activity="bjj", from a single mapping, one column.
  *
  * Values not listed in `aliases` pass through unchanged.
  */
@@ -67,7 +67,7 @@ export type MetricsMapping = {
 export type EventsMapping = {
   kind: "events";
   startedAt: { ref: ColumnRef; format: DateFormat };
-  sport: ValueSlot;
+  activity: ValueSlot;
   type: ValueSlot;
   durationMinutes?: ValueSlot; // value may be raw minutes OR "HH:MM:SS" OR "7 hr 30 min"
   notes?: ValueSlot;
@@ -97,7 +97,7 @@ export type WeightUnitConfig = {
 export type WorkoutSetsMapping = {
   kind: "workout_sets";
   startedAt: { ref: ColumnRef; format: DateFormat };
-  sport: ValueSlot;
+  activity: ValueSlot;
   eventType: ValueSlot; // e.g. "strength"
   eventSourceId?: ValueSlot; // groups sets by source id (TeamBuildr's WorkoutId)
   exerciseName: ValueSlot;
@@ -142,7 +142,7 @@ export function collectReferencedColumns(m: ImportMapping): Set<string> {
     addSlot(m.sourceId);
   } else if (m.kind === "events") {
     addRef(m.startedAt);
-    addSlot(m.sport);
+    addSlot(m.activity);
     addSlot(m.type);
     addSlot(m.durationMinutes);
     addSlot(m.notes);
@@ -150,7 +150,7 @@ export function collectReferencedColumns(m: ImportMapping): Set<string> {
     addMetricTargets(m.metrics);
   } else {
     addRef(m.startedAt);
-    addSlot(m.sport);
+    addSlot(m.activity);
     addSlot(m.eventType);
     addSlot(m.eventSourceId);
     addSlot(m.exerciseName);
@@ -180,7 +180,7 @@ export type OutMetric = {
 export type OutEvent = {
   kind: "event";
   startedAt: string;
-  sport: string;
+  activity: string;
   type: string;
   durationMinutes?: number | null;
   notes?: string | null;
@@ -192,7 +192,7 @@ export type OutEvent = {
 export type OutWorkoutSet = {
   kind: "workout_set";
   startedAt: string;
-  sport: string;
+  activity: string;
   eventType: string;
   eventSourceId?: string | null;
   exerciseName: string;
@@ -554,9 +554,9 @@ function applyEvent(
   const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto", tz);
   if (!startedAt) return { out: [], error: "could not parse date" };
 
-  const sport = readSlot(headers, row, m.sport);
+  const activity = readSlot(headers, row, m.activity);
   const type = readSlot(headers, row, m.type);
-  if (!sport || !type) return { out: [], error: "missing sport/type" };
+  if (!activity || !type) return { out: [], error: "missing activity/type" };
 
   const duration = m.durationMinutes
     ? parseDuration(readSlot(headers, row, m.durationMinutes))
@@ -583,7 +583,7 @@ function applyEvent(
       {
         kind: "event",
         startedAt,
-        sport,
+        activity,
         type,
         durationMinutes: duration,
         notes,
@@ -605,11 +605,11 @@ function applyWorkoutSet(
   const startedAt = parseDate(lookup(headers, row, m.startedAt.ref), m.startedAt.format ?? "auto", tz);
   if (!startedAt) return { out: [], error: "could not parse date" };
 
-  const sport = readSlot(headers, row, m.sport);
+  const activity = readSlot(headers, row, m.activity);
   const eventType = readSlot(headers, row, m.eventType);
   const exerciseName = readSlot(headers, row, m.exerciseName);
-  if (!sport || !eventType || !exerciseName) {
-    return { out: [], error: "missing sport/event_type/exercise_name" };
+  if (!activity || !eventType || !exerciseName) {
+    return { out: [], error: "missing activity/event_type/exercise_name" };
   }
 
   const reps = parseNumber(readSlot(headers, row, m.reps));
@@ -634,7 +634,7 @@ function applyWorkoutSet(
       {
         kind: "workout_set",
         startedAt,
-        sport,
+        activity,
         eventType,
         eventSourceId,
         exerciseName,
@@ -700,7 +700,7 @@ export function autoMatchHeaders(kind: ImportMapping["kind"], headers: string[])
   if (kind === "events") {
     return {
       startedAt: pick("date", "started", "timestamp"),
-      sport: pick("sport", "activity", "category"),
+      activity: pick("activity", "activity", "category"),
       type: pick("type", "kind"),
       duration: pick("duration", "time", "elapsed"),
       notes: pick("notes", "comment", "description"),

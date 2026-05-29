@@ -3,7 +3,7 @@ import { unzipSync, strFromU8 } from "fflate";
 import { db } from "@/db";
 import {
   events,
-  sports,
+  activities,
   metricTypes,
   metricTypeAliases,
   importSources,
@@ -57,14 +57,14 @@ import type {
  * determines which handler runs.
  *
  * Foundational catalog (applied first, in dependency order):
- *   - sports.csv                 - INSERT OR IGNORE by name
- *   - metric_types.csv           - INSERT OR IGNORE by name (optional sport FK by name)
+ *   - activities.csv                 - INSERT OR IGNORE by name
+ *   - metric_types.csv           - INSERT OR IGNORE by name (optional activity FK by name)
  *   - metric_type_aliases.csv    - INSERT OR IGNORE by alias; canonical by name
  *   - import_sources.csv         - INSERT OR IGNORE by name
  *   - source_settings.csv        - upsert on source PK
  *
- * User targets (reference sports + metric_types):
- *   - goals.csv                  - dedupe by (sport, metric, deadline)
+ * User targets (reference activities + metric_types):
+ *   - goals.csv                  - dedupe by (activity, metric, deadline)
  *   - focuses.csv                - dedupe by (goal, name, start_date); goal resolved
  *                                  by (goal_sport, goal_metric, goal_deadline)
  *   - goal_journal_entries.csv   - dedupe by (goal, content, created_at)
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
 
   // Build the import pipeline. Order matters: foundational catalog first
   // (so FKs resolve), then user targets (goals/focuses reference the
-  // catalog), then measured data (events reference sports;
+  // catalog), then measured data (events reference activities;
   // event_metrics/workout_sets reference events), then audit/cache rows
   // last. The pipeline only includes phases for CSVs actually present
   // in the upload, so a single-CSV import emits exactly one phase.
@@ -276,7 +276,7 @@ function buildPipeline(
  * table key, importer function) tuples in execution order. Order
  * matters — foundational catalog first (so FKs resolve), then user
  * targets (goals/focuses reference the catalog), then measured data
- * (events reference sports; event_metrics/workout_sets reference
+ * (events reference activities; event_metrics/workout_sets reference
  * events), then audit/cache rows last.
  *
  * Adding a new table = one new tuple here. `recognized`, the SSE
@@ -286,7 +286,7 @@ function buildPipeline(
 const PIPELINE_ORDER: ReadonlyArray<
   [string, ImportTable, (csv: string, userId: number) => Promise<TableResult>]
 > = [
-  ["sports.csv", "sports", importSportsTable],
+  ["activities.csv", "activities", importActivitiesTable],
   ["metric_types.csv", "metric_types", importMetricTypes],
   ["metric_type_aliases.csv", "metric_type_aliases", importMetricTypeAliases],
   ["import_sources.csv", "import_sources", importImportSources],
@@ -401,7 +401,7 @@ async function importMetrics(text: string, userId: number): Promise<TableResult>
 // -----------------------------------------------------------------------------
 
 async function importEvents(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   // Buffer composite-membership rows so the second pass can resolve
   // member source_ids → ids after all events are inserted. Without
   // this, a composite row might reference members that haven't been
@@ -414,10 +414,10 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
   const result = await processCsv(
     "events.csv",
     text,
-    ["started_at", "sport", "type"],
+    ["started_at", "activity", "type"],
     async (row, idx) => {
       const startedAt = row[idx.get("started_at")!];
-      const sportName = row[idx.get("sport")!];
+      const activityName = row[idx.get("activity")!];
       const type = row[idx.get("type")!];
       const durStr = idx.has("duration_minutes") ? row[idx.get("duration_minutes")!] : "";
       const notes = idx.has("notes") ? row[idx.get("notes")!] : "";
@@ -430,11 +430,11 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
         ? row[idx.get("composite_members")!]
         : "";
 
-      if (!startedAt || !sportName || !type) throw new Error("missing required field");
-      const sportId = sportCache.get(sportName);
-      if (!sportId) {
+      if (!startedAt || !activityName || !type) throw new Error("missing required field");
+      const activityId = activityCache.get(activityName);
+      if (!activityId) {
         throw new Error(
-          `unknown sport "${sportName}" (known: ${[...sportCache.keys()].join(", ")})`,
+          `unknown activity "${activityName}" (known: ${[...activityCache.keys()].join(", ")})`,
         );
       }
       const duration = durStr === "" ? null : Number(durStr);
@@ -442,7 +442,7 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
         throw new Error(`non-numeric duration "${durStr}"`);
       }
 
-      if (!sourceId) sourceId = `custom-${sportName}-${type}-${startedAt}`;
+      if (!sourceId) sourceId = `custom-${activityName}-${type}-${startedAt}`;
 
       // Defer composite-member linking to the second pass.
       if (statusCol === "composite" && compositeMembersCol) {
@@ -461,7 +461,7 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
           and(
             userScope(userId).events,
             eq(events.startedAt, startedAt),
-            eq(events.sportId, sportId),
+            eq(events.activityId, activityId),
             eq(events.type, type),
           ),
         )
@@ -476,7 +476,7 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
 
       const { status } = await upsertEvent({
         userId,
-        sportId,
+        activityId,
         type,
         durationMinutes: duration,
         notes: notes || null,
@@ -558,41 +558,41 @@ async function importEvents(text: string, userId: number): Promise<TableResult> 
 // -----------------------------------------------------------------------------
 
 async function importEventMetrics(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "event_metrics.csv",
     text,
-    ["event_started_at", "sport", "event_type", "metric", "value"],
+    ["event_started_at", "activity", "event_type", "metric", "value"],
     async (row, idx) => {
       const startedAt = row[idx.get("event_started_at")!];
-      const sportName = row[idx.get("sport")!];
+      const activityName = row[idx.get("activity")!];
       const eventType = row[idx.get("event_type")!];
       const eventSourceId = idx.has("event_source_id") ? row[idx.get("event_source_id")!] : "";
       const metricName = row[idx.get("metric")!];
       const unit = idx.has("unit") ? row[idx.get("unit")!] : "";
       const valueStr = row[idx.get("value")!];
 
-      if (!startedAt || !sportName || !eventType || !metricName || valueStr === "") {
+      if (!startedAt || !activityName || !eventType || !metricName || valueStr === "") {
         throw new Error("missing required field");
       }
       const value = Number(valueStr);
       if (!Number.isFinite(value)) throw new Error(`non-numeric value "${valueStr}"`);
-      const sportId = sportCache.get(sportName);
-      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
+      const activityId = activityCache.get(activityName);
+      if (!activityId) throw new Error(`unknown activity "${activityName}"`);
 
       let parentId = await resolveEventId({
         userId,
         sourceId: eventSourceId,
         startedAt,
-        sportId,
+        activityId,
         type: eventType,
       });
       if (parentId === null) {
-        const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
+        const synthId = eventSourceId || `custom-${activityName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
           userId,
-          sportId,
+          activityId,
           type: eventType,
           durationMinutes: null,
           notes: null,
@@ -625,15 +625,15 @@ async function importEventMetrics(text: string, userId: number): Promise<TableRe
 // -----------------------------------------------------------------------------
 
 async function importWorkoutSets(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "workout_sets.csv",
     text,
-    ["event_started_at", "sport", "event_type", "exercise_name", "set_number", "reps", "weight"],
+    ["event_started_at", "activity", "event_type", "exercise_name", "set_number", "reps", "weight"],
     async (row, idx) => {
       const startedAt = row[idx.get("event_started_at")!];
-      const sportName = row[idx.get("sport")!];
+      const activityName = row[idx.get("activity")!];
       const eventType = row[idx.get("event_type")!];
       const eventSourceId = idx.has("event_source_id") ? row[idx.get("event_source_id")!] : "";
       const exerciseName = row[idx.get("exercise_name")!];
@@ -643,24 +643,24 @@ async function importWorkoutSets(text: string, userId: number): Promise<TableRes
       const rpeStr = idx.has("rpe") ? row[idx.get("rpe")!] : "";
       const notes = idx.has("notes") ? row[idx.get("notes")!] : "";
 
-      if (!startedAt || !sportName || !eventType || !exerciseName) {
+      if (!startedAt || !activityName || !eventType || !exerciseName) {
         throw new Error("missing required field");
       }
-      const sportId = sportCache.get(sportName);
-      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
+      const activityId = activityCache.get(activityName);
+      if (!activityId) throw new Error(`unknown activity "${activityName}"`);
 
       let parentId = await resolveEventId({
         userId,
         sourceId: eventSourceId,
         startedAt,
-        sportId,
+        activityId,
         type: eventType,
       });
       if (parentId === null) {
-        const synthId = eventSourceId || `custom-${sportName}-${eventType}-${startedAt}`;
+        const synthId = eventSourceId || `custom-${activityName}-${eventType}-${startedAt}`;
         const { eventId } = await upsertEvent({
           userId,
-          sportId,
+          activityId,
           type: eventType,
           durationMinutes: null,
           notes: null,
@@ -779,11 +779,11 @@ async function importEventDuplicateDenylist(
 // helpers
 // -----------------------------------------------------------------------------
 
-async function loadSportCache(userId: number): Promise<Map<string, number>> {
+async function loadActivityCache(userId: number): Promise<Map<string, number>> {
   const rows = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(userId).sports);
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(userId).activities);
   return new Map(rows.map((r) => [r.name, r.id]));
 }
 
@@ -791,7 +791,7 @@ async function loadSportCache(userId: number): Promise<Map<string, number>> {
  * Run a CSV import for a single table. Handles the repeated boilerplate:
  * header validation, per-row try/catch, row-N error formatting, result
  * counting. The per-row handler throws an Error for soft validation
- * failures ("missing required field", "unknown sport", etc.) and returns
+ * failures ("missing required field", "unknown activity", etc.) and returns
  * "accepted" | "skipped" | "updated" for successful outcomes. Errors
  * thrown inside the handler are caught and formatted as
  * `<filename> row <N>: <message>` (N is 1-indexed + 1 for the header row).
@@ -889,24 +889,24 @@ async function processCsv(
 // Foundational catalog + user targets — all use processCsv for boilerplate.
 // -----------------------------------------------------------------------------
 
-async function importSportsTable(text: string, userId: number): Promise<TableResult> {
-  return processCsv("sports.csv", text, ["name", "color"], async (row, idx) => {
+async function importActivitiesTable(text: string, userId: number): Promise<TableResult> {
+  return processCsv("activities.csv", text, ["name", "color"], async (row, idx) => {
     const name = row[idx.get("name")!];
     const color = row[idx.get("color")!];
     if (!name || !color) throw new Error("missing required field");
     // Per-user uniqueness on (user_id, name). Conflict target updated
-    // accordingly so the same sport name in different users coexists.
+    // accordingly so the same activity name in different users coexists.
     const inserted = await db
-      .insert(sports)
+      .insert(activities)
       .values({ userId, name, color })
-      .onConflictDoNothing({ target: [sports.userId, sports.name] })
-      .returning({ id: sports.id });
+      .onConflictDoNothing({ target: [activities.userId, activities.name] })
+      .returning({ id: activities.id });
     return inserted.length > 0 ? "accepted" : "skipped";
   });
 }
 
 async function importMetricTypes(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   return processCsv(
     "metric_types.csv",
     text,
@@ -915,7 +915,7 @@ async function importMetricTypes(text: string, userId: number): Promise<TableRes
       const name = row[idx.get("name")!];
       const unit = row[idx.get("unit")!] ?? "";
       const freqStr = row[idx.get("frequency_hint")!] ?? "daily";
-      const sportName = idx.has("sport") ? row[idx.get("sport")!] : "";
+      const activityName = idx.has("activity") ? row[idx.get("activity")!] : "";
       // target + higher_is_better are optional for backward compat with
       // pre-2026-05-04 exports (the columns didn't exist yet). Missing
       // column = leave existing values alone on conflict.
@@ -932,18 +932,18 @@ async function importMetricTypes(text: string, userId: number): Promise<TableRes
         target = n;
       }
       const higherIsBetter = hibRaw === "" ? true : hibRaw === "1" || hibRaw === "true";
-      const sportId = sportName ? sportCache.get(sportName) ?? null : null;
-      if (sportName && !sportId) throw new Error(`unknown sport "${sportName}"`);
+      const activityId = activityName ? activityCache.get(activityName) ?? null : null;
+      if (activityName && !activityId) throw new Error(`unknown activity "${activityName}"`);
 
       // Upsert on the unique (user_id, name) index so re-import refreshes
       // target / higher_is_better on existing rows. Only update mutable
       // config fields — never touch identity.
       const inserted = await db
         .insert(metricTypes)
-        .values({ userId, name, unit, frequencyHint: freqStr, sportId, target, higherIsBetter })
+        .values({ userId, name, unit, frequencyHint: freqStr, activityId, target, higherIsBetter })
         .onConflictDoUpdate({
           target: [metricTypes.userId, metricTypes.name],
-          set: { unit, frequencyHint: freqStr, sportId, target, higherIsBetter },
+          set: { unit, frequencyHint: freqStr, activityId, target, higherIsBetter },
         })
         .returning({ id: metricTypes.id });
       return inserted.length > 0 ? "accepted" : "skipped";
@@ -1029,20 +1029,20 @@ async function importSourceSettings(text: string, userId: number): Promise<Table
 }
 
 async function importGoals(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "goals.csv",
     text,
-    ["sport", "metric", "target_value", "deadline"],
+    ["activity", "metric", "target_value", "deadline"],
     async (row, idx) => {
-      const sportName = row[idx.get("sport")!];
+      const activityName = row[idx.get("activity")!];
       const metricName = row[idx.get("metric")!];
       const targetStr = row[idx.get("target_value")!];
       const deadline = row[idx.get("deadline")!];
       const status =
         (idx.has("status") ? row[idx.get("status")!] : "active") || "active";
-      if (!sportName || !metricName || targetStr === "" || !deadline) {
+      if (!activityName || !metricName || targetStr === "" || !deadline) {
         throw new Error("missing required field");
       }
       if (!isStatus(status)) throw new Error(`invalid status "${status}"`);
@@ -1050,11 +1050,11 @@ async function importGoals(text: string, userId: number): Promise<TableResult> {
       if (!Number.isFinite(target)) {
         throw new Error(`non-numeric target_value "${targetStr}"`);
       }
-      const sportId = sportCache.get(sportName);
-      if (!sportId) throw new Error(`unknown sport "${sportName}"`);
+      const activityId = activityCache.get(activityName);
+      if (!activityId) throw new Error(`unknown activity "${activityName}"`);
       const metricTypeId = typeCache.byName.get(metricName);
       if (metricTypeId === undefined) throw new Error(`unknown metric "${metricName}"`);
-      // Natural-key dedupe: (sportId, metricTypeId, deadline). Scoped
+      // Natural-key dedupe: (activityId, metricTypeId, deadline). Scoped
       // by user_id so two users with similar goals don't collide.
       const existing = await db
         .select({ id: goals.id })
@@ -1062,7 +1062,7 @@ async function importGoals(text: string, userId: number): Promise<TableResult> {
         .where(
           and(
             userScope(userId).goals,
-            eq(goals.sportId, sportId),
+            eq(goals.activityId, activityId),
             eq(goals.metricTypeId, metricTypeId),
             eq(goals.deadline, deadline),
           ),
@@ -1071,7 +1071,7 @@ async function importGoals(text: string, userId: number): Promise<TableResult> {
       if (existing.length > 0) return "skipped";
       await db.insert(goals).values({
         userId,
-        sportId,
+        activityId,
         metricTypeId,
         targetValue: target,
         deadline,
@@ -1083,7 +1083,7 @@ async function importGoals(text: string, userId: number): Promise<TableResult> {
 }
 
 async function importFocuses(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   // focuses is INHERIT — restrict via this user's goals.
   const ownedGoalIds = db
@@ -1097,7 +1097,7 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
     async (row, idx) => {
       const name = row[idx.get("name")!];
       const startDate = row[idx.get("start_date")!];
-      const goalSport = row[idx.get("goal_sport")!];
+      const goalActivity = row[idx.get("goal_sport")!];
       const goalMetric = row[idx.get("goal_metric")!];
       const goalDeadline = row[idx.get("goal_deadline")!];
       const source =
@@ -1113,7 +1113,7 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
         ? row[idx.get("dismissed_at")!]
         : "";
 
-      if (!name || !startDate || !goalSport || !goalMetric || !goalDeadline) {
+      if (!name || !startDate || !goalActivity || !goalMetric || !goalDeadline) {
         throw new Error("missing required field");
       }
       if (!isStatus(status)) throw new Error(`invalid status "${status}"`);
@@ -1121,8 +1121,8 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
         throw new Error(`invalid source "${source}"`);
       }
 
-      const goalSportId = sportCache.get(goalSport);
-      if (!goalSportId) throw new Error(`unknown sport "${goalSport}"`);
+      const goalActivityId = activityCache.get(goalActivity);
+      if (!goalActivityId) throw new Error(`unknown activity "${goalActivity}"`);
       const goalMetricTypeId = typeCache.byName.get(goalMetric);
       if (goalMetricTypeId === undefined) {
         throw new Error(`unknown metric "${goalMetric}"`);
@@ -1134,7 +1134,7 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
         .where(
           and(
             userScope(userId).goals,
-            eq(goals.sportId, goalSportId),
+            eq(goals.activityId, goalActivityId),
             eq(goals.metricTypeId, goalMetricTypeId),
             eq(goals.deadline, goalDeadline),
           ),
@@ -1142,7 +1142,7 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
         .limit(1);
       if (g.length === 0) {
         throw new Error(
-          `goal not found for (${goalSport}, ${goalMetric}, ${goalDeadline})`,
+          `goal not found for (${goalActivity}, ${goalMetric}, ${goalDeadline})`,
         );
       }
       const goalId = g[0].id;
@@ -1179,7 +1179,7 @@ async function importFocuses(text: string, userId: number): Promise<TableResult>
 }
 
 async function importGoalJournalEntries(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   const ownedGoalIds = db
     .select({ id: goals.id })
@@ -1190,7 +1190,7 @@ async function importGoalJournalEntries(text: string, userId: number): Promise<T
     text,
     ["goal_sport", "goal_metric", "goal_deadline", "content"],
     async (row, idx) => {
-      const goalSport = row[idx.get("goal_sport")!];
+      const goalActivity = row[idx.get("goal_sport")!];
       const goalMetric = row[idx.get("goal_metric")!];
       const goalDeadline = row[idx.get("goal_deadline")!];
       const content = row[idx.get("content")!];
@@ -1205,11 +1205,11 @@ async function importGoalJournalEntries(text: string, userId: number): Promise<T
         ? row[idx.get("linked_metric")!]
         : "";
 
-      if (!goalSport || !goalMetric || !goalDeadline || !content) {
+      if (!goalActivity || !goalMetric || !goalDeadline || !content) {
         throw new Error("missing required field");
       }
-      const goalSportId = sportCache.get(goalSport);
-      if (!goalSportId) throw new Error(`unknown sport "${goalSport}"`);
+      const goalActivityId = activityCache.get(goalActivity);
+      if (!goalActivityId) throw new Error(`unknown activity "${goalActivity}"`);
       const goalMetricTypeId = typeCache.byName.get(goalMetric);
       if (goalMetricTypeId === undefined) {
         throw new Error(`unknown metric "${goalMetric}"`);
@@ -1221,7 +1221,7 @@ async function importGoalJournalEntries(text: string, userId: number): Promise<T
         .where(
           and(
             userScope(userId).goals,
-            eq(goals.sportId, goalSportId),
+            eq(goals.activityId, goalActivityId),
             eq(goals.metricTypeId, goalMetricTypeId),
             eq(goals.deadline, goalDeadline),
           ),
@@ -1229,7 +1229,7 @@ async function importGoalJournalEntries(text: string, userId: number): Promise<T
         .limit(1);
       if (g.length === 0) {
         throw new Error(
-          `goal not found for (${goalSport}, ${goalMetric}, ${goalDeadline})`,
+          `goal not found for (${goalActivity}, ${goalMetric}, ${goalDeadline})`,
         );
       }
       const goalId = g[0].id;
@@ -1297,7 +1297,7 @@ async function importGoalJournalEntries(text: string, userId: number): Promise<T
  * export, which keeps the seed migration's idempotency intact.
  */
 async function importDashboards(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   return processCsv(
     "dashboards.csv",
     text,
@@ -1306,14 +1306,14 @@ async function importDashboards(text: string, userId: number): Promise<TableResu
       const slug = row[idx.get("slug")!];
       const name = row[idx.get("name")!];
       const icon = idx.has("icon") ? row[idx.get("icon")!] : "";
-      const sportName = idx.has("sport_name") ? row[idx.get("sport_name")!] : "";
+      const activityName = idx.has("activity_name") ? row[idx.get("activity_name")!] : "";
       const positionRaw = idx.has("position") ? row[idx.get("position")!] : "0";
       const isSystemRaw = idx.has("is_system") ? row[idx.get("is_system")!] : "0";
       const seededId = idx.has("seeded_id") ? row[idx.get("seeded_id")!] : "";
       if (!slug || !name) throw new Error("missing slug or name");
 
-      const sportId = sportName ? sportCache.get(sportName) ?? null : null;
-      if (sportName && !sportId) throw new Error(`unknown sport "${sportName}"`);
+      const activityId = activityName ? activityCache.get(activityName) ?? null : null;
+      if (activityName && !activityId) throw new Error(`unknown activity "${activityName}"`);
 
       const position = Number(positionRaw);
       if (!Number.isFinite(position)) throw new Error(`invalid position "${positionRaw}"`);
@@ -1326,7 +1326,7 @@ async function importDashboards(text: string, userId: number): Promise<TableResu
           slug,
           name,
           icon: icon || null,
-          sportId,
+          activityId,
           position,
           isSystem,
           seededId: seededId || null,
@@ -1432,11 +1432,11 @@ async function importDashboardWidgets(text: string, userId: number): Promise<Tab
  * For idempotent re-imports we dedupe on (ts, endpoint, model, status) —
  * tight enough that two separate calls won't collide, loose enough that
  * the same row from two exports skips cleanly. goal_id resolves from the
- * (sport, metric, deadline) natural key; missing or unresolvable = NULL
+ * (activity, metric, deadline) natural key; missing or unresolvable = NULL
  * (matches the schema's set-null on goal delete).
  */
 async function importCoachCalls(text: string, userId: number): Promise<TableResult> {
-  const sportCache = await loadSportCache(userId);
+  const activityCache = await loadActivityCache(userId);
   const typeCache = await buildMetricTypeCache(userId);
   return processCsv(
     "coach_calls.csv",
@@ -1450,7 +1450,7 @@ async function importCoachCalls(text: string, userId: number): Promise<TableResu
       const tokensOut = idx.has("tokens_out") ? Number(row[idx.get("tokens_out")!] || 0) : 0;
       const durationMs = idx.has("duration_ms") ? Number(row[idx.get("duration_ms")!] || 0) : 0;
       const status = (idx.has("status") ? row[idx.get("status")!] : "success") || "success";
-      const goalSport = idx.has("goal_sport") ? row[idx.get("goal_sport")!] : "";
+      const goalActivity = idx.has("goal_sport") ? row[idx.get("goal_sport")!] : "";
       const goalMetric = idx.has("goal_metric") ? row[idx.get("goal_metric")!] : "";
       const goalDeadline = idx.has("goal_deadline") ? row[idx.get("goal_deadline")!] : "";
 
@@ -1460,17 +1460,17 @@ async function importCoachCalls(text: string, userId: number): Promise<TableResu
       }
 
       let goalId: number | null = null;
-      if (goalSport && goalMetric && goalDeadline) {
-        const sportId = sportCache.get(goalSport);
+      if (goalActivity && goalMetric && goalDeadline) {
+        const activityId = activityCache.get(goalActivity);
         const metricTypeId = typeCache.byName.get(goalMetric);
-        if (sportId && metricTypeId !== undefined) {
+        if (activityId && metricTypeId !== undefined) {
           const g = await db
             .select({ id: goals.id })
             .from(goals)
             .where(
               and(
                 userScope(userId).goals,
-                eq(goals.sportId, sportId),
+                eq(goals.activityId, activityId),
                 eq(goals.metricTypeId, metricTypeId),
                 eq(goals.deadline, goalDeadline),
               ),
@@ -1605,12 +1605,12 @@ async function importReconcileLog(text: string, userId: number): Promise<TableRe
  */
 async function importMergeLog(text: string, userId: number): Promise<TableResult> {
   const typeCache = await buildMetricTypeCache(userId);
-  // Build a sport-name → id cache once for the same purpose, scoped to user.
-  const sportRows = await db
-    .select({ id: sports.id, name: sports.name })
-    .from(sports)
-    .where(userScope(userId).sports);
-  const sportCache = new Map(sportRows.map((r) => [r.name, r.id]));
+  // Build a activity-name → id cache once for the same purpose, scoped to user.
+  const activityRows = await db
+    .select({ id: activities.id, name: activities.name })
+    .from(activities)
+    .where(userScope(userId).activities);
+  const activityCache = new Map(activityRows.map((r) => [r.name, r.id]));
 
   return processCsv(
     "merge_log.csv",
@@ -1635,7 +1635,7 @@ async function importMergeLog(text: string, userId: number): Promise<TableResult
       if (!kindRaw || !createdAt || !canonicalName || !payload) {
         throw new Error("missing required field");
       }
-      if (kindRaw !== "metric_type" && kindRaw !== "sport") {
+      if (kindRaw !== "metric_type" && kindRaw !== "activity") {
         throw new Error(`invalid kind "${kindRaw}"`);
       }
 
@@ -1647,7 +1647,7 @@ async function importMergeLog(text: string, userId: number): Promise<TableResult
         const id = typeCache.byName.get(canonicalName);
         canonicalId = id ?? (Number(canonicalIdRaw) || 0);
       } else {
-        const id = sportCache.get(canonicalName);
+        const id = activityCache.get(canonicalName);
         canonicalId = id ?? (Number(canonicalIdRaw) || 0);
       }
 

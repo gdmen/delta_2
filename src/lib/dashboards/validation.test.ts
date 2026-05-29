@@ -29,13 +29,13 @@ describe("createDashboardInput", () => {
     expect(() => createDashboardInput.parse({ name: "x".repeat(256) })).toThrow();
   });
 
-  it("rejects invalid sportId", () => {
-    expect(() => createDashboardInput.parse({ name: "x", sportId: 0 })).toThrow();
-    expect(() => createDashboardInput.parse({ name: "x", sportId: -1 })).toThrow();
+  it("rejects invalid activityId", () => {
+    expect(() => createDashboardInput.parse({ name: "x", activityId: 0 })).toThrow();
+    expect(() => createDashboardInput.parse({ name: "x", activityId: -1 })).toThrow();
   });
 
-  it("accepts null sportId", () => {
-    expect(createDashboardInput.parse({ name: "x", sportId: null }).sportId).toBeNull();
+  it("accepts null activityId", () => {
+    expect(createDashboardInput.parse({ name: "x", activityId: null }).activityId).toBeNull();
   });
 });
 

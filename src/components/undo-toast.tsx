@@ -20,7 +20,7 @@ export interface UndoToastDetail {
   mergeLogId: number;
   canonicalName: string;
   mergedCount: number;
-  kind: "metric_type" | "sport";
+  kind: "metric_type" | "activity";
 }
 
 const TOAST_EVENT = "delta:undo-toast";

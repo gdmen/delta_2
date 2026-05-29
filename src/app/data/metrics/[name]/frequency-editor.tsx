@@ -14,7 +14,7 @@ type FrequencyHint = "daily" | "weekly" | "occasional";
  * Why this exists: the ingest auto-create path
  * (`src/lib/ingest/metric-resolver.ts`) defaults every newly-seen orphan
  * to `"daily"` because that's right for high-volume importers (Apple
- * Health steps, Strava sport_minutes). Point-in-time measurements
+ * Health steps, Strava activity_minutes). Point-in-time measurements
  * (DEXA scan body comp, body weight) need to be reclassified by hand —
  * otherwise `excludeTodayIfDaily` filters out the latest reading on the
  * day it was taken, making the chart look stuck on yesterday's data.
@@ -87,7 +87,7 @@ export function MetricFrequencyEditor({
       </div>
       <p className="mt-2 text-[0.75rem] text-muted">
         <span className="font-mono">daily</span> / <span className="font-mono">weekly</span>:
-        rolling aggregate (steps, sleep, sport minutes). Today&apos;s value is
+        rolling aggregate (steps, sleep, activity minutes). Today&apos;s value is
         mid-flight, so charts hide it.{" "}
         <span className="font-mono">occasional</span>: point-in-time
         measurement (DEXA scan, body weight). Today&apos;s reading is the

@@ -54,3 +54,6 @@ next-env.d.ts
 /delta2.db-wal
 /delta2.db-shm
 /delta2.db.bak*
+
+# personal CSV exports (TeamBuildr, food, poop, etc) — never commit
+*.csv

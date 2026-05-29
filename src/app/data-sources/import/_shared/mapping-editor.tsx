@@ -87,7 +87,7 @@ export function defaultMappingForKind(
     return {
       kind: "events",
       startedAt: { ref: dateRef, format: "auto" },
-      sport: slotFromAutoMatch("sport"),
+      activity: slotFromAutoMatch("activity"),
       type: slotFromAutoMatch("type"),
       durationMinutes: slotFromAutoMatch("duration"),
       notes: slotFromAutoMatch("notes"),
@@ -97,7 +97,7 @@ export function defaultMappingForKind(
   return {
     kind: "workout_sets",
     startedAt: { ref: dateRef, format: "auto" },
-    sport: { source: "literal", value: "powerlifting" },
+    activity: { source: "literal", value: "powerlifting" },
     eventType: { source: "literal", value: "strength" },
     eventSourceId: slotFromAutoMatch("eventSourceId"),
     exerciseName: slotFromAutoMatch("exerciseName"),
@@ -142,7 +142,7 @@ export function KindPicker({
       </div>
       <p className="mt-2 text-[0.75rem] text-muted">
         {kind === "metrics" && "One row = one or more timestamped numeric measurements."}
-        {kind === "events" && "One row = one session (run, ride, class, etc.) with sport + type + duration."}
+        {kind === "events" && "One row = one session (run, ride, class, etc.) with activity + type + duration."}
         {kind === "workout_sets" && "One row = one set of a lifting exercise (reps + weight)."}
       </p>
     </div>
@@ -165,7 +165,7 @@ export function MappingEditor({
   headers,
   onChange,
   metricNameSuggestions = [],
-  sportSuggestions = [],
+  activitySuggestions = [],
   distinctValuesByColumn,
 }: {
   kind: Kind;
@@ -173,7 +173,7 @@ export function MappingEditor({
   headers: string[];
   onChange: (m: ImportMapping) => void;
   metricNameSuggestions?: string[];
-  sportSuggestions?: string[];
+  activitySuggestions?: string[];
   /**
    * Distinct values per CSV column, populated by callers that have the
    * source data available (wizard parses the upload; edit page can
@@ -198,7 +198,7 @@ export function MappingEditor({
         mapping={mapping}
         headers={headers}
         onChange={onChange}
-        sportSuggestions={sportSuggestions}
+        activitySuggestions={activitySuggestions}
         metricNameSuggestions={metricNameSuggestions}
       />
     );
@@ -209,7 +209,7 @@ export function MappingEditor({
         mapping={mapping}
         headers={headers}
         onChange={onChange}
-        sportSuggestions={sportSuggestions}
+        activitySuggestions={activitySuggestions}
         distinctValuesByColumn={distinctValuesByColumn}
       />
     );
@@ -343,13 +343,13 @@ function EventsEditor({
   mapping,
   headers,
   onChange,
-  sportSuggestions,
+  activitySuggestions,
   metricNameSuggestions,
 }: {
   mapping: Extract<ImportMapping, { kind: "events" }>;
   headers: string[];
   onChange: (m: ImportMapping) => void;
-  sportSuggestions: string[];
+  activitySuggestions: string[];
   metricNameSuggestions: string[];
 }) {
   const attachedMetrics = mapping.metrics ?? [];
@@ -364,13 +364,13 @@ function EventsEditor({
           onChange={(ref, format) => onChange({ ...mapping, startedAt: { ref, format } })}
         />
       </Field>
-      <Field label="Sport" required>
+      <Field label="Activity" required>
         <SlotPicker
-          slot={mapping.sport}
+          slot={mapping.activity}
           headers={headers}
-          literalPlaceholder="e.g. running (matches sports.name)"
-          literalSuggestions={sportSuggestions}
-          onChange={(sport) => onChange({ ...mapping, sport })}
+          literalPlaceholder="e.g. running (matches activities.name)"
+          literalSuggestions={activitySuggestions}
+          onChange={(activity) => onChange({ ...mapping, activity })}
         />
       </Field>
       <Field label="Type" required>
@@ -501,13 +501,13 @@ function WorkoutSetsEditor({
   mapping,
   headers,
   onChange,
-  sportSuggestions,
+  activitySuggestions,
   distinctValuesByColumn,
 }: {
   mapping: Extract<ImportMapping, { kind: "workout_sets" }>;
   headers: string[];
   onChange: (m: ImportMapping) => void;
-  sportSuggestions: string[];
+  activitySuggestions: string[];
   distinctValuesByColumn?: Record<string, string[]>;
 }) {
   // If the user mapped exerciseName to a column AND we have distinct values
@@ -560,13 +560,13 @@ function WorkoutSetsEditor({
           onChange={(ref, format) => onChange({ ...mapping, startedAt: { ref, format } })}
         />
       </Field>
-      <Field label="Sport" required>
+      <Field label="Activity" required>
         <SlotPicker
-          slot={mapping.sport}
+          slot={mapping.activity}
           headers={headers}
           literalPlaceholder="e.g. powerlifting"
-          literalSuggestions={sportSuggestions}
-          onChange={(sport) => onChange({ ...mapping, sport })}
+          literalSuggestions={activitySuggestions}
+          onChange={(activity) => onChange({ ...mapping, activity })}
         />
       </Field>
       <Field label="Event type" required>
@@ -771,7 +771,7 @@ export function SlotPicker({
 /**
  * Edit a column's raw->canonical value map. Used to let one mapping handle
  * CSVs where different rows need different canonical targets for the same
- * slot (e.g. Exercise column mapping to sport=biking vs sport=bjj).
+ * slot (e.g. Exercise column mapping to activity=biking vs activity=bjj).
  */
 function AliasesEditor({
   aliases,
@@ -1017,13 +1017,13 @@ export function useMetricTypeNames(): string[] {
   return names;
 }
 
-export function useSportNames(): string[] {
+export function useActivityNames(): string[] {
   const [names, setNames] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/sports");
+        const res = await fetch("/api/activities");
         if (!res.ok) return;
         const json = (await res.json()) as { name: string }[];
         if (!cancelled) setNames(json.map((x) => x.name));

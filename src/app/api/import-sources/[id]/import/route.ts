@@ -9,10 +9,10 @@ import {
   resolveMetricTypeId,
 } from "@/lib/ingest/metric-resolver";
 import {
-  buildSportCache,
-  resolveSportId,
-  type SportCache,
-} from "@/lib/ingest/sport-resolver";
+  buildActivityCache,
+  resolveActivityId,
+  type ActivityCache,
+} from "@/lib/ingest/activity-resolver";
 import { ReconcileTracker } from "@/lib/reconcile";
 import {
   upsertMetric,
@@ -44,7 +44,7 @@ const PROGRESS_EMIT_MIN_MS = 250;
  *     synthesized from the natural fields (same strategy as the generic
  *     /api/import route).
  *   - workout_sets: parent event resolved by event_source_id when
- *     mapped, else by (sport, event_type, started_at). Sets upsert on
+ *     mapped, else by (activity, event_type, started_at). Sets upsert on
  *     (event_id, exercise_metric_type_id, set_number). The raw
  *     exercise_name is resolved through the metric_types alias table
  *     (same path as metric names) so merges and aliases cover exercises.
@@ -102,7 +102,7 @@ export async function POST(
     const result: TableResult = { accepted: 0, skipped: 0, updated: 0, errors: [] };
 
     const typeCache = await buildMetricTypeCache(user.id);
-    const sportCache = await buildSportCache(user.id);
+    const activityCache = await buildActivityCache(user.id);
     const tracker = new ReconcileTracker(user.id);
     // User timezone anchors naive dates ("2026-05-07" or
     // "2026-05-07 23:00") to wall-clock time in `tz`. Without this a
@@ -137,7 +137,7 @@ export async function POST(
       } else {
         for (const item of out) {
           try {
-            await writeOutRow(item, sourceTag, typeCache, sportCache, result, i, tracker, user.id);
+            await writeOutRow(item, sourceTag, typeCache, activityCache, result, i, tracker, user.id);
           } catch (err) {
             result.errors.push(
               `row ${i + 2}: ${err instanceof Error ? err.message : String(err)}`
@@ -169,7 +169,7 @@ async function writeOutRow(
   item: OutRow,
   sourceTag: string,
   typeCache: Awaited<ReturnType<typeof buildMetricTypeCache>>,
-  sportCache: SportCache,
+  activityCache: ActivityCache,
   result: TableResult,
   rowIdx: number,
   tracker: ReconcileTracker,
@@ -208,22 +208,22 @@ async function writeOutRow(
   }
 
   if (item.kind === "event") {
-    const sportId = await resolveSportId({
-      rawName: item.sport,
+    const activityId = await resolveActivityId({
+      rawName: item.activity,
       sourceSystem: sourceTag,
-      cache: sportCache,
+      cache: activityCache,
     });
     // When the mapping doesn't supply a source_id, include the row index
-    // so multiple rows that share a date/sport/type (e.g. three Stationary
+    // so multiple rows that share a date/activity/type (e.g. three Stationary
     // Bike sets on the same day) each become their own event and each
     // keeps its own attached metrics. If the caller wants per-row
     // collapsing (one event per day), they should map source_id to a
     // natural column.
     const sourceId =
-      item.sourceId ?? `${sourceTag}-${item.sport}-${item.type}-${item.startedAt}-${rowIdx}`;
+      item.sourceId ?? `${sourceTag}-${item.activity}-${item.type}-${item.startedAt}-${rowIdx}`;
     const input: EventInput = {
       userId,
-      sportId,
+      activityId,
       type: item.type,
       durationMinutes: item.durationMinutes ?? null,
       notes: item.notes ?? null,
@@ -252,10 +252,10 @@ async function writeOutRow(
   }
 
   if (item.kind === "workout_set") {
-    const sportId = await resolveSportId({
-      rawName: item.sport,
+    const activityId = await resolveActivityId({
+      rawName: item.activity,
       sourceSystem: sourceTag,
-      cache: sportCache,
+      cache: activityCache,
     });
 
     // Resolve parent event. Whatever the parent's source_id ends up being,
@@ -275,7 +275,7 @@ async function writeOutRow(
       if (parentId === null) {
         const { eventId } = await upsertEvent({
           userId,
-          sportId,
+          activityId,
           type: item.eventType,
           durationMinutes: null,
           notes: null,
@@ -293,7 +293,7 @@ async function writeOutRow(
           and(
             userScope(userId).events,
             eq(events.startedAt, item.startedAt),
-            eq(events.sportId, sportId),
+            eq(events.activityId, activityId),
             eq(events.type, item.eventType),
           )
         )
@@ -301,11 +301,11 @@ async function writeOutRow(
       parentId = existing[0]?.id ?? null;
       parentSourceId = existing[0]?.sourceId ?? null;
       if (parentId === null) {
-        const synth = `${sourceTag}-${item.sport}-${item.eventType}-${item.startedAt}`;
+        const synth = `${sourceTag}-${item.activity}-${item.eventType}-${item.startedAt}`;
         parentSourceId = synth;
         const { eventId } = await upsertEvent({
           userId,
-          sportId,
+          activityId,
           type: item.eventType,
           durationMinutes: null,
           notes: null,

@@ -11,7 +11,7 @@
  *   npx tsx scripts/smoke-daily-summaries.ts
  */
 import { db } from "@/db";
-import { metrics, metricTypes, dailySummaries, sports, users } from "@/db/schema";
+import { metrics, metricTypes, dailySummaries, activities, users } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { recomputeDailySummary } from "@/lib/ingest-service";
 
@@ -31,9 +31,9 @@ async function getOrCreateMetricType(userId: number, name: string): Promise<numb
     .limit(1);
   if (existing.length > 0) return existing[0].id;
 
-  // Look for a sport to attach. Any sport works for this test.
-  const anySport = await db.select({ id: sports.id }).from(sports).where(eq(sports.userId, userId)).limit(1);
-  const sportId = anySport[0]?.id ?? null;
+  // Look for a activity to attach. Any activity works for this test.
+  const anyActivity = await db.select({ id: activities.id }).from(activities).where(eq(activities.userId, userId)).limit(1);
+  const activityId = anyActivity[0]?.id ?? null;
 
   const result = await db
     .insert(metricTypes)
@@ -42,7 +42,7 @@ async function getOrCreateMetricType(userId: number, name: string): Promise<numb
       name,
       unit: "test",
       higherIsBetter: true,
-      sportId,
+      activityId,
     })
     .returning({ id: metricTypes.id });
   return result[0].id;

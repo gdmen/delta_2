@@ -25,7 +25,7 @@ import { userScope } from "@/lib/auth/scope";
  *   - `reconcile_log`  — DELETE WHERE source = ? (audit trail; cleared so
  *                        future reconciles start from a clean state)
  *
- * Tables intentionally untouched: metric_types, sports, dashboards, goals,
+ * Tables intentionally untouched: metric_types, activities, dashboards, goals,
  * focuses, metric_type_aliases, source_settings, ingest_configs,
  * import_sources (the per-source CONFIG row stays so the user's mapping
  * isn't lost — wiping data is reversible by re-import; wiping config is

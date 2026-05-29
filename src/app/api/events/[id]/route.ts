@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { events, sports } from "@/db/schema";
+import { events, activities } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
 interface UpdateEventBody {
-  sportId?: number;
+  activityId?: number;
   type?: string;
   durationMinutes?: number | null;
   notes?: string | null;
@@ -32,23 +32,23 @@ export async function PATCH(
   }
 
   const updates: Partial<typeof events.$inferInsert> = {};
-  if (body.sportId !== undefined) {
-    if (typeof body.sportId !== "number") {
-      return NextResponse.json({ error: "sportId must be a number" }, { status: 400 });
+  if (body.activityId !== undefined) {
+    if (typeof body.activityId !== "number") {
+      return NextResponse.json({ error: "activityId must be a number" }, { status: 400 });
     }
     // FK injection guard — same shape as POST /api/events. Without
     // this check, a PATCH could rewrite the event to point at a
-    // foreign owner's sport, which would then surface in the JOIN
+    // foreign owner's activity, which would then surface in the JOIN
     // on the listing page.
-    const ownsSport = await db
-      .select({ id: sports.id })
-      .from(sports)
-      .where(and(eq(sports.id, body.sportId), userScope(user.id).sports))
+    const ownsActivity = await db
+      .select({ id: activities.id })
+      .from(activities)
+      .where(and(eq(activities.id, body.activityId), userScope(user.id).activities))
       .limit(1);
-    if (ownsSport.length === 0) {
-      return NextResponse.json({ error: "sportId not found" }, { status: 400 });
+    if (ownsActivity.length === 0) {
+      return NextResponse.json({ error: "activityId not found" }, { status: 400 });
     }
-    updates.sportId = body.sportId;
+    updates.activityId = body.activityId;
   }
   if (body.type !== undefined) {
     if (typeof body.type !== "string" || !body.type) {

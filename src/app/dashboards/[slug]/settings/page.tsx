@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { db } from "@/db";
-import { sports, dashboardShareTokens } from "@/db/schema";
+import { activities, dashboardShareTokens } from "@/db/schema";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { loadDashboard } from "@/lib/dashboards/load";
 import { SLUG_PATTERN } from "@/lib/dashboards/slug";
@@ -23,11 +23,11 @@ export default async function DashboardSettingsPage({
   const dashboard = await loadDashboard(slug, user.id);
   if (!dashboard) notFound();
 
-  const sportRows = await db
-    .select({ id: sports.id, name: sports.name, color: sports.color })
-    .from(sports)
-    .where(userScope(user.id).sports)
-    .orderBy(asc(sports.name));
+  const activityRows = await db
+    .select({ id: activities.id, name: activities.name, color: activities.color })
+    .from(activities)
+    .where(userScope(user.id).activities)
+    .orderBy(asc(activities.name));
 
   // Active share token (if any). Direct DB read avoids an internal
   // HTTP round-trip; the API route uses the same query.
@@ -56,13 +56,13 @@ export default async function DashboardSettingsPage({
       <h1 className="text-2xl font-semibold mb-2">{dashboard.name} settings</h1>
       {dashboard.isSystem && (
         <p className="text-[0.875rem] text-muted mb-6">
-          This is a system dashboard. You can rename it and change the sport
+          This is a system dashboard. You can rename it and change the activity
           color, but its URL slug stays put and it can&apos;t be deleted.
         </p>
       )}
       <DashboardSettingsForm
         dashboard={dashboard}
-        sports={sportRows}
+        activities={activityRows}
         activeShareToken={activeShareToken}
       />
     </div>

@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { events, goals, metricTypes, sports } from "@/db/schema";
+import { events, goals, metricTypes, activities } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { requireUserOr401 } from "@/lib/auth/require";
 import { userScope } from "@/lib/auth/scope";
 
 /**
- * DELETE /api/sports/:id
+ * DELETE /api/activities/:id
  *
- * Allowed only when no rows reference this sport from the three tables
- * with NOT NULL FKs: events, goals, metric_types. dashboards.sport_id
+ * Allowed only when no rows reference this activity from the three tables
+ * with NOT NULL FKs: events, goals, metric_types. dashboards.activity_id
  * is nullable + ON DELETE SET NULL — those rows survive with their
- * sport-color dot cleared. Returns 409 with the blocking counts when
+ * activity-color dot cleared. Returns 409 with the blocking counts when
  * NOT NULL refs exist so the UI can show a useful message.
  *
  * Mirrors the policy in src/app/api/metric-types/[id]/route.ts.
@@ -33,15 +33,15 @@ export async function DELETE(
     db
       .select({ c: sql<number>`count(*)` })
       .from(events)
-      .where(and(userScope(user.id).events, eq(events.sportId, id))),
+      .where(and(userScope(user.id).events, eq(events.activityId, id))),
     db
       .select({ c: sql<number>`count(*)` })
       .from(goals)
-      .where(and(userScope(user.id).goals, eq(goals.sportId, id))),
+      .where(and(userScope(user.id).goals, eq(goals.activityId, id))),
     db
       .select({ c: sql<number>`count(*)` })
       .from(metricTypes)
-      .where(and(userScope(user.id).metricTypes, eq(metricTypes.sportId, id))),
+      .where(and(userScope(user.id).metricTypes, eq(metricTypes.activityId, id))),
   ]);
   const counts = {
     events: Number(ev[0]?.c ?? 0),
@@ -51,17 +51,17 @@ export async function DELETE(
   const total = counts.events + counts.goals + counts.metricTypes;
   if (total > 0) {
     return NextResponse.json(
-      { error: "sport still referenced", counts },
+      { error: "activity still referenced", counts },
       { status: 409 },
     );
   }
 
   const result = await db
-    .delete(sports)
-    .where(and(userScope(user.id).sports, eq(sports.id, id)))
-    .returning({ id: sports.id });
+    .delete(activities)
+    .where(and(userScope(user.id).activities, eq(activities.id, id)))
+    .returning({ id: activities.id });
   if (result.length === 0) {
-    return NextResponse.json({ error: "sport not found" }, { status: 404 });
+    return NextResponse.json({ error: "activity not found" }, { status: 404 });
   }
   return NextResponse.json({ ok: true });
 }

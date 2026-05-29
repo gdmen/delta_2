@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 interface MergeRow {
   id: number;
-  kind: "metric_type" | "sport";
+  kind: "metric_type" | "activity";
   createdAt: string;
   canonicalName: string;
   mergedNames: string;
@@ -106,7 +106,7 @@ export default async function MergesPage({
         value: rows.length,
         unit: rows.length === 1 ? "merge" : "merges",
       }}
-      description="Recent metric_type and sport merges. Click Undo to reverse one — restores the merged rows + re-points everything that pointed at the canonical back to the original. Chain merges (you merged A→B then B→C) require undoing the more-recent one first."
+      description="Recent metric_type and activity merges. Click Undo to reverse one — restores the merged rows + re-points everything that pointed at the canonical back to the original. Chain merges (you merged A→B then B→C) require undoing the more-recent one first."
     >
       <MergesFilterInput initial={qParam} />
       {rows.length === 0 ? (
@@ -125,7 +125,7 @@ export default async function MergesPage({
                 No merges yet.
               </p>
               <p className="text-[0.8125rem] text-muted">
-                When you combine duplicate metric types or sports, they&apos;ll appear here for undo.
+                When you combine duplicate metric types or activities, they&apos;ll appear here for undo.
               </p>
               <Link
                 href="/data/metrics"

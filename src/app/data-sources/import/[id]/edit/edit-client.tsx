@@ -9,7 +9,7 @@ import {
 import {
   MappingEditor,
   useMetricTypeNames,
-  useSportNames,
+  useActivityNames,
   type Kind,
 } from "../../_shared/mapping-editor";
 
@@ -58,7 +58,7 @@ export function EditClient({
   const [distinctExercises, setDistinctExercises] = useState<string[]>([]);
 
   const metricNames = useMetricTypeNames();
-  const sportNames = useSportNames();
+  const activityNames = useActivityNames();
   const headers = [...collectReferencedColumns(mapping)];
 
   // Load existing metric_types this source has written to (for migration detection).
@@ -169,7 +169,7 @@ export function EditClient({
         headers={headers}
         onChange={updateMapping}
         metricNameSuggestions={metricNames}
-        sportSuggestions={sportNames}
+        activitySuggestions={activityNames}
         distinctValuesByColumn={
           // For workout_sets sources, key the distinct list under whatever
           // column the mapping currently has exerciseName pointing at.

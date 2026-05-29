@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { goals, metricTypes, sports } from "@/db/schema";
+import { goals, metricTypes, activities } from "@/db/schema";
 import { and, eq, desc, ne } from "drizzle-orm";
 import { computeGoalProgress } from "@/lib/goal-calc";
 import { requireUserOr401 } from "@/lib/auth/require";
@@ -16,9 +16,9 @@ export async function GET() {
       metricTypeId: goals.metricTypeId,
       metricName: metricTypes.name,
       metricUnit: metricTypes.unit,
-      sportId: goals.sportId,
-      sportName: sports.name,
-      sportColor: sports.color,
+      activityId: goals.activityId,
+      activityName: activities.name,
+      activityColor: activities.color,
       name: goals.name,
       targetValue: goals.targetValue,
       deadline: goals.deadline,
@@ -26,7 +26,7 @@ export async function GET() {
     })
     .from(goals)
     .innerJoin(metricTypes, eq(goals.metricTypeId, metricTypes.id))
-    .innerJoin(sports, eq(goals.sportId, sports.id))
+    .innerJoin(activities, eq(goals.activityId, activities.id))
     .where(and(userScope(user.id).goals, ne(goals.status, "abandoned")))
     .orderBy(desc(goals.createdAt));
 
@@ -47,7 +47,7 @@ export async function GET() {
 
 interface CreateGoalBody {
   metricTypeId: number;
-  sportId: number;
+  activityId: number;
   targetValue: number;
   deadline: string; // YYYY-MM-DD
   name?: string | null;
@@ -66,16 +66,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!body.metricTypeId || !body.sportId || body.targetValue === undefined || !body.deadline) {
+  if (!body.metricTypeId || !body.activityId || body.targetValue === undefined || !body.deadline) {
     return NextResponse.json(
-      { error: "Missing required fields: metricTypeId, sportId, targetValue, deadline" },
+      { error: "Missing required fields: metricTypeId, activityId, targetValue, deadline" },
       { status: 400 }
     );
   }
 
   // FK injection guard. Without these per-user checks, any caller
-  // can attach a goal to ANY metric_type or sport id — the SELECT
-  // JOIN on /goals would then leak the foreign owner's metric/sport
+  // can attach a goal to ANY metric_type or activity id — the SELECT
+  // JOIN on /goals would then leak the foreign owner's metric/activity
   // name + color into the caller's UI. The schema FKs alone don't
   // enforce per-user ownership; the queries do.
   const ownsMt = await db
@@ -86,13 +86,13 @@ export async function POST(request: NextRequest) {
   if (ownsMt.length === 0) {
     return NextResponse.json({ error: "metricTypeId not found" }, { status: 400 });
   }
-  const ownsSport = await db
-    .select({ id: sports.id })
-    .from(sports)
-    .where(and(eq(sports.id, body.sportId), userScope(user.id).sports))
+  const ownsActivity = await db
+    .select({ id: activities.id })
+    .from(activities)
+    .where(and(eq(activities.id, body.activityId), userScope(user.id).activities))
     .limit(1);
-  if (ownsSport.length === 0) {
-    return NextResponse.json({ error: "sportId not found" }, { status: 400 });
+  if (ownsActivity.length === 0) {
+    return NextResponse.json({ error: "activityId not found" }, { status: 400 });
   }
 
   // Optional name. Empty string and whitespace-only normalize to null so
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
   const result = await db.insert(goals).values({
     userId: user.id,
     metricTypeId: body.metricTypeId,
-    sportId: body.sportId,
+    activityId: body.activityId,
     name,
     targetValue: body.targetValue,
     deadline: body.deadline,

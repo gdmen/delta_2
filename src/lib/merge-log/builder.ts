@@ -6,7 +6,7 @@ import {
   goals,
   goalJournalEntries,
   workoutSets,
-  sports,
+  activities,
   events,
   dashboards,
 } from "@/db/schema";
@@ -16,7 +16,7 @@ import type { ExtractTablesWithRelations } from "drizzle-orm";
 import {
   MERGE_LOG_PAYLOAD_VERSION,
   type MetricTypeMergedEntry,
-  type SportMergedEntry,
+  type ActivityMergedEntry,
 } from "./types";
 import type * as schema from "@/db/schema";
 
@@ -63,7 +63,7 @@ export async function buildMetricTypeMergedEntry(
       id: metricTypes.id,
       name: metricTypes.name,
       unit: metricTypes.unit,
-      sportId: metricTypes.sportId,
+      activityId: metricTypes.activityId,
       frequencyHint: metricTypes.frequencyHint,
       target: metricTypes.target,
       higherIsBetter: metricTypes.higherIsBetter,
@@ -180,21 +180,21 @@ export async function buildMetricTypeMergedEntry(
 }
 
 /**
- * Same shape for sport merges. Critical: the dashboards snapshot MUST
- * happen BEFORE `tx.delete(sports)` — once the sport row is deleted,
- * ON DELETE SET NULL on dashboards.sport_id has already nulled the
+ * Same shape for activity merges. Critical: the dashboards snapshot MUST
+ * happen BEFORE `tx.delete(activities)` — once the activity row is deleted,
+ * ON DELETE SET NULL on dashboards.activity_id has already nulled the
  * column, so a post-delete snapshot would always be empty.
  */
-export async function buildSportMergedEntry(
+export async function buildActivityMergedEntry(
   tx: Tx,
   mergedId: number,
-): Promise<SportMergedEntry> {
+): Promise<ActivityMergedEntry> {
   const rowResult = await tx
-    .select({ id: sports.id, name: sports.name, color: sports.color })
-    .from(sports)
-    .where(eq(sports.id, mergedId));
+    .select({ id: activities.id, name: activities.name, color: activities.color })
+    .from(activities)
+    .where(eq(activities.id, mergedId));
   if (rowResult.length === 0) {
-    throw new Error(`buildSportMergedEntry: merged sport id=${mergedId} not found`);
+    throw new Error(`buildActivityMergedEntry: merged activity id=${mergedId} not found`);
   }
   const row = rowResult[0];
 
@@ -202,29 +202,29 @@ export async function buildSportMergedEntry(
     await tx
       .select({ id: events.id })
       .from(events)
-      .where(eq(events.sportId, mergedId))
+      .where(eq(events.activityId, mergedId))
   ).map((r) => r.id);
 
   const goalsMovedIds = (
     await tx
       .select({ id: goals.id })
       .from(goals)
-      .where(eq(goals.sportId, mergedId))
+      .where(eq(goals.activityId, mergedId))
   ).map((r) => r.id);
 
   const metricTypesMovedIds = (
     await tx
       .select({ id: metricTypes.id })
       .from(metricTypes)
-      .where(eq(metricTypes.sportId, mergedId))
+      .where(eq(metricTypes.activityId, mergedId))
   ).map((r) => r.id);
 
-  // Captured BEFORE the sport delete (caller must respect ordering).
+  // Captured BEFORE the activity delete (caller must respect ordering).
   const dashboardsNulledIds = (
     await tx
       .select({ id: dashboards.id })
       .from(dashboards)
-      .where(eq(dashboards.sportId, mergedId))
+      .where(eq(dashboards.activityId, mergedId))
   ).map((r) => r.id);
 
   return {
@@ -244,9 +244,9 @@ export function buildMetricTypeMergePayload(
   return { v: MERGE_LOG_PAYLOAD_VERSION, kind: "metric_type", canonicalId, merged };
 }
 
-export function buildSportMergePayload(
+export function buildActivityMergePayload(
   canonicalId: number,
-  merged: SportMergedEntry[],
-): import("./types").SportMergePayloadV1 {
-  return { v: MERGE_LOG_PAYLOAD_VERSION, kind: "sport", canonicalId, merged };
+  merged: ActivityMergedEntry[],
+): import("./types").ActivityMergePayloadV1 {
+  return { v: MERGE_LOG_PAYLOAD_VERSION, kind: "activity", canonicalId, merged };
 }

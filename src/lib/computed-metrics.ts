@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { events, metricTypes, sports, workoutSets } from "@/db/schema";
+import { events, metricTypes, activities, workoutSets } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { oconnorE1RM } from "./strength-metrics";
 import { userScope } from "./auth/scope";
@@ -18,8 +18,8 @@ import { userScope } from "./auth/scope";
  * metric-history.ts.
  *
  * Six families today:
- *   sport_sessions_count_<sport>   one sample per active day, value = count(events)
- *   sport_minutes_<sport>          one sample per active day, value = sum(duration_minutes)
+ *   activity_sessions_count_<activity>   one sample per active day, value = count(events)
+ *   activity_minutes_<activity>          one sample per active day, value = sum(duration_minutes)
  *   <exercise>_max                 lifetime PR step-up (monotonic, only emits on new max)
  *   <exercise>_max_12mo            sliding 365-day max (steps both up and down)
  *   <exercise>_e1rm                per-day max O'Conner e1RM
@@ -36,13 +36,13 @@ type Sample = { date: string; value: number };
 
 interface ComputedMatch {
   family:
-    | "sport_sessions_count"
-    | "sport_minutes"
+    | "activity_sessions_count"
+    | "activity_minutes"
     | "exercise_max"
     | "exercise_max_12mo"
     | "exercise_e1rm"
     | "exercise_volume_per_day";
-  subject: string; // sport name or exercise slug
+  subject: string; // activity name or exercise slug
 }
 
 /**
@@ -50,11 +50,11 @@ interface ComputedMatch {
  * matters: longer suffixes (`_max_12mo`) must beat shorter ones (`_max`).
  */
 export function matchComputed(name: string): ComputedMatch | null {
-  if (name.startsWith("sport_sessions_count_")) {
-    return { family: "sport_sessions_count", subject: name.slice("sport_sessions_count_".length) };
+  if (name.startsWith("activity_sessions_count_")) {
+    return { family: "activity_sessions_count", subject: name.slice("activity_sessions_count_".length) };
   }
-  if (name.startsWith("sport_minutes_")) {
-    return { family: "sport_minutes", subject: name.slice("sport_minutes_".length) };
+  if (name.startsWith("activity_minutes_")) {
+    return { family: "activity_minutes", subject: name.slice("activity_minutes_".length) };
   }
   if (name.endsWith("_max_12mo")) {
     return { family: "exercise_max_12mo", subject: name.slice(0, -"_max_12mo".length) };
@@ -81,10 +81,10 @@ export async function resolveComputedSamples(name: string, userId: number): Prom
   if (!m) return null;
 
   switch (m.family) {
-    case "sport_sessions_count":
-      return await sportSessionsCount(m.subject, userId);
-    case "sport_minutes":
-      return await sportMinutes(m.subject, userId);
+    case "activity_sessions_count":
+      return await activitySessionsCount(m.subject, userId);
+    case "activity_minutes":
+      return await activityMinutes(m.subject, userId);
     case "exercise_max":
       return await exerciseLifetimeMax(m.subject, userId);
     case "exercise_max_12mo":
@@ -116,21 +116,21 @@ export async function countForComputed(name: string, userId: number): Promise<nu
 }
 
 // -----------------------------------------------------------------------------
-// Sport families
+// Activity families
 // -----------------------------------------------------------------------------
 
-async function loadSportId(sportName: string, userId: number): Promise<number | null> {
+async function loadActivityId(activityName: string, userId: number): Promise<number | null> {
   const rows = await db
-    .select({ id: sports.id })
-    .from(sports)
-    .where(and(userScope(userId).sports, eq(sports.name, sportName)))
+    .select({ id: activities.id })
+    .from(activities)
+    .where(and(userScope(userId).activities, eq(activities.name, activityName)))
     .limit(1);
   return rows[0]?.id ?? null;
 }
 
-async function sportSessionsCount(sportName: string, userId: number): Promise<Sample[]> {
-  const sportId = await loadSportId(sportName, userId);
-  if (sportId === null) return [];
+async function activitySessionsCount(activityName: string, userId: number): Promise<Sample[]> {
+  const activityId = await loadActivityId(activityName, userId);
+  if (activityId === null) return [];
   // Group by calendar date in the started_at string. substr is cheaper
   // here than parsing — recordedAt is always ISO 8601 prefixed by
   // YYYY-MM-DD.
@@ -140,22 +140,22 @@ async function sportSessionsCount(sportName: string, userId: number): Promise<Sa
       n: sql<number>`count(*)`,
     })
     .from(events)
-    .where(and(userScope(userId).events, eq(events.sportId, sportId)))
+    .where(and(userScope(userId).events, eq(events.activityId, activityId)))
     .groupBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`)
     .orderBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`);
   return rows.map((r) => ({ date: r.day, value: Number(r.n) }));
 }
 
-async function sportMinutes(sportName: string, userId: number): Promise<Sample[]> {
-  const sportId = await loadSportId(sportName, userId);
-  if (sportId === null) return [];
+async function activityMinutes(activityName: string, userId: number): Promise<Sample[]> {
+  const activityId = await loadActivityId(activityName, userId);
+  if (activityId === null) return [];
   const rows = await db
     .select({
       day: sql<string>`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`,
       mins: sql<number>`coalesce(sum(${events.durationMinutes}), 0)`,
     })
     .from(events)
-    .where(and(userScope(userId).events, eq(events.sportId, sportId)))
+    .where(and(userScope(userId).events, eq(events.activityId, activityId)))
     .groupBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`)
     .orderBy(sql`to_char((${events.startedAt} AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`);
   // Drop days where the sum is 0 (events with NULL duration sum to 0). A
@@ -351,10 +351,10 @@ export function describeComputedSource(name: string): string | null {
   const m = matchComputed(name);
   if (!m) return null;
   switch (m.family) {
-    case "sport_sessions_count":
-      return `count of events for sport "${m.subject}", grouped by day`;
-    case "sport_minutes":
-      return `sum of duration_minutes for sport "${m.subject}", grouped by day`;
+    case "activity_sessions_count":
+      return `count of events for activity "${m.subject}", grouped by day`;
+    case "activity_minutes":
+      return `sum of duration_minutes for activity "${m.subject}", grouped by day`;
     case "exercise_max":
       return `lifetime PR walk over workout_sets where exercise = "${m.subject}"`;
     case "exercise_max_12mo":

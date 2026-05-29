@@ -7,17 +7,17 @@ import { GoalListComponent } from "./Component";
 export const goalListWidget = defineWidget<GoalListConfig>({
   type: "goal_list",
   name: "Goals list",
-  description: "Active goals, optionally filtered by sport.",
+  description: "Active goals, optionally filtered by activity.",
   category: "goal",
   defaultSize: { w: 6, h: 3 },
   minSize: { w: 4, h: 2 },
   schema: goalListSchema,
-  defaultConfig: { sportFilter: null },
+  defaultConfig: { activityFilter: null },
   uiMeta: {
-    sportFilter: {
-      label: "Filter by sport",
-      component: "sport-picker",
-      helpText: "Show only goals for one sport. Leave blank for all goals.",
+    activityFilter: {
+      label: "Filter by activity",
+      component: "activity-picker",
+      helpText: "Show only goals for one activity. Leave blank for all goals.",
     },
   },
   Component: GoalListComponent,

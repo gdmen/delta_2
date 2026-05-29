@@ -7,7 +7,7 @@ import type { CandidatePair } from "@/lib/duplicates/detector";
 import { formatShort } from "@/lib/format";
 import {
   CompositeMergeModal,
-  type SportOption,
+  type ActivityOption,
 } from "@/components/composite-merge-modal";
 
 /**
@@ -15,18 +15,18 @@ import {
  * gets a Merge… or Not a duplicate button. Dismissals POST to the
  * single-dismiss endpoint; merges open the composite-merge modal.
  *
- * Server fetched `pairs` (last 14d) and `sportOptions` (the user's
- * sports list) — this client component just handles the per-pair
+ * Server fetched `pairs` (last 14d) and `activityOptions` (the user's
+ * activities list) — this client component just handles the per-pair
  * interactions and re-renders via router.refresh() on success.
  */
 export function SuggestedComposites({
   pairs,
-  sportOptions,
-  typeSuggestionsBySportId,
+  activityOptions,
+  typeSuggestionsByActivityId,
 }: {
   pairs: CandidatePair[];
-  sportOptions: SportOption[];
-  typeSuggestionsBySportId?: Record<number, string[]>;
+  activityOptions: ActivityOption[];
+  typeSuggestionsByActivityId?: Record<number, string[]>;
 }) {
   const router = useRouter();
   const [mergeTarget, setMergeTarget] = useState<CandidatePair | null>(null);
@@ -95,8 +95,8 @@ export function SuggestedComposites({
             {
               id: mergeTarget.aId,
               source: mergeTarget.aSource,
-              sportId: mergeTarget.aSportId,
-              sportName: mergeTarget.aSportName,
+              activityId: mergeTarget.aActivityId,
+              activityName: mergeTarget.aActivityName,
               type: mergeTarget.aType,
               startedAt: mergeTarget.aStartedAt,
               durationMinutes: mergeTarget.aDurationMinutes,
@@ -104,15 +104,15 @@ export function SuggestedComposites({
             {
               id: mergeTarget.bId,
               source: mergeTarget.bSource,
-              sportId: mergeTarget.bSportId,
-              sportName: mergeTarget.bSportName,
+              activityId: mergeTarget.bActivityId,
+              activityName: mergeTarget.bActivityName,
               type: mergeTarget.bType,
               startedAt: mergeTarget.bStartedAt,
               durationMinutes: mergeTarget.bDurationMinutes,
             },
           ]}
-          sportOptions={sportOptions}
-          typeSuggestionsBySportId={typeSuggestionsBySportId}
+          activityOptions={activityOptions}
+          typeSuggestionsByActivityId={typeSuggestionsByActivityId}
           onClose={() => setMergeTarget(null)}
         />
       )}
@@ -141,7 +141,7 @@ function PairCard({
       <MemberLine
         id={p.aId}
         source={p.aSource}
-        sportName={p.aSportName}
+        activityName={p.aActivityName}
         type={p.aType}
         time={aTime}
         durationMinutes={p.aDurationMinutes}
@@ -149,7 +149,7 @@ function PairCard({
       <MemberLine
         id={p.bId}
         source={p.bSource}
-        sportName={p.bSportName}
+        activityName={p.bActivityName}
         type={p.bType}
         time={bTime}
         durationMinutes={p.bDurationMinutes}
@@ -178,14 +178,14 @@ function PairCard({
 function MemberLine({
   id,
   source,
-  sportName,
+  activityName,
   type,
   time,
   durationMinutes,
 }: {
   id: number;
   source: string;
-  sportName: string;
+  activityName: string;
   type: string;
   time: string;
   durationMinutes: number | null;
@@ -200,7 +200,7 @@ function MemberLine({
         {source}
       </Link>
       <span className="flex-1 truncate">
-        {sportName} · {type}
+        {activityName} · {type}
       </span>
       <span className="text-muted whitespace-nowrap">
         {time}

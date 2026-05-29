@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { metrics, events, metricTypes, sports } from "@/db/schema";
+import { metrics, events, metricTypes, activities } from "@/db/schema";
 import { and, sql, eq } from "drizzle-orm";
 import { formatShort } from "@/lib/format";
 import { requireUserOrSignin } from "@/lib/auth/require";
@@ -8,7 +8,7 @@ import { userScope } from "@/lib/auth/scope";
 /**
  * Per-source "what has been imported" summary.
  *
- * Shows one row per metric_type and (optionally) one row per sport's events
+ * Shows one row per metric_type and (optionally) one row per activity's events
  * seen under this source. Intended for the sub-page of a data source so the
  * user can answer "what's in Delta from <source>?" without running SQL.
  *
@@ -34,16 +34,16 @@ export async function SourceDataBrowser({ source }: { source: string }) {
 
   const eventRows = await db
     .select({
-      sportId: sports.id,
-      sportName: sports.name,
+      activityId: activities.id,
+      activityName: activities.name,
       count: sql<number>`count(*)`,
       firstAt: sql<string>`min(${events.startedAt})`,
       lastAt: sql<string>`max(${events.startedAt})`,
     })
     .from(events)
-    .innerJoin(sports, eq(events.sportId, sports.id))
+    .innerJoin(activities, eq(events.activityId, activities.id))
     .where(and(userScope(user.id).events, eq(events.source, source)))
-    .groupBy(sports.id)
+    .groupBy(activities.id)
     .orderBy(sql`count(*) desc`);
 
   const totalMetrics = metricRows.reduce((s, r) => s + Number(r.count), 0);
@@ -119,7 +119,7 @@ export async function SourceDataBrowser({ source }: { source: string }) {
             <table className="w-full text-[0.8125rem]">
               <thead className="bg-surface text-muted text-[0.6875rem] uppercase tracking-wider">
                 <tr>
-                  <th className="text-left font-mono font-semibold px-3 py-2">Sport</th>
+                  <th className="text-left font-mono font-semibold px-3 py-2">Activity</th>
                   <th className="text-right font-mono font-semibold px-3 py-2">Rows</th>
                   <th className="hidden sm:table-cell text-right font-mono font-semibold px-3 py-2">Earliest</th>
                   <th className="text-right font-mono font-semibold px-3 py-2">Latest</th>
@@ -127,8 +127,8 @@ export async function SourceDataBrowser({ source }: { source: string }) {
               </thead>
               <tbody>
                 {eventRows.map((r) => (
-                  <tr key={r.sportId} className="border-t border-border first:border-t-0">
-                    <td className="px-3 py-2 font-mono">{r.sportName}</td>
+                  <tr key={r.activityId} className="border-t border-border first:border-t-0">
+                    <td className="px-3 py-2 font-mono">{r.activityName}</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
                       {Number(r.count).toLocaleString()}
                     </td>
