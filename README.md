@@ -4,6 +4,9 @@ A self-hosted fitness coaching dashboard with an AI coach. Tracks powerlifting, 
 
 Two hearts: a **dashboard** (key metrics, PR curves, goal progress) and a **coach** (morning briefings, chat, case files per training focus). The differentiator is `focus-as-primitive` — training focuses are first-class objects the coach reads and correlates with metrics.
 
+<img width="400" alt="Screenshot 2026-08-31 at 2 46 10 PM" src="https://github.com/user-attachments/assets/3c087d57-fe65-4c8d-bc77-0635f8dfa299" /> <img width="400" alt="Screenshot 2026-08-31 at 2 45 56 PM" src="https://github.com/user-attachments/assets/c1057dcd-c52c-486e-851c-3b36865699da" />
+
+
 ## Features
 
 - **Data ingestion.** Apple Health via iOS Shortcut, Strava via OAuth sync (distance + elevation attached as per-event metrics), BodySpec DEXA via PDF upload, generic CSV import wizard with saved column mappings per source.
